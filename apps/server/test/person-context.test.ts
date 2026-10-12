@@ -62,7 +62,9 @@ describe("renderPersonContext — tin nhắn riêng", () => {
     expect(iBlock).toBeGreaterThan(out.indexOf("# Người đang chat"));
     expect(iTag).toBeGreaterThan(iBlock);
     expect(iOwn).toBeGreaterThan(iTag);
-    expect(out.trimEnd().endsWith("Trả lời ngắn gọn, không báo giá qua chat.")).toBe(true);
+    expect(out).toContain("Trả lời ngắn gọn, không báo giá qua chat.");
+    expect(out.trimEnd()).toContain("# Quy tắc xưng hô bắt buộc do quản trị viên đặt");
+    expect(out).toContain('tự xưng "em" và gọi người này là "anh Đức"');
   });
 
   it("bật cho AI biết điện thoại/email → có trong khối", () => {
@@ -79,6 +81,7 @@ describe("renderPersonContext — tin nhắn riêng", () => {
     const out = renderPersonContext(data(), { channelKind: "telegram", peerKind: "direct" });
     expect(out).toContain('- Tên trên Telegram: "IMGROUP Đức"');
     expect(out).not.toContain("# Chỉ dẫn của quản trị viên");
+    expect(out).not.toContain("# Quy tắc xưng hô bắt buộc");
   });
 
   it("trang Chat web", () => {
@@ -147,7 +150,7 @@ describe("an toàn + giới hạn", () => {
       channelKind: "telegram",
       peerKind: "direct",
     });
-    const own = out.slice(out.indexOf("## Riêng người này"));
+    const own = out.slice(out.indexOf("## Riêng người này"), out.indexOf("# Quy tắc xưng hô bắt buộc"));
     expect(own.length).toBeLessThan(PERSON_LIMITS.personInstructions + 40);
     const tagText = out.slice(out.indexOf("## Theo nhãn"), out.indexOf("## Riêng người này"));
     expect((tagText.match(/## Theo nhãn/g) ?? []).length).toBe(4);

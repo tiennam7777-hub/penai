@@ -167,5 +167,15 @@ export function renderPersonContext(
         sections.join("\n"),
     );
   }
+  if (addressAs || selfAddress) {
+    out.push(
+      "# Quy tắc xưng hô bắt buộc do quản trị viên đặt\n" +
+      `Khi trả lời người đang chat, ${selfAddress ? `tự xưng \"${selfAddress}\"` : "giữ cách tự xưng phù hợp"}` +
+      `${addressAs ? ` và gọi người này là \"${addressAs}\"` : ""}. ` +
+      "Giữ đúng vai trong mọi câu, kể cả câu ngắn. Quy tắc này ưu tiên hơn câu mẫu trong lời dặn chung " +
+      "và cách người kia xưng hô; nếu câu mẫu dùng đại từ khác thì đổi đại từ cho đúng vai. " +
+      "Không lặp lại lời xác nhận ngắn của người kia chỉ để tạo một câu đáp.",
+    );
+  }
   return out.join("\n\n");
 }

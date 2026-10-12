@@ -18,6 +18,7 @@ import {
   upsertInboxObservedPeer,
   getInboxThreadAgentBlock,
   getInboxMessageByMsgId,
+  getPersonContextData,
   loadMessages,
   type EnabledChannel,
   recordTraceSafe,
@@ -42,6 +43,7 @@ import {
 import { forgetInboxChannel, inboxHooks } from "./inbox.js";
 import { isPersonalChannelKind } from "@penai/channels";
 import { classifyOrchidSalesScope } from "./orchid-sales-scope.js";
+import { hasPersonalAddressMismatch, requiresPersonalAddressGuard } from "./persona-reply-guard.js";
 
 /** Handler + channel theo channelId — cho webhook route (WhatsApp, Teams) dùng. */
 export const channelHandlers = new Map<
@@ -819,6 +821,19 @@ export function makeInboundHandler(
     // Agent đã gửi thẻ duyệt trong lượt này → final rỗng là hợp lệ, đừng thay
     // bằng placeholder "(không có nội dung)".
     let cardSent = false;
+    const personData = channelIdentity
+      ? await getPersonContextData(db, ctx, {
+          principalId: channelIdentity.principalId,
+          contactId: channelIdentity.contactId,
+        }).catch((err) => {
+          logger.warn(`Nạp hồ sơ xưng hô lỗi: ${(err as Error).message}`);
+          return null;
+        })
+      : null;
+    const selfAddress = personData?.profile?.selfAddress;
+    const addressAs = personData?.profile?.addressAs;
+    const protectPersonalAddress = requiresPersonalAddressGuard(selfAddress, addressAs);
+    const roleMismatch = (text: string) => hasPersonalAddressMismatch(text, selfAddress, addressAs);
     const loopDeps = await buildLoopDeps(rt, ctx, agent.provider, {
       ...agentOpts(agent),
       autoApproveExec: false,
@@ -956,12 +971,17 @@ export function makeInboundHandler(
           if (ev.type === "text_delta") {
             streamed += ev.text;
             sinceTool += ev.text;
-            hooks?.onTextDelta?.(ev.text);
+            // Streaming có thể gửi chữ ra kênh trước khi kiểm tra được cả câu.
+            if (!protectPersonalAddress) hooks?.onTextDelta?.(ev.text);
           } else if (ev.type === "tool_call") {
             // câu dẫn trước tool ("Để em kiểm tra...") → bubble riêng
             const block = sinceTool.replace(MEDIA_MARKER_RE, "").trim();
             if (block && hooks?.onBlockReply) {
-              hooks.onBlockReply(block);
+              if (roleMismatch(block)) {
+                logger.warn(`Chặn câu dẫn đảo vai xưng hô trên kênh ${channel.id}`);
+              } else {
+                hooks.onBlockReply(block);
+              }
               emittedBlockReply = true;
             }
             sinceTool = "";
@@ -1028,6 +1048,10 @@ export function makeInboundHandler(
 
     // model có thể lặp lại marker trong câu trả lời — gỡ đi
     const cleanText = finalText.replace(MEDIA_MARKER_RE, "").trim();
+    if (roleMismatch(cleanText)) {
+      logger.warn(`Chặn câu kết đảo vai xưng hô trên kênh ${channel.id}`);
+      return mediaOut.length ? { kind: "reply", text: "", media: mediaOut } : { kind: "ignore" };
+    }
     return {
       kind: "reply",
       // Đã có media hoặc thẻ duyệt gửi đi → final rỗng là hợp lệ (nội dung nằm
