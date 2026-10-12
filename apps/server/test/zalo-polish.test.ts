@@ -55,27 +55,28 @@ describe("Zalo pending peers", () => {
   });
 });
 
-describe("Zalo photo-only runtime", () => {
+describe("Photo messages remain silent", () => {
   const inbound = (sender = "photos", text = "", photo = true): InboundMessage => ({ channelId: channel.id, channelKind: "zalo_personal", chatKey: `direct:${sender}`, senderId: sender, senderName: "Khách", peerKind: "direct", text,
     ...(photo ? { media: [{ kind: "photo", dataUrl: png }] } : {}) });
-  it("saves consecutive images, acknowledges once without running AI, and passes saved images to the later request", async () => {
+  it("saves consecutive images without replying and passes them to a later text request", async () => {
     const handler = makeInboundHandler(rt, new Scheduler(), channel);
     requests.length = 0;
-    expect(await handler(inbound())).toEqual({ kind: "reply", text: "Đã nhận hình ạ." });
+    expect(await handler(inbound())).toEqual({ kind: "ignore" });
     expect(await handler(inbound())).toEqual({ kind: "ignore" });
     expect(requests).toHaveLength(0);
     const result = await handler(inbound("photos", "Xem giúp tôi những ảnh vừa gửi", false));
     expect(result.kind).toBe("reply");
     expect(requests.some((r) => r.messages.some((m) => m.role === "user" && (m.images?.length ?? 0) > 0))).toBe(true);
     expect(await readdir(join(dir, fx.wsA, "users", "zalo_personal-photos"))).not.toHaveLength(0);
-    expect(await handler(inbound())).toEqual({ kind: "reply", text: "Đã nhận hình ạ." });
+    expect(await handler(inbound())).toEqual({ kind: "ignore" });
   });
-  it("processes a photo with a caption and supports changing acknowledgement to silence without reconnecting", async () => {
+  it("does not answer a photo even with a question, pairing requirement, or old acknowledgement setting", async () => {
     const handler = makeInboundHandler(rt, new Scheduler(), channel);
     requests.length = 0;
-    expect((await handler(inbound("caption", "Đọc nội dung ảnh"))).kind).toBe("reply");
-    expect(requests.length).toBeGreaterThan(0);
-    const settings = await app.inject({ method: "PUT", url: `/v1/inbox/${channel.id}/settings`, headers: auth(), payload: { photoAck: "off" } });
+    expect(await handler(inbound("caption", "Đọc nội dung ảnh"))).toEqual({ kind: "ignore" });
+    expect(await makeInboundHandler(rt, new Scheduler(), { ...channel, requirePairing: true })(inbound("not-paired", "Giá bao nhiêu?"))).toEqual({ kind: "ignore" });
+    expect(requests).toHaveLength(0);
+    const settings = await app.inject({ method: "PUT", url: `/v1/inbox/${channel.id}/settings`, headers: auth(), payload: { photoAck: "short" } });
     expect(settings.statusCode).toBe(200); expect(settings.json().photoAck).toBe("off");
     expect(await handler(inbound("silent"))).toEqual({ kind: "ignore" });
   });

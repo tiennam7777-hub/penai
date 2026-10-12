@@ -7,6 +7,7 @@ import {
   normalizeWhatsappPhone,
   personalPlatformLabel,
   whatsappThreadToJid,
+  WhatsappPersonalChannel,
 } from "../src/index.js";
 
 describe("WhatsApp cá nhân — tiện ích", () => {
@@ -65,4 +66,31 @@ describe("WhatsApp cá nhân — tiện ích", () => {
     expect(describeWhatsappContent({ protocolMessage: {} })).toBeNull();
     expect(describeWhatsappContent(null)).toBeNull();
   });
+});
+
+it("WhatsApp image with caption stays silent even when the handler attempts to reply", async () => {
+  const sent: string[] = [];
+  let inboundMedia: unknown;
+  const channel = new WhatsappPersonalChannel({
+    id: "wa-silent-photo", name: "WhatsApp", token: "{}", config: { auto_reaction: "heart" },
+    requirePairing: false,
+    onInbound: async (message, hooks) => {
+      inboundMedia = message.media;
+      hooks?.onStatus?.("thinking");
+      hooks?.onBlockReply?.("Phản hồi sớm");
+      return { kind: "reply", text: "Đã nhận hình ạ." };
+    },
+  });
+  const internals = channel as unknown as Record<string, unknown>;
+  internals.toLog = async () => ({
+    entry: { direction: "in", contentType: "photo", text: "Mẫu này giá bao nhiêu?",
+      peerKind: "direct", threadId: "84900000000", senderId: "84900000000", senderName: "Khách" },
+    chatKey: "direct:84900000000", media: [], mentioned: true,
+  });
+  internals.isThreadEnabled = () => true;
+  internals.sendText = async (_threadId: string, _peerKind: string, text: string) => { sent.push(text); return []; };
+  const handle = (channel as unknown as { handleMessage: (sock: unknown, m: unknown, live: boolean) => Promise<void> }).handleMessage.bind(channel);
+  await handle({ sendPresenceUpdate: async () => { sent.push("typing"); } }, { key: { id: "photo-1", fromMe: false } }, true);
+  expect(inboundMedia).toMatchObject([{ kind: "photo" }]);
+  expect(sent).toEqual([]);
 });

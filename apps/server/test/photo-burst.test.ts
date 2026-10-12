@@ -14,8 +14,9 @@ describe("Zalo photo bursts", () => {
   it("isolates channel, conversation and sender and defaults to a short acknowledgement", () => {
     const bursts = new PhotoBurst();
     for (const key of ["a:1:x", "b:1:x", "a:2:x", "a:1:y"]) expect(bursts.acknowledge(key, 0)).toBe(true);
-    expect(readPhotoAcknowledgement({})).toBe("short");
+    expect(readPhotoAcknowledgement({})).toBe("off");
     expect(readPhotoAcknowledgement({ photo_ack: "off" })).toBe("off");
-    expect(readPhotoAcknowledgement({ photo_ack: "invalid" })).toBe("short");
+    expect(readPhotoAcknowledgement({ photo_ack: "invalid" })).toBe("off");
+    expect(readPhotoAcknowledgement({ photo_ack: "short" })).toBe("off");
   });
 });

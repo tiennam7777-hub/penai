@@ -7,7 +7,6 @@ import {
   appendMessage,
   createSession,
   getAgentById,
-  getChannelById,
   getChannelSession,
   isPaired,
   createPairing,
@@ -42,7 +41,6 @@ import {
 } from "@penai/channels";
 import { forgetInboxChannel, inboxHooks } from "./inbox.js";
 import { isPersonalChannelKind } from "@penai/channels";
-import { PhotoBurst, readPhotoAcknowledgement } from "./photo-burst.js";
 import { classifyOrchidSalesScope } from "./orchid-sales-scope.js";
 
 /** Handler + channel theo channelId — cho webhook route (WhatsApp, Teams) dùng. */
@@ -228,7 +226,6 @@ const RECENT_IMAGES_MAX = 5;
 const recentImages = new Map<string, Array<{ name: string; path: string }>>();
 /** Số lần liên tiếp chỉ-gửi-ảnh trong 1 session — để ack lần 2+ ngắn gọn. */
 const imageOnlyStreak = new Map<string, number>();
-const photoBursts = new PhotoBurst();
 
 export function extOfDataUrl(dataUrl: string): string {
   const m = /^data:image\/(\w+)/.exec(dataUrl);
@@ -550,8 +547,7 @@ export function makeInboundHandler(
   const { db } = rt.db;
   return async (msg, hooks?: RunHooks): Promise<InboundResult> => {
     const ctx = systemContext(channel.workspaceId);
-    const photoBurstKey = `${channel.id}:${msg.chatKey}:${msg.senderId}`;
-    if (msg.text.trim()) photoBursts.reset(photoBurstKey);
+    const hasPhoto = (msg.media ?? []).some((m) => m.kind === "photo");
 
     // Nhóm Zalo: đệm tin chưa tag làm ngữ cảnh (kể cả tin orchestrator sẽ
     // tiêu thụ) — người dùng hay nhắn vài tin liên tiếp rồi mới tag bot.
@@ -564,7 +560,7 @@ export function makeInboundHandler(
 
     // Interceptor (bộ điều phối quy trình...): chạy TRƯỚC pairing/agent — phản hồi
     // của đại lý trong nhóm demo phải tới orchestrator dù người gửi chưa pair.
-    for (const interceptor of inboundInterceptors) {
+    for (const interceptor of hasPhoto ? [] : inboundInterceptors) {
       try {
         const res = await interceptor(msg);
         if (res) return res;
@@ -610,7 +606,7 @@ export function makeInboundHandler(
     );
 
     // Gate pairing (fail-closed): DM lạ chưa duyệt → cấp mã, chờ admin duyệt
-    if (channel.requirePairing) {
+    if (channel.requirePairing && !hasPhoto) {
       const paired = await isPaired(db, ctx, channel.id, msg.senderId);
       if (!paired) {
         const pairing = await createPairing(db, ctx, channel.id, genPairingCode(), msg.senderId);
@@ -643,6 +639,31 @@ export function makeInboundHandler(
       });
       await mapChannelSession(db, ctx, channel.id, msg.chatKey, s.id);
       sessionId = s.id;
+    }
+
+    // Tin có ảnh chỉ được lưu làm ngữ cảnh cho lượt sau. Kể cả có caption,
+    // câu hỏi hay người gửi chưa được duyệt, không phát text/tool/typing.
+    if (hasPhoto) {
+      try {
+        const userKey = `${channel.kind}-${msg.senderId}`;
+        const userDir = resolve(join(rt.config.dataDir, ctx.workspaceId, "users", sanitizeUserKey(userKey)));
+        const photos = (msg.media ?? []).filter((m) => m.kind === "photo" && m.dataUrl);
+        const savedImages = await saveInboundImages(userDir, photos, msg.text);
+        if (savedImages.length) {
+          const list = [...(recentImages.get(sessionId) ?? []), ...savedImages];
+          recentImages.set(sessionId, list.slice(-RECENT_IMAGES_MAX));
+        }
+        const docs = (msg.media ?? []).filter((m) => m.kind === "document" && m.dataB64);
+        const savedDocs = await saveInboundDocs(userDir, docs, msg.text);
+        const content = mergeMediaText(msg.text, msg.media, savedImages.map((s) => s.name), savedDocs.map((s) => s.name));
+        await appendMessage(db, ctx, sessionId, {
+          role: "user",
+          content: { kind: "text", text: content || "[Người dùng gửi ảnh]" },
+        });
+      } catch (err) {
+        logger.warn(`Lưu ảnh inbound lỗi, giữ im lặng: ${(err as Error).message}`);
+      }
+      return { kind: "ignore" };
     }
 
     // Bot commands (/stop /reset /new /status /help)
@@ -752,8 +773,7 @@ export function makeInboundHandler(
     );
     const savedDocs = await saveInboundDocs(userDirEarly, inboundDocs, msg.text);
 
-    // Chỉ gửi ảnh/file, chưa có yêu cầu → lưu + xác nhận ngắn, KHÔNG chạy LLM.
-    // (Thói quen phổ biến: gửi 3-5 ảnh / vài file trước rồi mới nhắn yêu cầu.)
+    // Chỉ gửi file, chưa có yêu cầu → lưu + xác nhận ngắn, KHÔNG chạy LLM.
     const hasSubstance =
       msg.text.trim().length > 0 ||
       (msg.media ?? []).some((m) => m.text !== undefined || m.note);
@@ -766,14 +786,6 @@ export function makeInboundHandler(
           text: `[Đã gửi ${savedAll.length} file: ${savedAll.map((s) => s.name).join(", ")}]`,
         },
       }).catch(() => {});
-      if (channel.kind === "zalo_personal" && savedImages.length && !savedDocs.length) {
-        const first = photoBursts.acknowledge(photoBurstKey);
-        const settings = await getChannelById(db, ctx, channel.id);
-        if (first && readPhotoAcknowledgement((settings?.config as Record<string, unknown>) ?? channel.config) === "short") {
-          return { kind: "reply", text: "Đã nhận hình ạ." };
-        }
-        return { kind: "ignore" };
-      }
       const streak = (imageOnlyStreak.get(sessionId) ?? 0) + 1;
       imageOnlyStreak.set(sessionId, streak);
       // Báo rõ TÊN FILE đã lưu để người dùng (và agent ở các lượt sau) tham chiếu

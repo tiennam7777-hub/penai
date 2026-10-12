@@ -1041,11 +1041,12 @@ export class ZaloPersonalChannel implements Channel {
     const senderId = String(message.data.uidFrom || message.threadId);
     const senderName =
       message.data.dName || (message.isSelf ? (this.account?.name ?? senderId) : senderId);
+    const photoMessage = zaloMediaKind(String(message.data.msgType ?? ""), "") === "photo";
 
     // Inbox: ghi MỌI tin (kể cả thread chưa cho agent trả lời). Tin do PenAI
     // tự gửi (agent/web/MCP) đã ghi lúc gửi → bỏ qua bản dội lại.
     await this.logListenerMessage(message, peerKind, threadId, senderId, senderName);
-    if (!message.isSelf) this.scheduleAutoReaction(message, peerKind, threadId);
+    if (!message.isSelf && !photoMessage) this.scheduleAutoReaction(message, peerKind, threadId);
 
     // Chế độ an toàn: LUÔN ghi nhận ai/nhóm nào nhắn tới (metadata, không lưu
     // nội dung), rồi im lặng bỏ qua mọi thread chưa được chỉ định làm demo —
@@ -1079,6 +1080,9 @@ export class ZaloPersonalChannel implements Channel {
       message.data.content,
       String(message.data.msgType ?? ""),
     );
+    if (photoMessage && !media.some((m) => m.kind === "photo")) {
+      media.push({ kind: "photo", note: "[Người dùng gửi ảnh nhưng không tải được]" });
+    }
     const quote = message.data.quote;
     const quotedMsgId = quote?.globalMsgId != null ? String(quote.globalMsgId) : "";
     const quoted = quotedMsgId
@@ -1091,11 +1095,13 @@ export class ZaloPersonalChannel implements Channel {
 
     const hooks = {
       onStatus: (status: string) => {
+        if (photoMessage) return;
         if (status === "queued" || status === "thinking") {
           void this.api?.sendTypingEvent(threadId, threadType).catch(() => {});
         }
       },
       onBlockReply: (blockText: string) => {
+        if (photoMessage) return;
         const key = replyKey(blockText);
         if (!key || blockReplies.has(key)) return;
         blockReplies.set(key, this.sendText(threadId, threadType, blockText)
@@ -1123,6 +1129,7 @@ export class ZaloPersonalChannel implements Channel {
         },
         hooks,
       );
+      if (photoMessage) return;
       if (result.kind === "pairing") {
         // Ngoại lệ Zalo cá nhân: người chưa duyệt pairing thì IM LẶNG — không
         // gửi mã pair (tài khoản thật không tự nhắn cho người lạ). Mã vẫn được
@@ -1141,6 +1148,7 @@ export class ZaloPersonalChannel implements Channel {
       }
     } catch (error) {
       this.deps.onError?.(error as Error);
+      if (photoMessage) return;
       await this.sendText(
         threadId,
         threadType,

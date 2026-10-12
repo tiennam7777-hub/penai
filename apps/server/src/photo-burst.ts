@@ -11,6 +11,7 @@ export class PhotoBurst {
   reset(key: string): void { this.last.delete(key); }
 }
 
-export function readPhotoAcknowledgement(config: Record<string, unknown>): "short" | "off" {
-  return config["photo_ack"] === "off" ? "off" : "short";
+export function readPhotoAcknowledgement(_config: Record<string, unknown>): "off" {
+  // Kept for old settings responses; photo acknowledgement is no longer configurable.
+  return "off";
 }

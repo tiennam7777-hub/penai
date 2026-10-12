@@ -119,6 +119,37 @@ describe("Inbox: ghi tin đi/đến + bỏ bản dội lại", () => {
   });
 });
 
+it("ảnh kèm câu hỏi vẫn lưu inbound nhưng không phát text, typing hoặc phản hồi lỗi", async () => {
+  const sent: string[] = [];
+  let inboundMedia: unknown;
+  const channel = new ZaloPersonalChannel({
+    id: "zp-silent-photo", name: "Zalo", token: "{}", config: { auto_reaction: "heart" },
+    requirePairing: false,
+    onInbound: async (message, hooks) => {
+      inboundMedia = message.media;
+      hooks?.onStatus?.("thinking");
+      hooks?.onBlockReply?.("Tin trả lời sớm");
+      return { kind: "reply", text: "Đã nhận hình ạ." };
+    },
+  });
+  const internals = channel as unknown as Record<string, unknown>;
+  internals.api = {
+    sendMessage: async (message: string) => { sent.push(message); return { message: { msgId: "sent" } }; },
+    sendTypingEvent: async () => { sent.push("typing"); },
+  };
+  internals.account = { id: "me", name: "Shop" };
+  internals.isThreadEnabled = () => true;
+  internals.collectMedia = async () => [];
+  const handle = (channel as unknown as { handleMessage: (m: unknown) => Promise<void> }).handleMessage.bind(channel);
+  await handle({
+    type: ThreadType.User, threadId: "customer", isSelf: false,
+    data: { msgId: "photo-1", cliMsgId: "cli-1", uidFrom: "customer", dName: "Khách",
+      content: { title: "Mẫu này giá bao nhiêu?" }, msgType: "chat.photo", ts: String(Date.now()) },
+  });
+  expect(inboundMedia).toMatchObject([{ kind: "photo" }]);
+  expect(sent).toEqual([]);
+});
+
 describe("Reaction: tự thả cảm xúc + thả tay", () => {
   afterEach(() => vi.useRealTimers());
 

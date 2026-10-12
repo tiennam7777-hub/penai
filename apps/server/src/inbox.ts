@@ -900,7 +900,7 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
     if (parsed.data.pauseMinutes !== undefined) config["inbox_pause_minutes"] = parsed.data.pauseMinutes;
     if (parsed.data.mcpReadMessages !== undefined) config["mcp_read_messages"] = parsed.data.mcpReadMessages;
     if (parsed.data.autoReaction !== undefined) config["auto_reaction"] = parsed.data.autoReaction;
-    if (parsed.data.photoAck !== undefined) config["photo_ack"] = parsed.data.photoAck;
+    if (parsed.data.photoAck !== undefined) config["photo_ack"] = "off";
     await updateChannel(db, req.authCtx, channelId, { config });
     const cfg = readInboxConfig(config);
     // Đặt "số phút AI tạm im" về 0 = không tạm dừng nữa → gỡ luôn các lượt tạm dừng đang treo,
