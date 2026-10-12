@@ -119,7 +119,7 @@ describe("Inbox: ghi tin đi/đến + bỏ bản dội lại", () => {
   });
 });
 
-it("ảnh kèm câu hỏi vẫn lưu inbound nhưng không phát text, typing hoặc phản hồi lỗi", async () => {
+it("ảnh kèm câu hỏi được trả lời, còn ảnh không chữ thì im lặng", async () => {
   const sent: string[] = [];
   let inboundMedia: unknown;
   const channel = new ZaloPersonalChannel({
@@ -129,12 +129,12 @@ it("ảnh kèm câu hỏi vẫn lưu inbound nhưng không phát text, typing ho
       inboundMedia = message.media;
       hooks?.onStatus?.("thinking");
       hooks?.onBlockReply?.("Tin trả lời sớm");
-      return { kind: "reply", text: "Đã nhận hình ạ." };
+      return { kind: "reply", text: "Giá mẫu này là 1,6 triệu ạ." };
     },
   });
   const internals = channel as unknown as Record<string, unknown>;
   internals.api = {
-    sendMessage: async (message: string) => { sent.push(message); return { message: { msgId: "sent" } }; },
+    sendMessage: async (message: { msg: string }) => { sent.push(message.msg); return { message: { msgId: "sent" } }; },
     sendTypingEvent: async () => { sent.push("typing"); },
   };
   internals.account = { id: "me", name: "Shop" };
@@ -148,7 +148,10 @@ it("ảnh kèm câu hỏi vẫn lưu inbound nhưng không phát text, typing ho
       content: { title: "Mẫu này giá bao nhiêu?" }, msgType: "chat.photo", ts: String(Date.now()) },
   });
   expect(inboundMedia).toMatchObject([{ kind: "photo" }]);
-  expect(sent).toEqual([]);
+  expect(sent).toContain("Tin trả lời sớm");
+  expect(sent).toContain("Giá mẫu này là 1,6 triệu ạ.");
+  expect(sent).toContain("typing");
+  sent.length = 0;
   await handle({
     type: ThreadType.User, threadId: "customer", isSelf: false,
     data: { msgId: "photo-file-2", cliMsgId: "cli-2", uidFrom: "customer", dName: "Khách",

@@ -978,10 +978,11 @@ export class WhatsappPersonalChannel implements Channel {
     const { entry, chatKey, media, mentioned } = parsed;
     const photoMessage = entry.contentType === "photo" || media.some((item) => item.kind === "photo" ||
       (item.kind === "document" && /\.(png|jpe?g|gif|webp)$/i.test(item.name ?? "")));
+    const silentPhoto = photoMessage && !entry.text.trim();
     if (photoMessage && !media.some((item) => item.kind === "photo")) {
       media.push({ kind: "photo", note: "[Người dùng gửi ảnh nhưng không tải được]" });
     }
-    if (photoMessage) {
+    if (silentPhoto) {
       const pending = this.autoReactTimers.get(entry.threadId);
       if (pending) clearTimeout(pending);
       this.autoReactTimers.delete(entry.threadId);
@@ -994,7 +995,7 @@ export class WhatsappPersonalChannel implements Channel {
     // Tin tới lúc PenAI đang tắt (đồng bộ bù) chỉ lưu Inbox, không chạy agent cho tin đã cũ
     if (!live) return;
     const fromMe = entry.direction === "out";
-    if (!fromMe && !photoMessage) this.scheduleAutoReaction(m, entry.peerKind, entry.threadId);
+    if (!fromMe && !silentPhoto) this.scheduleAutoReaction(m, entry.peerKind, entry.threadId);
     if (entry.peerKind === "group" || !fromMe) this.recordObservation(chatKey, entry.threadId, entry.peerKind, entry.senderId, entry.senderName);
     if (fromMe) return;
     if (!this.isThreadEnabled(chatKey)) return;
@@ -1003,11 +1004,11 @@ export class WhatsappPersonalChannel implements Channel {
     const jid = whatsappThreadToJid(entry.threadId);
     const hooks = {
       onStatus: (status: string) => {
-        if (photoMessage) return;
+        if (silentPhoto) return;
         if (status === "queued" || status === "thinking") void sock.sendPresenceUpdate("composing", jid).catch(() => {});
       },
       onBlockReply: (blockText: string) => {
-        if (photoMessage) return;
+        if (silentPhoto) return;
         void this.sendText(entry.threadId, entry.peerKind, blockText).catch((error) => this.deps.onError?.(error as Error));
       },
     };
@@ -1026,7 +1027,7 @@ export class WhatsappPersonalChannel implements Channel {
         },
         hooks,
       );
-      if (photoMessage) return;
+      if (silentPhoto) return;
       void sock.sendPresenceUpdate("paused", jid).catch(() => {});
       if (result.kind === "pairing") {
         // Tài khoản thật không tự nhắn mã ghép nối cho người lạ — quản trị duyệt ở Dashboard → Channels
@@ -1037,7 +1038,7 @@ export class WhatsappPersonalChannel implements Channel {
       }
     } catch (error) {
       this.deps.onError?.(error as Error);
-      if (photoMessage) return;
+      if (silentPhoto) return;
       await this.sendText(entry.threadId, entry.peerKind, "⚠️ Có lỗi khi xử lý tin nhắn. Vui lòng thử lại.").catch(() => {});
     }
   }

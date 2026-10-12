@@ -1053,12 +1053,18 @@ export class ZaloPersonalChannel implements Channel {
       ? String((rawContent as Record<string, unknown>).type ?? "") : "";
     const mediaKind = zaloMediaKind(String(message.data.msgType ?? ""), rawContentType);
     let photoMessage = mediaKind === "photo" || mediaKind === "sticker";
+    let text = typeof message.data.content === "string" ? message.data.content : "";
+    if (!text && photoMessage && rawContent && typeof rawContent === "object") {
+      const content = rawContent as Record<string, unknown>;
+      const caption = content.description || content.title;
+      if (typeof caption === "string" && !/\.(png|jpe?g|webp|gif)$/i.test(caption)) text = caption;
+    }
 
     // Inbox: ghi MỌI tin (kể cả thread chưa cho agent trả lời). Tin do PenAI
     // tự gửi (agent/web/MCP) đã ghi lúc gửi → bỏ qua bản dội lại.
     await this.logListenerMessage(message, peerKind, threadId, senderId, senderName);
     if (!message.isSelf) {
-      if (photoMessage) this.cancelAutoReaction(peerKind, threadId);
+      if (photoMessage && !text.trim()) this.cancelAutoReaction(peerKind, threadId);
       else this.scheduleAutoReaction(message, peerKind, threadId);
     }
 
@@ -1083,13 +1089,6 @@ export class ZaloPersonalChannel implements Channel {
       peerKind !== "group" ||
       shouldHandleZaloGroup(message.data, this.account?.id ?? "", true);
 
-    let text = typeof message.data.content === "string" ? message.data.content : "";
-    if (!text && message.data.content && typeof message.data.content === "object" &&
-        zaloMediaKind(String(message.data.msgType ?? ""), "") === "photo") {
-      const content = message.data.content as unknown as Record<string, unknown>;
-      const caption = content.description || content.title;
-      if (typeof caption === "string" && !/\.(png|jpe?g|webp|gif)$/i.test(caption)) text = caption;
-    }
     const media = await this.collectMedia(
       message.data.content,
       String(message.data.msgType ?? ""),
@@ -1097,8 +1096,14 @@ export class ZaloPersonalChannel implements Channel {
     if (!photoMessage && media.some((item) => item.kind === "photo" ||
       (item.kind === "document" && /\.(png|jpe?g|gif|webp)$/i.test(item.name ?? "")))) {
       photoMessage = true;
-      this.cancelAutoReaction(peerKind, threadId);
     }
+    if (!text && photoMessage && rawContent && typeof rawContent === "object") {
+      const content = rawContent as Record<string, unknown>;
+      const caption = content.description || content.title;
+      if (typeof caption === "string" && !/\.(png|jpe?g|webp|gif)$/i.test(caption)) text = caption;
+    }
+    const silentPhoto = photoMessage && !text.trim();
+    if (silentPhoto) this.cancelAutoReaction(peerKind, threadId);
     if (photoMessage && !media.some((m) => m.kind === "photo")) {
       media.push({ kind: "photo", note: "[Người dùng gửi ảnh nhưng không tải được]" });
     }
@@ -1114,13 +1119,13 @@ export class ZaloPersonalChannel implements Channel {
 
     const hooks = {
       onStatus: (status: string) => {
-        if (photoMessage) return;
+        if (silentPhoto) return;
         if (status === "queued" || status === "thinking") {
           void this.api?.sendTypingEvent(threadId, threadType).catch(() => {});
         }
       },
       onBlockReply: (blockText: string) => {
-        if (photoMessage) return;
+        if (silentPhoto) return;
         const key = replyKey(blockText);
         if (!key || blockReplies.has(key)) return;
         blockReplies.set(key, this.sendText(threadId, threadType, blockText)
@@ -1148,7 +1153,7 @@ export class ZaloPersonalChannel implements Channel {
         },
         hooks,
       );
-      if (photoMessage) return;
+      if (silentPhoto) return;
       if (result.kind === "pairing") {
         // Ngoại lệ Zalo cá nhân: người chưa duyệt pairing thì IM LẶNG — không
         // gửi mã pair (tài khoản thật không tự nhắn cho người lạ). Mã vẫn được
@@ -1167,7 +1172,7 @@ export class ZaloPersonalChannel implements Channel {
       }
     } catch (error) {
       this.deps.onError?.(error as Error);
-      if (photoMessage) return;
+      if (silentPhoto) return;
       await this.sendText(
         threadId,
         threadType,

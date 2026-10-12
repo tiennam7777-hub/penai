@@ -548,6 +548,7 @@ export function makeInboundHandler(
   return async (msg, hooks?: RunHooks): Promise<InboundResult> => {
     const ctx = systemContext(channel.workspaceId);
     const hasPhoto = (msg.media ?? []).some((m) => m.kind === "photo");
+    const silentPhoto = hasPhoto && !msg.text.trim();
 
     // Nhóm Zalo: đệm tin chưa tag làm ngữ cảnh (kể cả tin orchestrator sẽ
     // tiêu thụ) — người dùng hay nhắn vài tin liên tiếp rồi mới tag bot.
@@ -560,7 +561,7 @@ export function makeInboundHandler(
 
     // Interceptor (bộ điều phối quy trình...): chạy TRƯỚC pairing/agent — phản hồi
     // của đại lý trong nhóm demo phải tới orchestrator dù người gửi chưa pair.
-    for (const interceptor of hasPhoto ? [] : inboundInterceptors) {
+    for (const interceptor of silentPhoto ? [] : inboundInterceptors) {
       try {
         const res = await interceptor(msg);
         if (res) return res;
@@ -606,7 +607,7 @@ export function makeInboundHandler(
     );
 
     // Gate pairing (fail-closed): DM lạ chưa duyệt → cấp mã, chờ admin duyệt
-    if (channel.requirePairing && !hasPhoto) {
+    if (channel.requirePairing && !silentPhoto) {
       const paired = await isPaired(db, ctx, channel.id, msg.senderId);
       if (!paired) {
         const pairing = await createPairing(db, ctx, channel.id, genPairingCode(), msg.senderId);
@@ -641,9 +642,9 @@ export function makeInboundHandler(
       sessionId = s.id;
     }
 
-    // Tin có ảnh chỉ được lưu làm ngữ cảnh cho lượt sau. Kể cả có caption,
-    // câu hỏi hay người gửi chưa được duyệt, không phát text/tool/typing.
-    if (hasPhoto) {
+    // Ảnh không kèm lời nhắn chỉ được lưu làm ngữ cảnh cho lượt sau.
+    // Ảnh kèm chữ đi tiếp qua luồng agent để trả lời câu hỏi của khách.
+    if (silentPhoto) {
       try {
         const userKey = `${channel.kind}-${msg.senderId}`;
         const userDir = resolve(join(rt.config.dataDir, ctx.workspaceId, "users", sanitizeUserKey(userKey)));

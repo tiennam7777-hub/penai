@@ -68,7 +68,7 @@ describe("WhatsApp cá nhân — tiện ích", () => {
   });
 });
 
-it("WhatsApp image with caption stays silent even when the handler attempts to reply", async () => {
+it("WhatsApp image with caption receives a reply, while image without text stays silent", async () => {
   const sent: string[] = [];
   let inboundMedia: unknown;
   const channel = new WhatsappPersonalChannel({
@@ -78,7 +78,7 @@ it("WhatsApp image with caption stays silent even when the handler attempts to r
       inboundMedia = message.media;
       hooks?.onStatus?.("thinking");
       hooks?.onBlockReply?.("Phản hồi sớm");
-      return { kind: "reply", text: "Đã nhận hình ạ." };
+      return { kind: "reply", text: "Giá mẫu này là 1,6 triệu ạ." };
     },
   });
   const internals = channel as unknown as Record<string, unknown>;
@@ -92,5 +92,14 @@ it("WhatsApp image with caption stays silent even when the handler attempts to r
   const handle = (channel as unknown as { handleMessage: (sock: unknown, m: unknown, live: boolean) => Promise<void> }).handleMessage.bind(channel);
   await handle({ sendPresenceUpdate: async () => { sent.push("typing"); } }, { key: { id: "photo-1", fromMe: false } }, true);
   expect(inboundMedia).toMatchObject([{ kind: "photo" }]);
+  expect(sent).toContain("Phản hồi sớm");
+  expect(sent).toContain("Giá mẫu này là 1,6 triệu ạ.");
+  sent.length = 0;
+  internals.toLog = async () => ({
+    entry: { direction: "in", contentType: "photo", text: "",
+      peerKind: "direct", threadId: "84900000000", senderId: "84900000000", senderName: "Khách" },
+    chatKey: "direct:84900000000", media: [], mentioned: true,
+  });
+  await handle({ sendPresenceUpdate: async () => { sent.push("typing"); } }, { key: { id: "photo-2", fromMe: false } }, true);
   expect(sent).toEqual([]);
 });

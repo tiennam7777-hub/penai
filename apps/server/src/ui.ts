@@ -4089,7 +4089,7 @@ export const INDEX_HTML = `<!doctype html>
         '<label style="display:flex;gap:8px;align-items:center;opacity:1;font-size:.9rem"><input type="checkbox" id="isOn" style="width:auto"> Lưu nội dung tin nhắn (bật Inbox)</label>' +
         '<div class="muted" style="margin:4px 0 10px">Tắt thì tin mới không được lưu/hiện trong Inbox (tin cũ giữ nguyên). Lưu ý: bật là lưu cả tin riêng tư của tài khoản Zalo này.</div>' +
         '<label>AI tạm im bao nhiêu phút sau khi nhân viên trả lời (0 = không tạm dừng)</label><input id="isPause" type="number" min="0" max="1440" style="width:120px">' +
-        '<div class="muted" style="margin:12px 0">Tin có ảnh, kể cả ảnh kèm chữ: AI im lặng; ảnh và lời nhắn vẫn được lưu để xử lý khi khách nhắn tiếp.</div>' +
+        '<div class="muted" style="margin:12px 0">Chỉ gửi ảnh không kèm chữ: AI im lặng và lưu ảnh. Ảnh kèm câu hỏi: AI xử lý và trả lời.</div>' +
         '<label style="margin-top:14px">Tự thả cảm xúc khi khách nhắn (cá nhân + nhóm)</label><select id="isAutoRx" style="width:200px"><option value="off">Tắt</option><option value="heart">❤️ Thả tim</option><option value="like">👍 Thích</option></select>' +
         '<div class="muted" style="margin:4px 0 0">Thả vào tin cuối mỗi đợt khách nhắn, sau 1–4 giây. Nhóm đông người nhắn nhiều thì tài khoản thả rất nhiều — nền tảng có thể giới hạn tài khoản.</div>' +
         '<label style="display:flex;gap:8px;align-items:center;opacity:1;font-size:.9rem;margin-top:14px"><input type="checkbox" id="isMcpRead" style="width:auto"> Cho ứng dụng AI bên ngoài (MCP) đọc hội thoại và nội dung tin nhắn</label>' +
