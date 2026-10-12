@@ -35,6 +35,8 @@ export interface ContactOverview {
   userKey: string;
   /** Tên lấy từ hồ sơ trên kênh (Telegram/Zalo…) — người dùng tự đặt. */
   displayName: string | null;
+  /** Tên đang hiển thị trong Inbox của đúng kênh và UID. */
+  inboxName: string | null;
   /** Tên quản trị viên đặt trong hồ sơ (ưu tiên hiển thị). */
   profileName: string | null;
   principalId: string | null;
@@ -147,6 +149,7 @@ function mapOverview(r: Record<string, unknown>): ContactOverview {
     externalId: r.external_id as string,
     userKey: `${r.channel_kind as string}-${r.external_id as string}`,
     displayName: str(r.display_name),
+    inboxName: str(r.inbox_name),
     profileName: str(r.profile_name),
     principalId: str(r.principal_id),
     firstSeen: toDate(r.first_seen),
@@ -166,6 +169,11 @@ async function queryOverview(db: Db, ctx: WorkspaceContext, contactId: string | 
              c.first_seen, c.last_seen,
              ch.name AS channel_name,
              COALESCE(c.metadata->>'peer_kind', c.metadata->>'zalo_kind') AS zalo_kind,
+             CASE WHEN c.channel_kind = 'zalo_personal'
+               THEN (SELECT COALESCE(NULLIF(zt.contact_alias, ''), NULLIF(zt.name, ''))
+                     FROM inbox_threads zt
+                     WHERE zt.channel_id = c.channel_id AND zt.thread_id = c.external_id)
+               ELSE NULL END AS inbox_name,
              (SELECT NULLIF(zt.phone, '') FROM inbox_threads zt
                WHERE zt.channel_id = c.channel_id AND zt.thread_id = c.external_id) AS zalo_phone,
              pp.display_name AS profile_name,
@@ -247,7 +255,7 @@ export async function exportContacts(
       peerKind: o.peerKind,
       externalId: o.externalId,
       userKey: o.userKey,
-      displayName: o.displayName ?? "",
+      displayName: o.inboxName ?? o.displayName ?? "",
       profileName: o.profileName ?? "",
       addressAs: s((p as Record<string, unknown>).address_as),
       selfAddress: s((p as Record<string, unknown>).self_address),
@@ -635,11 +643,17 @@ export async function getPersonContextData(
     let principalId = input.principalId ?? null;
     if (input.contactId) {
       const c = await tx.execute(sql`
-        SELECT display_name, first_seen, principal_id FROM contacts WHERE id = ${input.contactId}
+        SELECT c.display_name, c.first_seen, c.principal_id,
+          CASE WHEN c.channel_kind = 'zalo_personal'
+            THEN (SELECT COALESCE(NULLIF(zt.contact_alias, ''), NULLIF(zt.name, ''))
+                  FROM inbox_threads zt
+                  WHERE zt.channel_id = c.channel_id AND zt.thread_id = c.external_id)
+            ELSE NULL END AS inbox_name
+        FROM contacts c WHERE c.id = ${input.contactId}
       `);
-      const r = c.rows[0] as { display_name: string | null; first_seen: unknown; principal_id: string | null } | undefined;
+      const r = c.rows[0] as { display_name: string | null; inbox_name: string | null; first_seen: unknown; principal_id: string | null } | undefined;
       if (r) {
-        channelDisplayName = r.display_name;
+        channelDisplayName = r.inbox_name || r.display_name;
         firstSeen = toDate(r.first_seen);
         principalId = principalId ?? r.principal_id;
       }

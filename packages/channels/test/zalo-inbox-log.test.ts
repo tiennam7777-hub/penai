@@ -47,7 +47,7 @@ describe("Inbox: ghi tin đi/đến + bỏ bản dội lại", () => {
       requirePairing: true,
       onInbound: async () => ({ kind: "ignore" }),
       onMessageLog: (e) => logs.push(e),
-      onContactsSynced: (items) => contacts.push(items),
+      onContactsSynced: (items) => { contacts.push(items); },
     });
     let n = 100;
     const sent: Array<{ msg: unknown; threadId: string; type: unknown }> = [];

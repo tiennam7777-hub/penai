@@ -233,6 +233,7 @@ export interface InboxContactInput {
   name: string;
   /** undefined preserves the saved alias; empty string clears it. */
   contactAlias?: string;
+  isContact?: boolean;
   avatar?: string;
   phone?: string;
   memberCount?: number;
@@ -253,7 +254,7 @@ export async function upsertInboxContacts(
       const values = sql.join(
         batch.map(
           (c) =>
-            sql`(${ctx.workspaceId}::uuid, ${channelId}::uuid, ${c.threadId}, ${c.kind}, ${c.name}, ${c.contactAlias ?? null}, ${c.avatar ?? ""}, ${c.phone ?? ""}, true, ${c.memberCount ?? null}::int, now(), now())`,
+            sql`(${ctx.workspaceId}::uuid, ${channelId}::uuid, ${c.threadId}, ${c.kind}, ${c.name}, ${c.contactAlias ?? null}, ${c.avatar ?? ""}, ${c.phone ?? ""}, ${c.isContact ?? true}, ${c.memberCount ?? null}::int, now(), now())`,
         ),
         sql`, `,
       );
@@ -267,11 +268,21 @@ export async function upsertInboxContacts(
           name = CASE WHEN EXCLUDED.name <> '' THEN EXCLUDED.name ELSE inbox_threads.name END,
           avatar = CASE WHEN EXCLUDED.avatar <> '' THEN EXCLUDED.avatar ELSE inbox_threads.avatar END,
           phone = CASE WHEN EXCLUDED.phone <> '' THEN EXCLUDED.phone ELSE inbox_threads.phone END,
-          is_contact = true,
+          is_contact = inbox_threads.is_contact OR EXCLUDED.is_contact,
           member_count = COALESCE(EXCLUDED.member_count, inbox_threads.member_count),
           synced_at = now()`);
       n += batch.length;
     }
+    await tx.execute(sql`
+      UPDATE contacts c
+      SET display_name = t.contact_alias
+      FROM inbox_threads t
+      WHERE c.channel_id = ${channelId}::uuid
+        AND c.channel_kind = 'zalo_personal'
+        AND t.channel_id = c.channel_id
+        AND t.thread_id = c.external_id
+        AND t.contact_alias <> ''
+        AND c.display_name IS DISTINCT FROM t.contact_alias`);
     return n;
   });
 }
@@ -437,6 +448,24 @@ export async function getInboxMessageById(
     tx.execute(sql`SELECT m.*, u.name AS web_user_name, ${REACTIONS_SUBQUERY} AS reactions FROM inbox_messages m
       LEFT JOIN users u ON u.id = m.web_user_id
       WHERE m.channel_id = ${channelId} AND m.thread_id = ${threadId} AND m.id = ${id}::bigint`),
+  );
+  const r = res.rows[0] as Raw | undefined;
+  return r ? mapMessage(r) : null;
+}
+
+/** Tìm tin nền tảng đã gửi trong đúng kênh và hội thoại để giải tham chiếu Zalo. */
+export async function getInboxMessageByMsgId(
+  db: Db,
+  ctx: WorkspaceContext,
+  channelId: string,
+  threadId: string,
+  msgId: string,
+): Promise<InboxMessageRow | null> {
+  if (!msgId || msgId.length > 100) return null;
+  const res = await withWorkspace(db, ctx, (tx) =>
+    tx.execute(sql`SELECT m.*, u.name AS web_user_name FROM inbox_messages m
+      LEFT JOIN users u ON u.id = m.web_user_id
+      WHERE m.channel_id = ${channelId} AND m.thread_id = ${threadId} AND m.msg_id = ${msgId}`),
   );
   const r = res.rows[0] as Raw | undefined;
   return r ? mapMessage(r) : null;

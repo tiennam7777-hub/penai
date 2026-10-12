@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { extname, join, resolve } from "node:path";
 import { decryptSecret, encryptSecret, logger } from "@penai/shared";
 import { confineMediaPath } from "@penai/tools";
 import {
@@ -18,10 +18,12 @@ import {
   updateChannel,
   upsertInboxObservedPeer,
   getInboxThreadAgentBlock,
+  getInboxMessageByMsgId,
+  loadMessages,
   type EnabledChannel,
   recordTraceSafe,
 } from "@penai/db";
-import { Scheduler, runAgent } from "@penai/core";
+import { Scheduler, gatedProvider, runAgent } from "@penai/core";
 import {
   ChannelManager,
   isChannelKindSupported,
@@ -41,6 +43,7 @@ import {
 import { forgetInboxChannel, inboxHooks } from "./inbox.js";
 import { isPersonalChannelKind } from "@penai/channels";
 import { PhotoBurst, readPhotoAcknowledgement } from "./photo-burst.js";
+import { classifyOrchidSalesScope } from "./orchid-sales-scope.js";
 
 /** Handler + channel theo channelId — cho webhook route (WhatsApp, Teams) dùng. */
 export const channelHandlers = new Map<
@@ -438,10 +441,6 @@ export async function newDeliverables(
     .map((c) => c.path);
 }
 
-/** Chống spam: 1 mã ghép nối / người gửi / 60 giây. */
-const pairingDebounce = new Map<string, number>();
-const PAIRING_DEBOUNCE_MS = 60_000;
-
 /**
  * Nhóm Zalo demo: người dùng hay nhắn vài tin liên tiếp rồi mới tag bot.
  * Các tin chưa tag bị gate mention bỏ qua sẽ được đệm lại ở đây; khi có tin
@@ -614,21 +613,13 @@ export function makeInboundHandler(
     if (channel.requirePairing) {
       const paired = await isPaired(db, ctx, channel.id, msg.senderId);
       if (!paired) {
-        // Người lạ nhắn liên tục: không tạo mã mới mỗi tin (phình bảng
-        // channel_pairings + admin thấy hàng loạt mã khác nhau cho 1 người).
-        const debounceKey = `${channel.id}:${msg.senderId}`;
-        const last = pairingDebounce.get(debounceKey) ?? 0;
-        if (Date.now() - last < PAIRING_DEBOUNCE_MS) {
-          return { kind: "ignore" };
-        }
-        pairingDebounce.set(debounceKey, Date.now());
-        const code = genPairingCode();
-        await createPairing(db, ctx, channel.id, code, msg.senderId);
+        const pairing = await createPairing(db, ctx, channel.id, genPairingCode(), msg.senderId);
+        if (!pairing.created) return { kind: "ignore" };
         return {
           kind: "pairing",
           text:
             `👋 Xin chào! Bạn cần được duyệt trước khi dùng trợ lý này.\n` +
-            `Mã ghép nối của bạn: *${code}*\n` +
+            `Mã ghép nối của bạn: *${pairing.code}*\n` +
             `Vui lòng gửi mã này cho quản trị viên để được duyệt.`,
         };
       }
@@ -685,9 +676,68 @@ export function makeInboundHandler(
     const agent = await getAgentById(db, ctx, channel.agentId);
     if (!agent) return { kind: "reply", text: "⚠️ Agent chưa được cấu hình." };
 
+    // Kênh bán lan: lọc trước mọi text/tool của Agent. Adapter đã lưu tin vào
+    // Inbox trước khi gọi handler; ignore chỉ ngăn AI nhắn lại cho khách.
+    if (channel.config["orchid_sales_scope"] === true) {
+      const scopeText = [msg.text, ...(msg.media ?? []).flatMap((m) => [m.text ?? "", m.note ?? ""])]
+        .filter(Boolean).join("\n").trim();
+      const scopeImages = (msg.media ?? []).filter((m) => m.kind === "photo" && m.dataUrl)
+        .map((m) => m.dataUrl!).slice(0, 5);
+      if (scopeText || scopeImages.length) {
+        try {
+          const provider = rt.providers.get(agent.provider, ctx.workspaceId);
+          const limited = rt.gate
+            ? gatedProvider(rt.gate, provider, { providerKey: agent.provider, priority: 0 })
+            : provider;
+          const history = await loadMessages(db, ctx, sessionId!);
+          const decision = await classifyOrchidSalesScope(limited, agent.model, {
+            text: scopeText,
+            images: scopeImages,
+            recentMessages: history,
+            quotedProductPhoto: msg.quoted?.kind === "photo",
+          });
+          if (decision === "ignore") return { kind: "ignore" };
+        } catch (err) {
+          logger.warn(`orchid_sales_scope: không phân loại được, chuyển nhân viên xử lý (${(err as Error).message})`);
+          return { kind: "ignore" };
+        }
+      } else {
+        // Voice/video/file không đọc được: để nhân viên xem, không tự xác nhận.
+        return { kind: "ignore" };
+      }
+    }
+
     const userKey = `${channel.kind}-${msg.senderId}`;
     const wsDirEarly = resolve(join(rt.config.dataDir, ctx.workspaceId));
     const userDirEarly = resolve(join(wsDirEarly, "users", sanitizeUserKey(userKey)));
+    let quotedPhotoDataUrl: string | null = null;
+    if (msg.quoted?.kind === "photo") {
+      const threadId = msg.chatKey.slice(msg.chatKey.indexOf(":") + 1);
+      const quotedRow = await getInboxMessageByMsgId(db, ctx, channel.id, threadId, msg.quoted.msgId)
+        .catch(() => null);
+      const rawPath = quotedRow?.direction === "out" && quotedRow.contentType === "photo"
+        ? quotedRow.media?.localPath
+        : undefined;
+      const safePath = typeof rawPath === "string"
+        ? await confineMediaPath(rawPath, [wsDirEarly])
+        : null;
+      if (safePath) {
+        try {
+          const fileStat = await stat(safePath);
+          if (fileStat.size <= 10 * 1024 * 1024) {
+            const ext = extname(safePath).toLowerCase();
+            const mime = ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp"
+              : ext === ".gif" ? "image/gif" : "image/jpeg";
+            quotedPhotoDataUrl = `data:${mime};base64,${(await readFile(safePath)).toString("base64")}`;
+          }
+        } catch {
+          // Ảnh đã mất hoặc không đọc được: hỏi khách xác nhận, không đoán màu.
+        }
+      }
+      if (!quotedPhotoDataUrl) {
+        return { kind: "reply", text: "Em chưa xác định được chính xác ảnh anh/chị đã chọn trong album. Anh/chị gửi lại riêng ảnh đó hoặc cho em biết ảnh số mấy nhé ạ." };
+      }
+    }
 
     // Lưu ảnh + document inbound thành file (tham chiếu lại được ở các lượt
     // sau). Caption/tin nhắn kèm theo → đặt tên file slug dễ hiểu.
@@ -748,6 +798,7 @@ export function makeInboundHandler(
     // [[media:...]] trong kết quả tool (chưa kiểm tra — xác minh sau vòng lặp).
     const mediaOut: string[] = [];
     const pendingMedia: string[] = [];
+    let emittedBlockReply = false;
     // Agent đã CHỦ ĐỘNG chọn file gửi (send_file) → các nguồn auto (marker,
     // file mới sinh) chỉ là sản phẩm trung gian (ảnh nền chưa ghép chữ, .json
     // sinh ra giữa pipeline...) — không gửi kèm nữa.
@@ -827,14 +878,16 @@ export function makeInboundHandler(
         ? joinGroupChatter(chatterKey, msg.senderId, msg.senderName, msg.text)
         : msg.text;
     const userMessage = mergeMediaText(
-      inboundText,
+      quotedPhotoDataUrl
+        ? `[Khách đang trả lời trực tiếp ảnh đã gửi. Ảnh đi kèm lượt này chính là ảnh khách chọn; không suy đoán theo vị trí trong album.]\n${inboundText}`
+        : inboundText,
       msg.media,
       savedImages.map((s) => s.name),
       savedDocs.map((s) => s.name),
     );
     // Vision = ảnh lượt này + các ảnh gần đây của session (đọc lại từ đĩa) —
     // người dùng gửi ảnh trước, nhắn yêu cầu sau thì model vẫn "nhìn thấy" ảnh.
-    let userImages = await recentImagesAsDataUrls(sessionId);
+    let userImages = quotedPhotoDataUrl ? [quotedPhotoDataUrl] : await recentImagesAsDataUrls(sessionId);
     if (!userImages.length && photos.length) {
       userImages = photos.map((m) => m.dataUrl!);
     }
@@ -894,7 +947,10 @@ export function makeInboundHandler(
           } else if (ev.type === "tool_call") {
             // câu dẫn trước tool ("Để em kiểm tra...") → bubble riêng
             const block = sinceTool.replace(MEDIA_MARKER_RE, "").trim();
-            if (block) hooks?.onBlockReply?.(block);
+            if (block && hooks?.onBlockReply) {
+              hooks.onBlockReply(block);
+              emittedBlockReply = true;
+            }
             sinceTool = "";
             hooks?.onStatus?.(toolReactionStatus(ev.name));
           } else if (ev.type === "tool_result") {
@@ -907,7 +963,9 @@ export function makeInboundHandler(
               pendingMedia.push(raw);
             }
           } else if (ev.type === "done") {
-            done = ev.finalText || sinceTool || streamed;
+            // Nội dung đã phát qua onBlockReply không được dùng lại làm câu kết.
+            // Kênh không có hook vẫn cần fallback streamed để không mất chữ.
+            done = ev.finalText || sinceTool || (emittedBlockReply ? "" : streamed);
             traceUsage = ev.usage;
             traceIterations = ev.iterations;
           } else if (ev.type === "error") {
@@ -961,7 +1019,7 @@ export function makeInboundHandler(
       kind: "reply",
       // Đã có media hoặc thẻ duyệt gửi đi → final rỗng là hợp lệ (nội dung nằm
       // trong thẻ/file), không chèn placeholder gây bubble "(không có nội dung)".
-      text: cleanText || (mediaOut.length || cardSent ? "" : "(không có nội dung)"),
+      text: cleanText || (mediaOut.length || cardSent || emittedBlockReply ? "" : "(không có nội dung)"),
       ...(mediaOut.length ? { media: mediaOut } : {}),
     };
   };

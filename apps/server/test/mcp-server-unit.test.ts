@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import AdmZip from "adm-zip";
 import { describe, expect, it } from "vitest";
 import { isMcpPublicPath, parseScopes, pkceMatches, validRedirectUri } from "../src/mcp-server.js";
-import { isPlatformRejected, loadImageInput, readInboxConfig, sniffImage } from "../src/inbox.js";
+import { isPlatformRejected, loadImageInput, prepareOutboundDocument, readInboxConfig, sniffImage } from "../src/inbox.js";
 
 const PNG_1x1 = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
@@ -46,6 +50,33 @@ describe("MCP server — OAuth helpers", () => {
 });
 
 describe("Inbox — cấu hình + ảnh gửi đi", () => {
+  it("lưu file Word/Excel hợp lệ trong workspace và từ chối file giả hoặc tên không an toàn", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "penai-inbox-file-"));
+    try {
+      const archive = new AdmZip();
+      archive.addFile("[Content_Types].xml", Buffer.from("<Types/>"));
+      archive.addFile("xl/workbook.xml", Buffer.from("<workbook/>"));
+      const zip = archive.toBuffer();
+      const path = await prepareOutboundDocument(dir, "workspace-1", "channel-1", {
+        name: "Bảng giá.xlsx", contentB64: zip.toString("base64"),
+      });
+      expect(path).toContain(join("workspace-1", "zalo-inbox", "channel-1"));
+      expect(path).toMatch(/Bảng giá\.xlsx$/);
+      expect(await readFile(path)).toEqual(zip);
+      await expect(prepareOutboundDocument(dir, "workspace-1", "channel-1", {
+        name: "../escape.docx", contentB64: zip.toString("base64"),
+      })).rejects.toThrow(/Tên file/);
+      await expect(prepareOutboundDocument(dir, "workspace-1", "channel-1", {
+        name: "not-word.docx", contentB64: Buffer.from("wrong").toString("base64"),
+      })).rejects.toThrow(/định dạng/);
+      await expect(prepareOutboundDocument(dir, "workspace-1", "channel-1", {
+        name: "Bảng giá.xlsx", contentB64: "%%%",
+      })).rejects.toThrow(/Nội dung/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("readInboxConfig: mặc định bật lưu, tạm dừng 30 phút", () => {
     expect(readInboxConfig({})).toEqual({ enabled: true, pauseMinutes: 30, mcpReadMessages: false, autoReaction: null, agentReply: true, photoAck: "short" });
     expect(readInboxConfig({ inbox: false, inbox_pause_minutes: 0 })).toMatchObject({ enabled: false, pauseMinutes: 0, mcpReadMessages: false });

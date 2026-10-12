@@ -15,6 +15,28 @@ import {
 import { supportedChannelKinds } from "../src/manager.js";
 
 describe("Zalo contact aliases", () => {
+  it("syncs an alias for a non-friend without turning the person into a friend", async () => {
+    const channel = new ZaloPersonalChannel({
+      id: "zp-alias", name: "Zalo alias", token: "{}", config: {}, requirePairing: true,
+      onInbound: async () => ({ kind: "ignore" }),
+    });
+    (channel as unknown as { api: unknown }).api = {
+      getAllFriends: async () => [{ userId: "friend", zaloName: "Friend" }],
+      getAliasList: async () => ({ updateTime: "0", items: [
+        { userId: "friend", alias: "Friend alias" },
+        { userId: "customer", alias: "Chi Trinh Ghé Mua 0903759396" },
+      ] }),
+      getAllGroups: async () => ({ gridVerMap: {} }),
+    };
+    const targets = await channel.listTargets();
+    expect(targets).toContainEqual(expect.objectContaining({
+      id: "customer", name: "", contactAlias: "Chi Trinh Ghé Mua 0903759396", isContact: false,
+    }));
+    expect(targets).toContainEqual(expect.objectContaining({
+      id: "friend", name: "Friend", contactAlias: "Friend alias",
+    }));
+  });
+
   it("reads every page, including aliases missing from displayName", async () => {
     const pages: number[] = [];
     const result = await loadZaloContactAliases({ getAliasList: async (_count, page) => {

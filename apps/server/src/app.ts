@@ -1744,10 +1744,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     ctx: FastifyRequest["authCtx"],
     channels: Array<{ id: string; kind: string }>,
   ): Promise<(kind: string, channelId: string, externalId: string | null) => string | null> => {
-    const contactRows = await listContacts(db, ctx);
-    const byKindId = new Map<string, string>();
+    const contactRows = await listContactsOverview(db, ctx);
+    const byChannelId = new Map<string, string>();
     for (const c of contactRows) {
-      if (c.displayName) byKindId.set(`${c.channelKind}:${c.externalId}`, c.displayName);
+      const name = c.inboxName || c.profileName || c.displayName;
+      if (c.channelId && name) byChannelId.set(`${c.channelId}:${c.externalId}`, name);
     }
     const zaloByChannelSender = new Map<string, string>();
     await Promise.all(
@@ -1763,7 +1764,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return (kind, channelId, externalId) => {
       if (!externalId) return null;
       return (
-        byKindId.get(`${kind}:${externalId}`) ??
+        byChannelId.get(`${channelId}:${externalId}`) ??
         zaloByChannelSender.get(`${channelId}:${externalId}`) ??
         null
       );
@@ -2118,7 +2119,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         rows: [
           ["Loại", "UID / ID", "Tên", "SĐT", "Bạn bè / đang trong nhóm", "Số thành viên", "Tin gần nhất", "Chưa đọc", "AI"],
           ...threads.map((t): XlsxCell[] => [
-            t.kind === "group" ? "Nhóm" : "Cá nhân", t.threadId, t.name, t.phone, t.isContact ? "Có" : "", t.memberCount ?? "",
+            t.kind === "group" ? "Nhóm" : "Cá nhân", t.threadId, t.contactAlias || t.name, t.phone, t.isContact ? "Có" : "", t.memberCount ?? "",
             t.lastMessageAt ? new Date(t.lastMessageAt) : "", t.unreadCount || "", t.aiMode === "off" ? "Tắt" : "",
           ]),
         ],

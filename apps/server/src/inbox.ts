@@ -4,7 +4,7 @@
  * - Adapter của kênh báo MỌI tin đến/đi (onMessageLog) → lưu inbox_messages
  *   + inbox_threads → đẩy realtime (SSE) cho người đang trực.
  * - Người trực (operator trở lên: mọi kênh; member: kênh được gán) xem hội thoại,
- *   gửi text/ảnh, bật/tắt AI theo hội thoại. Nhân viên trả lời (web hoặc điện
+ *   gửi text/ảnh/tài liệu, bật/tắt AI theo hội thoại. Nhân viên trả lời (web hoặc điện
  *   thoại) → AI tạm im trong hội thoại đó `inbox_pause_minutes` phút (mặc định 30).
  * - Dùng chung cho MCP server (mcp-server.ts): gửi tin/ảnh, tra SĐT, danh bạ.
  *
@@ -16,6 +16,7 @@ import { lookup } from "node:dns/promises";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { isIP } from "node:net";
 import { join, relative, resolve, sep } from "node:path";
+import AdmZip from "adm-zip";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { hasRole, logger, type WorkspaceContext } from "@penai/shared";
@@ -253,8 +254,8 @@ export function inboxHooks(
         }
       })().catch((err) => logger.warn(`zalo.inbox_store lỗi: ${(err as Error).message}`));
     },
-    onContactsSynced: (items: ChannelContact[]) => {
-      void upsertInboxContacts(
+    onContactsSynced: async (items: ChannelContact[]) => {
+      const n = await upsertInboxContacts(
         db,
         ctx,
         ch.id,
@@ -263,13 +264,13 @@ export function inboxHooks(
           kind: i.type,
           name: i.name,
           ...(i.contactAlias !== undefined ? { contactAlias: i.contactAlias } : {}),
+          ...(i.isContact !== undefined ? { isContact: i.isContact } : {}),
           ...(i.avatar ? { avatar: i.avatar } : {}),
           ...(i.phone ? { phone: i.phone } : {}),
           ...(i.memberCount !== undefined ? { memberCount: i.memberCount } : {}),
         })),
-      )
-        .then((n) => broadcast(ch.workspaceId, ch.id, "contacts", { channelId: ch.id, count: n }))
-        .catch((err) => logger.warn(`zalo.contacts_store lỗi: ${(err as Error).message}`));
+      );
+      broadcast(ch.workspaceId, ch.id, "contacts", { channelId: ch.id, count: n });
     },
     onThreadName: (threadId: string, name: string) => {
       void setInboxThreadName(db, ctx, ch.id, threadId, name).catch(() => {});
@@ -405,6 +406,52 @@ export function sniffImage(buf: Buffer): { ext: string; mime: string } | null {
 }
 
 export class ImageInputError extends Error {}
+export class InboxFileInputError extends Error {}
+
+const INBOX_DOCUMENT_MAX_BYTES = 10 * 1024 * 1024;
+const INBOX_DOCUMENT_EXTENSIONS = new Set(["pdf", "doc", "docx", "xls", "xlsx"]);
+
+/** File văn phòng gửi từ Inbox; chỉ nhận một file tối đa 10 MB. */
+export async function prepareOutboundDocument(
+  dataDir: string,
+  workspaceId: string,
+  channelId: string,
+  input: { name: string; contentB64: string },
+): Promise<string> {
+  const name = input.name.trim();
+  if (!name || name.length > 120 || name.startsWith(".") || /[\\/\x00-\x1f\x7f]/.test(name)) {
+    throw new InboxFileInputError("Tên file không hợp lệ");
+  }
+  const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  if (!INBOX_DOCUMENT_EXTENSIONS.has(ext)) {
+    throw new InboxFileInputError("Chỉ hỗ trợ PDF, Word (.doc/.docx) và Excel (.xls/.xlsx)");
+  }
+  const b64 = input.contentB64;
+  if (!b64 || b64.length > Math.ceil(INBOX_DOCUMENT_MAX_BYTES / 3) * 4 ||
+      !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(b64)) {
+    throw new InboxFileInputError("Nội dung file không hợp lệ hoặc vượt 10 MB");
+  }
+  const buf = Buffer.from(b64, "base64");
+  if (!buf.length || buf.length > INBOX_DOCUMENT_MAX_BYTES) {
+    throw new InboxFileInputError("File rỗng hoặc vượt 10 MB");
+  }
+  const ole = buf.length >= 8 && buf.subarray(0, 8).equals(Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]));
+  let valid = ext === "pdf" ? buf.subarray(0, 5).toString("ascii") === "%PDF-" : ole;
+  if (ext === "docx" || ext === "xlsx") {
+    try {
+      const zip = new AdmZip(buf);
+      valid = !!zip.getEntry("[Content_Types].xml") && !!zip.getEntry(ext === "docx" ? "word/document.xml" : "xl/workbook.xml");
+    } catch {
+      valid = false;
+    }
+  }
+  if (!valid) throw new InboxFileInputError("Nội dung file không đúng định dạng đã chọn");
+  const dir = resolve(join(dataDir, workspaceId, "zalo-inbox", channelId, new Date().toISOString().slice(0, 7), randomUUID()));
+  await mkdir(dir, { recursive: true });
+  const path = join(dir, name);
+  await writeFile(path, buf, { flag: "wx" });
+  return path;
+}
 
 /**
  * Ảnh đầu vào: `data:image/...;base64,...` hoặc URL http(s) công khai.
@@ -490,6 +537,7 @@ export interface InboxSendRequest {
   peerKind: "direct" | "group";
   text?: string;
   image?: string;
+  file?: { name: string; contentB64: string };
   /** Ảnh đã nạp + lưu sẵn (prepareOutboundImage) — MCP kiểm tra ảnh trước khi chiếm lượt gửi. */
   filePaths?: string[];
   source: ZaloSendSource;
@@ -525,6 +573,9 @@ export async function sendInbox(dataDir: string, req: InboxSendRequest): Promise
   if (req.image) {
     filePaths.push(await prepareOutboundImage(dataDir, req.workspaceId, req.channelId, req.image));
   }
+  if (req.file) {
+    filePaths.push(await prepareOutboundDocument(dataDir, req.workspaceId, req.channelId, req.file));
+  }
   const msgIds = await runtime.sendManual({
     threadId: req.threadId,
     peerKind: req.peerKind,
@@ -547,9 +598,11 @@ const SendBody = z
   .object({
     text: z.string().max(10_000).optional(),
     image: z.string().max(15_000_000).optional(),
+    file: z.object({ name: z.string().max(120), contentB64: z.string().max(14_000_000) }).optional(),
     peerKind: z.enum(["direct", "group"]).optional(),
   })
-  .refine((v) => (v.text && v.text.trim()) || v.image, { message: "Cần nội dung hoặc ảnh" });
+  .refine((v) => (v.text && v.text.trim()) || v.image || v.file, { message: "Cần nội dung hoặc file" })
+  .refine((v) => !(v.image && v.file), { message: "Chỉ gửi một file mỗi lần" });
 
 const NewMessageBody = z
   .object({
@@ -558,9 +611,11 @@ const NewMessageBody = z
     peerKind: z.enum(["direct", "group"]).default("direct"),
     text: z.string().max(10_000).optional(),
     image: z.string().max(15_000_000).optional(),
+    file: z.object({ name: z.string().max(120), contentB64: z.string().max(14_000_000) }).optional(),
   })
   .refine((v) => v.to || v.phone, { message: "Cần uid (to) hoặc số điện thoại" })
-  .refine((v) => (v.text && v.text.trim()) || v.image, { message: "Cần nội dung hoặc ảnh" });
+  .refine((v) => (v.text && v.text.trim()) || v.image || v.file, { message: "Cần nội dung hoặc file" })
+  .refine((v) => !(v.image && v.file), { message: "Chỉ gửi một file mỗi lần" });
 
 const AiBody = z.object({ mode: z.enum(["auto", "off"]).optional(), resume: z.boolean().optional() });
 const InboxSettingsBody = z.object({
@@ -576,7 +631,7 @@ const ReactBody = z.object({ reaction: z.enum(["heart", "like", "haha", "wow", "
 function sendError(reply: FastifyReply, err: unknown, channelId: string) {
   const e = err as Error & { code?: string };
   const label = platformOf(channelId);
-  if (e instanceof ImageInputError) return reply.code(400).send({ error: e.message });
+  if (e instanceof ImageInputError || e instanceof InboxFileInputError) return reply.code(400).send({ error: e.message });
   if (e.code === "NOT_CONNECTED") return reply.code(409).send({ error: e.message, code: "NOT_CONNECTED" });
   if (isPlatformRejected(e)) return reply.code(422).send({ error: `${label} từ chối: ${e.message}`, code: `${label.toUpperCase()}_REJECTED` });
   logger.warn(`zalo.inbox_send lỗi: ${e.message}`);
@@ -701,6 +756,7 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
         peerKind,
         ...(parsed.data.text?.trim() ? { text: parsed.data.text } : {}),
         ...(parsed.data.image ? { image: parsed.data.image } : {}),
+        ...(parsed.data.file ? { file: parsed.data.file } : {}),
         source: "web",
         webUserId: req.authCtx.userId,
       });
@@ -741,6 +797,7 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
         peerKind,
         ...(parsed.data.text?.trim() ? { text: parsed.data.text } : {}),
         ...(parsed.data.image ? { image: parsed.data.image } : {}),
+        ...(parsed.data.file ? { file: parsed.data.file } : {}),
         source: "web",
         webUserId: req.authCtx.userId,
         ...(threadName ? { threadName } : {}),

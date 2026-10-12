@@ -210,7 +210,8 @@ export const INDEX_HTML = `<!doctype html>
   .ibx-who { font-size: .7rem; opacity: .7; margin: 0 4px 1px; }
   .ibx-time { font-size: .66rem; opacity: .5; margin: 1px 4px 0; }
   .ibx-quote { font-size: .78rem; opacity: .75; border-left: 3px solid rgba(128,128,128,.5); padding-left: 6px; margin-bottom: 4px; }
-  .ibx-photo { max-width: 260px; max-height: 260px; border-radius: 8px; display: block; }
+  .ibx-photo { max-width: 260px; max-height: 260px; border-radius: 8px; display: block; cursor: zoom-in; }
+  .ibx-photo-link { padding: 0; border: 0; background: none; cursor: zoom-in; }
   .ibx-sticker { width: 90px; height: 90px; object-fit: contain; }
   .ibx-compose { border-top: 1px solid var(--border); padding: 8px 10px; }
   .ibx-msg { position: relative; }
@@ -3028,7 +3029,7 @@ export const INDEX_HTML = `<!doctype html>
   function chLabel(k) { return CH_LABELS[k] || k; }
   function fmtTime(s) { if (!s) return ""; var d = new Date(s); return isNaN(d.getTime()) ? "" : d.toLocaleString("vi-VN"); }
   function tagPill(t) { return '<span class="pill tagpill"><i style="background:' + esc(t.color || "#94a3b8") + '"></i>' + esc(t.name) + "</span>"; }
-  function contactName(c) { return c.profileName || c.displayName || c.externalId; }
+  function contactName(c) { return c.inboxName || c.profileName || c.displayName || c.externalId; }
   function eachEl(root, sel, fn) { Array.prototype.forEach.call(root.querySelectorAll(sel), fn); }
   function charCounter(input, out, max) {
     var upd = function () { out.textContent = input.value.length + " / " + max + " ký tự"; };
@@ -3055,7 +3056,7 @@ export const INDEX_HTML = `<!doctype html>
         if (ch && r.channelId !== ch) return false;
         if (tg && !r.tags.some(function (t) { return t.id === tg; })) return false;
         if (!q) return true;
-        return [r.profileName, r.displayName, r.externalId, r.zaloPhone].some(function (v) { return !!v && String(v).toLowerCase().indexOf(q) >= 0; });
+        return [r.inboxName, r.profileName, r.displayName, r.externalId, r.zaloPhone].some(function (v) { return !!v && String(v).toLowerCase().indexOf(q) >= 0; });
       });
       box.innerHTML = "";
       box.appendChild(table(["Tên", "Kênh", "Loại", "UID / ID", "Duyệt", "Nhắn gần nhất"], rows, function (r) {
@@ -3064,7 +3065,8 @@ export const INDEX_HTML = `<!doctype html>
         tr.innerHTML =
           "<td><b>" + esc(contactName(r)) + "</b>" +
           (r.hasInstructions ? ' <span title="Có chỉ dẫn riêng cho AI">📝</span>' : "") +
-          (r.profileName && r.displayName && r.profileName !== r.displayName ? "<div class='muted'>" + esc(r.displayName) + "</div>" : "") +
+          (r.inboxName && r.displayName && r.inboxName !== r.displayName ? "<div class='muted'>Zalo: " + esc(r.displayName) + "</div>" :
+            r.profileName && r.displayName && r.profileName !== r.displayName ? "<div class='muted'>" + esc(r.displayName) + "</div>" : "") +
           (r.tags.length ? "<div style='margin-top:3px'>" + r.tags.map(tagPill).join(" ") + "</div>" : "") + "</td>" +
           "<td>" + esc(r.channelName || chLabel(r.channelKind)) + "<div class='muted'>" + esc(chLabel(r.channelKind)) + "</div></td>" +
           "<td>" + (r.peerKind === "group" ? "👥 Nhóm" : r.peerKind === "direct" ? "👤 Cá nhân" : '<span class="muted">—</span>') + "</td>" +
@@ -3799,7 +3801,7 @@ export const INDEX_HTML = `<!doctype html>
 
   PAGES.inbox = function () {
     var m = page("Inbox", "Nhiều người cùng xem và trả lời khách trên Zalo cá nhân, WhatsApp cá nhân. Nhân viên trả lời thì AI tự tạm im trong hội thoại đó.");
-    var S = { channels: [], canManage: false, ch: null, threads: [], cur: null, msgs: [], filter: "", kind: "", img: null, es: null };
+    var S = { channels: [], canManage: false, ch: null, threads: [], cur: null, msgs: [], filter: "", kind: "", img: null, file: null, es: null };
     var top = el("div", { "class": "row", style: "margin-bottom:10px" });
     top.innerHTML = '<select id="ibxCh" style="max-width:260px"></select><span id="ibxSt" class="muted"></span><span style="flex:1"></span>' +
       '<button class="ghost sm" id="ibxNew">＋ Nhắn tin mới</button><button class="ghost sm" id="ibxSync" style="display:none">🔄 Đồng bộ danh bạ</button><button class="ghost sm" id="ibxSet" style="display:none">⚙️ Cài đặt</button>';
@@ -3807,7 +3809,7 @@ export const INDEX_HTML = `<!doctype html>
     var wrap = el("div", { "class": "ibx" });
     wrap.innerHTML = '<div class="ibx-list"><div class="row" style="padding:8px"><input id="ibxQ" placeholder="Tìm tên, uid, SĐT…"><select id="ibxKind" style="flex:0 0 auto;min-width:0"><option value="">Tất cả</option><option value="direct">Cá nhân</option><option value="group">Nhóm</option><option value="unread">Chưa đọc</option></select></div><div id="ibxThreads" class="ibx-threads"></div></div>' +
       '<div class="ibx-chat"><div id="ibxHead" class="ibx-head muted">Chọn một hội thoại bên trái.</div><div id="ibxMsgs" class="ibx-msgs"></div>' +
-      '<div class="ibx-compose" id="ibxCompose" style="display:none"><div id="ibxImg"></div><div class="row" style="align-items:flex-end"><textarea id="ibxText" rows="2" placeholder="Nhập tin nhắn… (Enter để gửi, Shift+Enter xuống dòng, dán ảnh trực tiếp)"></textarea><input type="file" id="ibxFile" accept="image/png,image/jpeg,image/gif,image/webp" hidden><button class="ghost" id="ibxAttach" title="Gửi ảnh">🖼️</button><button id="ibxSend">Gửi</button></div></div></div>';
+      '<div class="ibx-compose" id="ibxCompose" style="display:none"><div id="ibxImg"></div><div class="row" style="align-items:flex-end"><textarea id="ibxText" rows="2" placeholder="Nhập tin nhắn… (Enter để gửi, Shift+Enter xuống dòng, dán ảnh trực tiếp)"></textarea><input type="file" id="ibxFile" accept="image/png,image/jpeg,image/gif,image/webp,.pdf,.doc,.docx,.xls,.xlsx" hidden><button class="ghost" id="ibxAttach" title="Gửi ảnh hoặc file Word, Excel, PDF">📎</button><button id="ibxSend">Gửi</button></div></div></div>';
     m.appendChild(wrap);
 
     function stopEs() { if (S.es) { try { S.es.close(); } catch (e) {} S.es = null; } }
@@ -3852,7 +3854,7 @@ export const INDEX_HTML = `<!doctype html>
     function msgBody(x) {
       var md = x.media || {}, h = "";
       var src = md.file ? "/v1/inbox/" + S.ch + "/file?p=" + encodeURIComponent(md.file) : (md.url || "");
-      if (x.contentType === "photo") h += src ? '<a href="' + esc(src) + '" target="_blank" rel="noopener noreferrer"><img class="ibx-photo" src="' + esc(src) + '" referrerpolicy="no-referrer" alt="ảnh" loading="lazy"></a>' : "[Hình ảnh]";
+      if (x.contentType === "photo") h += src ? '<button type="button" class="ibx-photo-link" title="Xem ảnh"><img class="ibx-photo" src="' + esc(src) + '" referrerpolicy="no-referrer" alt="ảnh" loading="lazy"></button>' : "[Hình ảnh]";
       else if (x.contentType === "sticker") h += md.url ? '<img class="ibx-sticker" src="' + esc(md.url) + '" referrerpolicy="no-referrer" alt="sticker">' : "[Sticker]";
       else if (x.contentType === "file") h += src ? '<a href="' + esc(src) + '" target="_blank" rel="noopener noreferrer">📎 ' + esc(md.name || "Tệp") + "</a>" : "📎 " + esc(md.name || "Tệp");
       else if (x.contentType === "voice") h += md.url ? '<audio controls preload="none" src="' + esc(md.url) + '"></audio>' : md.file ? '<a href="' + esc(src) + '" target="_blank" rel="noopener noreferrer">🎤 Tin nhắn thoại (tải về)</a>' : "[Tin nhắn thoại]";
@@ -3863,13 +3865,40 @@ export const INDEX_HTML = `<!doctype html>
       if (text) h += (h ? '<div style="margin-top:4px">' : "<div>") + ibxNl(text) + "</div>";
       return h;
     }
+    function showInboxPhoto(src) {
+      var dlg = document.createElement("dialog");
+      dlg.setAttribute("aria-label", "Xem ảnh trong Inbox");
+      dlg.style.cssText = "max-width:96vw;max-height:96vh;padding:10px;border:0;border-radius:10px;background:#171717;color:white";
+      var close = document.createElement("button");
+      close.type = "button"; close.textContent = "Đóng ×";
+      close.style.cssText = "display:block;margin:0 0 8px auto";
+      close.onclick = function () { dlg.close(); };
+      var img = document.createElement("img");
+      img.src = src; img.alt = "Ảnh trong hội thoại"; img.referrerPolicy = "no-referrer";
+      img.style.cssText = "display:block;max-width:94vw;max-height:85vh;object-fit:contain";
+      img.onerror = function () { img.style.display = "none"; note.textContent = "Không tải được ảnh từ nguồn Zalo."; };
+      var note = document.createElement("div");
+      dlg.appendChild(close); dlg.appendChild(img); dlg.appendChild(note);
+      dlg.addEventListener("click", function (e) { if (e.target === dlg) dlg.close(); });
+      dlg.addEventListener("close", function () { dlg.remove(); });
+      document.body.appendChild(dlg); dlg.showModal();
+    }
     function msgEl(x) {
       var out = x.direction === "out";
       var who = out ? (x.source === "web" ? "👤 " + (x.webUserName || "Nhân viên") : (IBX_SRC[x.source] || "")) : (S.cur && S.cur.kind === "group" ? x.senderName : "");
       if (out && x.source === "mcp" && x.webUserName) who = "🔌 Ứng dụng AI (" + x.webUserName + ")";
-      var q = x.meta && x.meta.quote && x.meta.quote.text ? '<div class="ibx-quote">↪ ' + esc(x.meta.quote.text) + "</div>" : "";
+      var ref = x.meta && x.meta.quote;
+      var q = ref && ref.text ? '<div class="ibx-quote">↪ ' + esc(ref.text) + "</div>" : "";
+      if (ref && ref.kind === "photo") {
+        var chosen = (S.msgs || []).find(function (m) { return m.msgId === ref.msgId && m.contentType === "photo"; });
+        var chosenMedia = chosen && chosen.media || {};
+        var chosenSrc = chosenMedia.file ? "/v1/inbox/" + S.ch + "/file?p=" + encodeURIComponent(chosenMedia.file) : (chosenMedia.url || "");
+        q = '<div class="ibx-quote">↪ Ảnh được trích dẫn' + (chosenSrc ? '<br><button type="button" class="ibx-photo-link" title="Xem ảnh được trích dẫn"><img class="ibx-photo" src="' + esc(chosenSrc) + '" referrerpolicy="no-referrer" alt="Ảnh được trích dẫn" loading="lazy" style="max-width:90px;max-height:90px"></button>' : '') + '</div>';
+      }
       var d = el("div", { "class": "ibx-msg " + (out ? "out" : "in"), "data-id": x.id });
       d.innerHTML = (who ? '<div class="ibx-who">' + esc(who) + "</div>" : "") + '<div class="ibx-bubble">' + q + msgBody(x) + "</div>" + rxHtml(x) + '<div class="ibx-time">' + esc(ibxTime(x.sentAt)) + "</div>";
+      var photoLink = d.querySelector("button.ibx-photo-link");
+      if (photoLink) photoLink.addEventListener("click", function () { showInboxPhoto(photoLink.querySelector("img").src); });
       if (x.canReact && !out) {
         var mine = myReaction(x);
         var bar = el("div", { "class": "ibx-react" });
@@ -3933,7 +3962,7 @@ export const INDEX_HTML = `<!doctype html>
       }).catch(function (e) { toast(e.message, true); });
     }
     function openThread(t) {
-      S.cur = t; S.img = null; renderImg();
+      S.cur = t; S.img = null; S.file = null; renderImg();
       Array.prototype.forEach.call(document.querySelectorAll(".ibx-item"), function (n) { n.classList.remove("active"); });
       renderThreads(); renderHead();
       $("#ibxCompose").style.display = "";
@@ -3958,15 +3987,29 @@ export const INDEX_HTML = `<!doctype html>
     }
     function renderImg() {
       var b = $("#ibxImg");
+      if (S.file) {
+        b.innerHTML = '<div class="row" style="margin-bottom:6px">📎 ' + esc(S.file.name) + ' <button class="ghost sm" id="ibxImgX">Bỏ file</button></div>';
+        $("#ibxImgX").onclick = function () { S.file = null; renderImg(); };
+        return;
+      }
       if (!S.img) { b.innerHTML = ""; return; }
       b.innerHTML = '<div class="row" style="margin-bottom:6px"><img src="' + S.img + '" style="max-height:90px;border-radius:8px"><button class="ghost sm" id="ibxImgX">Bỏ ảnh</button></div>';
       $("#ibxImgX").onclick = function () { S.img = null; renderImg(); };
     }
     function takeFile(f) {
       if (!f) return;
-      if (!/^image[/](png|jpeg|gif|webp)$/.test(f.type)) { toast("Chỉ gửi ảnh PNG/JPEG/GIF/WEBP", true); return; }
-      if (f.size > 10 * 1024 * 1024) { toast("Ảnh vượt 10 MB", true); return; }
-      var r = new FileReader(); r.onload = function () { S.img = r.result; renderImg(); }; r.readAsDataURL(f);
+      var isImage = /^image[/](png|jpeg|gif|webp)$/.test(f.type);
+      if (!isImage && !/\.(pdf|docx?|xlsx?)$/i.test(f.name)) { toast("Chỉ gửi ảnh, PDF, Word hoặc Excel", true); return; }
+      if (!f.size || f.size > 10 * 1024 * 1024) { toast("File phải từ 1 byte đến 10 MB", true); return; }
+      var r = new FileReader();
+      $("#ibxSend").disabled = true;
+      r.onload = function () {
+        if (isImage) { S.img = r.result; S.file = null; }
+        else { S.file = { name: f.name, contentB64: String(r.result).split(",")[1] || "" }; S.img = null; }
+        renderImg(); $("#ibxSend").disabled = false;
+      };
+      r.onerror = function () { $("#ibxSend").disabled = false; toast("Không đọc được file", true); };
+      r.readAsDataURL(f);
     }
     $("#ibxAttach").onclick = function () { $("#ibxFile").click(); };
     $("#ibxFile").onchange = function () { takeFile(this.files[0]); this.value = ""; };
@@ -3981,11 +4024,12 @@ export const INDEX_HTML = `<!doctype html>
       var text = $("#ibxText").value, body = {};
       if (text.trim()) body.text = text;
       if (S.img) body.image = S.img;
-      if (!body.text && !body.image) return;
+      if (S.file) body.file = S.file;
+      if (!body.text && !body.image && !body.file) return;
       var btn = $("#ibxSend"); btn.disabled = true;
       var tid = S.cur.threadId;
       api("/v1/inbox/" + S.ch + "/threads/" + encodeURIComponent(tid) + "/send", { method: "POST", body: body }).then(function () {
-        $("#ibxText").value = ""; S.img = null; renderImg();
+        $("#ibxText").value = ""; S.img = null; S.file = null; renderImg();
         // Tin mới tự về qua realtime; phòng khi mất kết nối realtime thì tải lại sau 2 giây
         setTimeout(function () { if (S.cur && S.cur.threadId === tid) api("/v1/inbox/" + S.ch + "/threads/" + encodeURIComponent(tid) + "/messages?limit=50").then(function (j) { if (S.cur && S.cur.threadId === tid && (j.messages || []).length !== S.msgs.length) { S.msgs = j.messages; renderMsgs(false); } }).catch(function () {}); }, 2000);
       }).catch(function (e) { toast(e.message, true); }).then(function () { btn.disabled = false; $("#ibxText").focus(); });
@@ -4031,7 +4075,7 @@ export const INDEX_HTML = `<!doctype html>
     var qTimer = null;
     $("#ibxQ").oninput = function () { var v = this.value.trim(); clearTimeout(qTimer); qTimer = setTimeout(function () { S.filter = v; loadThreads(); }, 300); };
     $("#ibxKind").onchange = function () { S.kind = this.value; loadThreads(); };
-    $("#ibxCh").onchange = function () { S.ch = this.value; S.cur = null; S.msgs = []; renderStatus(); renderHead(); $("#ibxMsgs").innerHTML = ""; $("#ibxCompose").style.display = "none"; loadThreads(); };
+    $("#ibxCh").onchange = function () { S.ch = this.value; S.cur = null; S.msgs = []; S.img = null; S.file = null; renderImg(); renderStatus(); renderHead(); $("#ibxMsgs").innerHTML = ""; $("#ibxCompose").style.display = "none"; loadThreads(); };
     $("#ibxSync").onclick = function () {
       var b = this; b.disabled = true;
       api("/v1/inbox/" + S.ch + "/sync-contacts", { method: "POST", body: {} })
@@ -4070,12 +4114,22 @@ export const INDEX_HTML = `<!doctype html>
         '<label>Gửi tới</label><select id="nwBy" style="width:100%"><option value="phone">Số điện thoại</option><option value="uid">uid cá nhân (mã hội thoại)</option><option value="group">ID nhóm</option></select>' +
         '<label id="nwLbl">Số điện thoại</label><input id="nwTo" style="width:100%" placeholder="0912345678">' +
         '<label>Nội dung</label><textarea id="nwText" rows="4" style="width:100%"></textarea>' +
-        '<label>Ảnh (không bắt buộc)</label><input id="nwFile" type="file" accept="image/png,image/jpeg,image/gif,image/webp">' +
+        '<label>Ảnh hoặc file Word, Excel, PDF (không bắt buộc, tối đa 10 MB)</label><input id="nwFile" type="file" accept="image/png,image/jpeg,image/gif,image/webp,.pdf,.doc,.docx,.xls,.xlsx">' +
         '<div id="nwMsg" style="margin-top:8px"></div><div class="dialog-actions"><button class="ghost" id="nwX">Hủy</button><button id="nwOk">Gửi</button></div>';
       document.body.appendChild(dlg);
-      var img = null;
+      var img = null, file = null;
       $("#nwBy", dlg).onchange = function () { $("#nwLbl", dlg).textContent = this.value === "phone" ? "Số điện thoại" : this.value === "uid" ? "uid cá nhân" : "ID nhóm"; };
-      $("#nwFile", dlg).onchange = function () { var f = this.files[0]; if (!f) { img = null; return; } var r = new FileReader(); r.onload = function () { img = r.result; }; r.readAsDataURL(f); };
+      $("#nwFile", dlg).onchange = function () {
+        var f = this.files[0]; img = null; file = null;
+        if (!f) return;
+        var isImage = /^image[/](png|jpeg|gif|webp)$/.test(f.type);
+        if (!isImage && !/\.(pdf|docx?|xlsx?)$/i.test(f.name)) { toast("Chỉ gửi ảnh, PDF, Word hoặc Excel", true); this.value = ""; return; }
+        if (!f.size || f.size > 10 * 1024 * 1024) { toast("File phải từ 1 byte đến 10 MB", true); this.value = ""; return; }
+        var r = new FileReader(); $("#nwOk", dlg).disabled = true;
+        r.onload = function () { if (isImage) img = r.result; else file = { name: f.name, contentB64: String(r.result).split(",")[1] || "" }; $("#nwOk", dlg).disabled = false; };
+        r.onerror = function () { $("#nwOk", dlg).disabled = false; toast("Không đọc được file", true); };
+        r.readAsDataURL(f);
+      };
       $("#nwX", dlg).onclick = function () { dlg.close(); dlg.remove(); };
       $("#nwOk", dlg).onclick = function () {
         var by = $("#nwBy", dlg).value, to = $("#nwTo", dlg).value.trim(), body = {};
@@ -4083,6 +4137,7 @@ export const INDEX_HTML = `<!doctype html>
         if (by === "phone") body.phone = to; else { body.to = to; body.peerKind = by === "group" ? "group" : "direct"; }
         if ($("#nwText", dlg).value.trim()) body.text = $("#nwText", dlg).value;
         if (img) body.image = img;
+        if (file) body.file = file;
         $("#nwOk", dlg).disabled = true;
         api("/v1/inbox/" + S.ch + "/new", { method: "POST", body: body }).then(function (j) {
           dlg.close(); dlg.remove(); toast("Đã gửi");

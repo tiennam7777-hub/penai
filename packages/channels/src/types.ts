@@ -25,6 +25,8 @@ export interface InboundMessage {
   /** direct | group */
   peerKind: "direct" | "group";
   media?: InboundMedia[];
+  /** Tin Zalo được khách trích dẫn; mã ảnh dùng để đối chiếu đúng ảnh đã gửi. */
+  quoted?: { msgId: string; kind: "photo" | "other" };
   /**
    * Group: người gửi có @mention/reply/lệnh nhắm vào bot không. Adapter set khi
    * pass-through mọi tin (zalo_personal) để runtime gate theo require_mention.
@@ -201,6 +203,8 @@ export interface ChannelContact {
   type: "direct" | "group";
   name: string;
   contactAlias?: string;
+  /** Alias-only peers are not necessarily Zalo friends. */
+  isContact?: boolean;
   avatar?: string;
   phone?: string;
   memberCount?: number;
