@@ -7,5 +7,5 @@ export function isFreshCustomerRequest(raw: string): boolean {
   if (/[?？]/u.test(text)) return true;
   if (text.split(/\s+/u).length > 1 && /(?:không|chưa)(?:[?.!]|$)/iu.test(text)) return true;
   if (/(?:^|\s)(?:gì|sao|bao nhiêu|mấy|nào|đâu|khi nào|được không|có không)(?=\s|[,.!]|$)/iu.test(text)) return true;
-  return /^(?:(?:anh|chị|shop|bên anh|bên chị)\s+)?(?:cho|gửi|báo|kiểm tra|xem|tư vấn|làm|đổi|sửa|đặt|hỏi|muốn|cần|nhờ|giúp|xin|giá|mẫu|chậu)(?=\s|[,.!]|$)/iu.test(text);
+  return /^(?:(?:anh|chị|shop|bên anh|bên chị)\s+)?(?:cho|gửi|báo|kiểm tra|xem|tư vấn|làm|đổi|sửa|đặt|hỏi|muốn|cần|nhờ|giúp|xin|giá)(?=\s|[,.!]|$)/iu.test(text);
 }
