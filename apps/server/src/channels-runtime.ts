@@ -19,6 +19,7 @@ import {
   getInboxThreadAgentBlock,
   resumeAgentAfterCustomerRequest,
   getInboxMessageByMsgId,
+  listInboxMessages,
   getPersonContextData,
   loadMessages,
   type EnabledChannel,
@@ -46,6 +47,7 @@ import { isPersonalChannelKind } from "@penai/channels";
 import { classifyOrchidSalesScope } from "./orchid-sales-scope.js";
 import { hasPersonalAddressMismatch, requiresPersonalAddressGuard } from "./persona-reply-guard.js";
 import { isFreshCustomerRequest } from "./recall-policy.js";
+import { orchidHandoffContext } from "./orchid-handoff-context.js";
 
 /** Handler + channel theo channelId — cho webhook route (WhatsApp, Teams) dùng. */
 export const channelHandlers = new Map<
@@ -915,7 +917,7 @@ export function makeInboundHandler(
       isZaloGroup && msg.mentioned
         ? joinGroupChatter(chatterKey, msg.senderId, msg.senderName, msg.text)
         : msg.text;
-    const userMessage = mergeMediaText(
+    const latestUserMessage = mergeMediaText(
       quotedPhotoDataUrl
         ? `[Khách đang trả lời trực tiếp ảnh đã gửi. Ảnh đi kèm lượt này chính là ảnh khách chọn; không suy đoán theo vị trí trong album.]\n${inboundText}`
         : inboundText,
@@ -923,6 +925,20 @@ export function makeInboundHandler(
       savedImages.map((s) => s.name),
       savedDocs.map((s) => s.name),
     );
+    // Inbox giữ cả những tin nhân viên/khách trao đổi trước khi Agent được duyệt.
+    // Session của Agent có thể chưa tồn tại lúc đó, nên nạp đúng thread trước khi trả lời.
+    const handoffContext = agent.key === "nhan-vien-kinh-doanh-orchids-world" &&
+      msg.channelKind === "zalo_personal"
+      ? await listInboxMessages(db, ctx, channel.id, msg.chatKey.slice(msg.chatKey.indexOf(":") + 1), { limit: 30 })
+        .then(orchidHandoffContext)
+        .catch((error) => {
+          logger.warn(`Không đọc được ngữ cảnh Inbox khi tiếp quản: ${String(error)}`);
+          return "";
+        })
+      : "";
+    const userMessage = handoffContext
+      ? `${handoffContext}\n\n[YÊU CẦU MỚI NHẤT CẦN TRẢ LỜI]\n${latestUserMessage}`
+      : latestUserMessage;
     // Vision = ảnh lượt này + các ảnh gần đây của session (đọc lại từ đĩa) —
     // người dùng gửi ảnh trước, nhắn yêu cầu sau thì model vẫn "nhìn thấy" ảnh.
     let userImages = quotedPhotoDataUrl ? [quotedPhotoDataUrl] : await recentImagesAsDataUrls(sessionId);
