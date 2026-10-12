@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gt, ne, sql } from "drizzle-orm";
 import type { WorkspaceContext } from "@penai/shared";
 import type { Db } from "./client.js";
 import { withWorkspace } from "./context.js";
@@ -190,19 +190,37 @@ export async function createPairing(
   code: string,
   externalUserId: string,
   ttlMinutes = 60,
-): Promise<void> {
-  await withWorkspace(db, ctx, (tx) =>
-    tx
-      .insert(channelPairings)
-      .values({
-        workspaceId: ctx.workspaceId,
-        channelId,
-        code,
-        externalUserId,
-        status: "pending",
-        expiresAt: new Date(Date.now() + ttlMinutes * 60_000),
-      }),
-  );
+): Promise<{ code: string; created: boolean }> {
+  return withWorkspace(db, ctx, async (tx) => {
+    // Serialize messages from this sender, including messages handled by other workers.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${channelId}), hashtext(${externalUserId}))`);
+    const pending = await tx.select().from(channelPairings).where(and(
+      eq(channelPairings.channelId, channelId),
+      eq(channelPairings.externalUserId, externalUserId),
+      eq(channelPairings.status, "pending"),
+    )).orderBy(desc(channelPairings.createdAt));
+    const now = new Date();
+    const current = pending.find((row) => row.expiresAt > now);
+    if (pending.length) {
+      await tx.delete(channelPairings)
+        .where(and(
+          eq(channelPairings.channelId, channelId),
+          eq(channelPairings.externalUserId, externalUserId),
+          eq(channelPairings.status, "pending"),
+          ...(current ? [ne(channelPairings.id, current.id)] : []),
+        ));
+    }
+    if (current) return { code: current.code, created: false };
+    await tx.insert(channelPairings).values({
+      workspaceId: ctx.workspaceId,
+      channelId,
+      code,
+      externalUserId,
+      status: "pending",
+      expiresAt: new Date(now.getTime() + ttlMinutes * 60_000),
+    });
+    return { code, created: true };
+  });
 }
 
 export async function isPaired(
@@ -233,8 +251,8 @@ export async function approvePairing(
   channelId: string,
   code: string,
 ): Promise<{ id: string; externalUserId: string | null } | null> {
-  const rows = await withWorkspace(db, ctx, (tx) =>
-    tx
+  const rows = await withWorkspace(db, ctx, async (tx) => {
+    const approved = await tx
       .update(channelPairings)
       .set({ status: "approved", approvedAt: new Date() })
       .where(
@@ -242,13 +260,22 @@ export async function approvePairing(
           eq(channelPairings.channelId, channelId),
           eq(channelPairings.code, code),
           eq(channelPairings.status, "pending"),
+          gt(channelPairings.expiresAt, new Date()),
         ),
       )
       .returning({
         id: channelPairings.id,
         externalUserId: channelPairings.externalUserId,
-      }),
-  );
+      });
+    if (approved[0]?.externalUserId) {
+      await tx.delete(channelPairings).where(and(
+        eq(channelPairings.channelId, channelId),
+        eq(channelPairings.externalUserId, approved[0].externalUserId),
+        eq(channelPairings.status, "pending"),
+      ));
+    }
+    return approved;
+  });
   return rows[0] ?? null;
 }
 
@@ -257,7 +284,7 @@ export async function listPendingPairings(db: Db, ctx: WorkspaceContext) {
     tx
       .select()
       .from(channelPairings)
-      .where(eq(channelPairings.status, "pending")),
+      .where(and(eq(channelPairings.status, "pending"), gt(channelPairings.expiresAt, new Date()))),
   );
 }
 

@@ -21,6 +21,16 @@ function setup(max = 50) {
 }
 
 describe("Zalo album delivery", () => {
+  it("forwards the exact quoted photo ID instead of inferring album position", async () => {
+    const { handle, inbound, logs } = setup();
+    await handle({ type: ThreadType.User, threadId: "customer", isSelf: false,
+      data: { msgId: "reply-1", uidFrom: "customer", content: "Lấy màu này",
+        msgType: "webchat", quote: { globalMsgId: 104, cliMsgType: 32, ownerId: "self", msg: "" } } });
+    expect(inbound.mock.calls[0]?.[0]).toMatchObject({
+      text: "Lấy màu này", quoted: { msgId: "104", kind: "photo" },
+    });
+    expect(logs[0]?.meta?.quote).toMatchObject({ msgId: "104", kind: "photo" });
+  });
   it.each([10, 20])("sends %i photos as one native album and logs each photo with its own ID", async (count) => {
     const { channel, send, logs } = setup();
     const paths = Array.from({ length: count }, (_, i) => `/image-${i}.jpg`);

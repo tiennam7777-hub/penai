@@ -11,6 +11,7 @@ import {
   createPairing,
   isPaired,
   approvePairing,
+  listPendingPairings,
   upsertContact,
   listContacts,
   type DbHandle,
@@ -75,6 +76,26 @@ describe("channels + pairing + contacts (RLS)", () => {
     const approved = await approvePairing(dbh.db, ctxA(), ch.id, "ABCD2345");
     expect(approved?.externalUserId).toBe("user-9");
     expect(await isPaired(dbh.db, ctxA(), ch.id, "user-9")).toBe(true);
+  });
+
+  it("chỉ giữ một yêu cầu đang chờ cho mỗi người trên mỗi kênh", async () => {
+    const ch = (await listChannels(dbh.db, ctxA()))[0]!;
+    const first = await createPairing(dbh.db, ctxA(), ch.id, "FIRST123", "repeat-user");
+    const second = await createPairing(dbh.db, ctxA(), ch.id, "SECOND12", "repeat-user");
+    expect(first).toEqual({ code: "FIRST123", created: true });
+    expect(second).toEqual({ code: "FIRST123", created: false });
+    expect((await listPendingPairings(dbh.db, ctxA())).filter((p) => p.externalUserId === "repeat-user")).toHaveLength(1);
+    await approvePairing(dbh.db, ctxA(), ch.id, "FIRST123");
+    expect((await listPendingPairings(dbh.db, ctxA())).filter((p) => p.externalUserId === "repeat-user")).toHaveLength(0);
+  });
+
+  it("mã hết hạn không hiện chờ duyệt và không được duyệt", async () => {
+    const ch = (await listChannels(dbh.db, ctxA()))[0]!;
+    await createPairing(dbh.db, ctxA(), ch.id, "EXPIRED1", "expired-user", -1);
+    expect((await listPendingPairings(dbh.db, ctxA())).filter((p) => p.externalUserId === "expired-user")).toHaveLength(0);
+    expect(await approvePairing(dbh.db, ctxA(), ch.id, "EXPIRED1")).toBeNull();
+    expect(await createPairing(dbh.db, ctxA(), ch.id, "RENEW123", "expired-user"))
+      .toEqual({ code: "RENEW123", created: true });
   });
 
   it("contacts upsert + dedup theo (workspace, kind, external_id)", async () => {

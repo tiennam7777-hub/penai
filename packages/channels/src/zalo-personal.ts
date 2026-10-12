@@ -67,6 +67,7 @@ export interface ZaloPersonalTarget {
   type: "direct" | "group";
   name: string;
   contactAlias?: string;
+  isContact?: boolean;
   avatar?: string;
   phone?: string;
   memberCount?: number;
@@ -628,6 +629,16 @@ export class ZaloPersonalChannel implements Channel {
       });
     }
 
+    // Zalo also permits a personal alias for a person who is not a friend.
+    // Include them in sync so an existing Inbox conversation can display its alias.
+    if (aliases) {
+      const friendIds = new Set(friends.map((friend) => String(friend.userId)));
+      for (const [id, alias] of aliases) {
+        if (!id || !alias || friendIds.has(id)) continue;
+        targets.push({ id, type: "direct", name: "", contactAlias: alias, isContact: false });
+      }
+    }
+
     const groups = await this.api.getAllGroups();
     const groupIds = Object.keys(groups.gridVerMap ?? {});
     for (let i = 0; i < groupIds.length; i += 10) {
@@ -645,7 +656,7 @@ export class ZaloPersonalChannel implements Channel {
         });
       }
     }
-    return targets.sort((a, b) => a.name.localeCompare(b.name, "vi"));
+    return targets.sort((a, b) => (a.contactAlias || a.name).localeCompare(b.contactAlias || b.name, "vi"));
   }
 
   /** Đã đăng nhập Zalo và sẵn sàng gửi. */
@@ -672,14 +683,16 @@ export class ZaloPersonalChannel implements Channel {
           type: t.type,
           name: t.name,
           ...(t.contactAlias !== undefined ? { contactAlias: t.contactAlias } : {}),
+          ...(t.isContact !== undefined ? { isContact: t.isContact } : {}),
           ...(t.avatar ? { avatar: t.avatar } : {}),
           ...(t.phone ? { phone: t.phone } : {}),
           ...(t.memberCount !== undefined ? { memberCount: t.memberCount } : {}),
         }));
-        this.deps.onContactsSynced?.(items);
+        await this.deps.onContactsSynced?.(items);
         const groups = items.filter((i) => i.type === "group").length;
-        logger.info(`zalo.contacts_synced: channel "${this.name}" ${items.length - groups} bạn bè, ${groups} nhóm`);
-        return { friends: items.length - groups, groups };
+        const friends = items.filter((i) => i.type === "direct" && i.isContact !== false).length;
+        logger.info(`zalo.contacts_synced: channel "${this.name}" ${friends} bạn bè, ${items.length - friends - groups} tên cá nhân hóa khác, ${groups} nhóm`);
+        return { friends, groups };
       } finally {
         this.contactSync = null;
       }
@@ -1066,8 +1079,15 @@ export class ZaloPersonalChannel implements Channel {
       message.data.content,
       String(message.data.msgType ?? ""),
     );
+    const quote = message.data.quote;
+    const quotedMsgId = quote?.globalMsgId != null ? String(quote.globalMsgId) : "";
+    const quoted = quotedMsgId
+      ? { msgId: quotedMsgId, kind: Number(quote?.cliMsgType) === 32 ? "photo" as const : "other" as const }
+      : undefined;
     if (!text.trim() && media.length === 0) return;
     const threadType = message.type;
+    const blockReplies = new Map<string, Promise<boolean>>();
+    const replyKey = (value: string) => value.trim().replace(/\s+/g, " ");
 
     const hooks = {
       onStatus: (status: string) => {
@@ -1076,9 +1096,14 @@ export class ZaloPersonalChannel implements Channel {
         }
       },
       onBlockReply: (blockText: string) => {
-        void this.sendText(threadId, threadType, blockText).catch((error) =>
-          this.deps.onError?.(error as Error),
-        );
+        const key = replyKey(blockText);
+        if (!key || blockReplies.has(key)) return;
+        blockReplies.set(key, this.sendText(threadId, threadType, blockText)
+          .then(() => true)
+          .catch((error) => {
+            this.deps.onError?.(error as Error);
+            return false;
+          }));
       },
     };
 
@@ -1094,6 +1119,7 @@ export class ZaloPersonalChannel implements Channel {
           peerKind,
           mentioned,
           ...(media.length ? { media } : {}),
+          ...(quoted ? { quoted } : {}),
         },
         hooks,
       );
@@ -1105,7 +1131,10 @@ export class ZaloPersonalChannel implements Channel {
           `zalo.pairing_silent: ${chatKey} chưa duyệt — đã cấp mã chờ admin, không nhắn lại`,
         );
       } else if (result.kind === "reply") {
-        if (result.text.trim()) await this.sendText(threadId, threadType, result.text);
+        if (result.text.trim()) {
+          const prior = blockReplies.get(replyKey(result.text));
+          if (!prior || !(await prior)) await this.sendText(threadId, threadType, result.text);
+        }
         if (result.media?.length) {
           await this.sendFiles(threadId, threadType, result.media);
         }
@@ -1144,12 +1173,14 @@ export class ZaloPersonalChannel implements Channel {
       const meta: Record<string, unknown> = {};
       const data = message.data as unknown as {
         mentions?: Array<{ uid: unknown }>;
-        quote?: { msg?: unknown; ownerId?: unknown };
+        quote?: { msg?: unknown; ownerId?: unknown; globalMsgId?: unknown; cliMsgType?: unknown };
       };
       if (data.quote) {
         meta.quote = {
           ownerId: String(data.quote.ownerId ?? ""),
           text: typeof data.quote.msg === "string" ? data.quote.msg.slice(0, 300) : "",
+          msgId: data.quote.globalMsgId == null ? "" : String(data.quote.globalMsgId),
+          kind: Number(data.quote.cliMsgType) === 32 ? "photo" : "other",
         };
       }
       if (Array.isArray(data.mentions) && data.mentions.length) {
