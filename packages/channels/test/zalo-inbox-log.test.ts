@@ -139,7 +139,8 @@ it("ảnh kèm câu hỏi vẫn lưu inbound nhưng không phát text, typing ho
   };
   internals.account = { id: "me", name: "Shop" };
   internals.isThreadEnabled = () => true;
-  internals.collectMedia = async () => [];
+  internals.collectMedia = async (_content: unknown, msgType: string) =>
+    msgType === "chat.file" ? [{ kind: "document", name: "mau.jpg", dataB64: "a" }] : [];
   const handle = (channel as unknown as { handleMessage: (m: unknown) => Promise<void> }).handleMessage.bind(channel);
   await handle({
     type: ThreadType.User, threadId: "customer", isSelf: false,
@@ -147,6 +148,13 @@ it("ảnh kèm câu hỏi vẫn lưu inbound nhưng không phát text, typing ho
       content: { title: "Mẫu này giá bao nhiêu?" }, msgType: "chat.photo", ts: String(Date.now()) },
   });
   expect(inboundMedia).toMatchObject([{ kind: "photo" }]);
+  expect(sent).toEqual([]);
+  await handle({
+    type: ThreadType.User, threadId: "customer", isSelf: false,
+    data: { msgId: "photo-file-2", cliMsgId: "cli-2", uidFrom: "customer", dName: "Khách",
+      content: { title: "mau.jpg" }, msgType: "chat.file", ts: String(Date.now()) },
+  });
+  expect(inboundMedia).toMatchObject([{ kind: "document", name: "mau.jpg" }, { kind: "photo" }]);
   expect(sent).toEqual([]);
 });
 

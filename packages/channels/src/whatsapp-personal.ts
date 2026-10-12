@@ -976,9 +976,15 @@ export class WhatsappPersonalChannel implements Channel {
     const parsed = await this.toLog(m, { download: live && !m.key.fromMe });
     if (!parsed) return;
     const { entry, chatKey, media, mentioned } = parsed;
-    const photoMessage = entry.contentType === "photo" || media.some((item) => item.kind === "photo");
+    const photoMessage = entry.contentType === "photo" || media.some((item) => item.kind === "photo" ||
+      (item.kind === "document" && /\.(png|jpe?g|gif|webp)$/i.test(item.name ?? "")));
     if (photoMessage && !media.some((item) => item.kind === "photo")) {
       media.push({ kind: "photo", note: "[Người dùng gửi ảnh nhưng không tải được]" });
+    }
+    if (photoMessage) {
+      const pending = this.autoReactTimers.get(entry.threadId);
+      if (pending) clearTimeout(pending);
+      this.autoReactTimers.delete(entry.threadId);
     }
     try {
       this.deps.onMessageLog?.(entry);

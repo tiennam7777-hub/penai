@@ -807,6 +807,13 @@ export class ZaloPersonalChannel implements Channel {
   }
 
   /** Khách nhắn (cá nhân + nhóm) → sau 1–4 giây thả cảm xúc vào tin CUỐI của đợt nhắn. */
+  private cancelAutoReaction(peerKind: "direct" | "group", threadId: string): void {
+    const key = `${peerKind}:${threadId}`;
+    const timer = this.autoReactTimers.get(key);
+    if (timer) clearTimeout(timer);
+    this.autoReactTimers.delete(key);
+  }
+
   private scheduleAutoReaction(message: Message, peerKind: "direct" | "group", threadId: string): void {
     const icon = this.autoReaction;
     if (!icon || !this.api) return;
@@ -1041,12 +1048,19 @@ export class ZaloPersonalChannel implements Channel {
     const senderId = String(message.data.uidFrom || message.threadId);
     const senderName =
       message.data.dName || (message.isSelf ? (this.account?.name ?? senderId) : senderId);
-    const photoMessage = zaloMediaKind(String(message.data.msgType ?? ""), "") === "photo";
+    const rawContent = message.data.content;
+    const rawContentType = rawContent && typeof rawContent === "object"
+      ? String((rawContent as Record<string, unknown>).type ?? "") : "";
+    const mediaKind = zaloMediaKind(String(message.data.msgType ?? ""), rawContentType);
+    let photoMessage = mediaKind === "photo" || mediaKind === "sticker";
 
     // Inbox: ghi MỌI tin (kể cả thread chưa cho agent trả lời). Tin do PenAI
     // tự gửi (agent/web/MCP) đã ghi lúc gửi → bỏ qua bản dội lại.
     await this.logListenerMessage(message, peerKind, threadId, senderId, senderName);
-    if (!message.isSelf && !photoMessage) this.scheduleAutoReaction(message, peerKind, threadId);
+    if (!message.isSelf) {
+      if (photoMessage) this.cancelAutoReaction(peerKind, threadId);
+      else this.scheduleAutoReaction(message, peerKind, threadId);
+    }
 
     // Chế độ an toàn: LUÔN ghi nhận ai/nhóm nào nhắn tới (metadata, không lưu
     // nội dung), rồi im lặng bỏ qua mọi thread chưa được chỉ định làm demo —
@@ -1080,6 +1094,11 @@ export class ZaloPersonalChannel implements Channel {
       message.data.content,
       String(message.data.msgType ?? ""),
     );
+    if (!photoMessage && media.some((item) => item.kind === "photo" ||
+      (item.kind === "document" && /\.(png|jpe?g|gif|webp)$/i.test(item.name ?? "")))) {
+      photoMessage = true;
+      this.cancelAutoReaction(peerKind, threadId);
+    }
     if (photoMessage && !media.some((m) => m.kind === "photo")) {
       media.push({ kind: "photo", note: "[Người dùng gửi ảnh nhưng không tải được]" });
     }
