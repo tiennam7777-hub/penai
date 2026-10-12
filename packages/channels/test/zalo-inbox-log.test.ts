@@ -161,6 +161,34 @@ it("ảnh kèm câu hỏi được trả lời, còn ảnh không chữ thì im 
   expect(sent).toEqual([]);
 });
 
+it("câu hỏi giá trích dẫn ảnh đã gửi vẫn tới Agent và được trả lời", async () => {
+  const sent: string[] = [];
+  let inbound: { text: string; quoted?: { msgId: string; kind: string } } | undefined;
+  const channel = new ZaloPersonalChannel({
+    id: "zp-quoted-question", name: "Zalo", token: "{}", config: {}, requirePairing: false,
+    onInbound: async (message) => {
+      inbound = message;
+      return { kind: "reply", text: "Chậu 8 cành giá 1.600.000đ." };
+    },
+  });
+  const internals = channel as unknown as Record<string, unknown>;
+  internals.api = { sendMessage: async (message: { msg: string }) => {
+    sent.push(message.msg); return { message: { msgId: "sent" } };
+  } };
+  internals.account = { id: "me", name: "Shop" };
+  internals.isThreadEnabled = () => true;
+  const handle = (channel as unknown as { handleMessage: (m: unknown) => Promise<void> }).handleMessage.bind(channel);
+  await handle({
+    type: ThreadType.User, threadId: "customer", isSelf: false,
+    data: { msgId: "question-1", cliMsgId: "cli-1", uidFrom: "customer", dName: "Khách",
+      content: "Mẫu này, 8 cành bao nhiêu", msgType: "chat.text", ts: String(Date.now()),
+      quote: { globalMsgId: 8367577646050, cliMsgType: 32 } },
+  });
+  expect(inbound?.text).toBe("Mẫu này, 8 cành bao nhiêu");
+  expect(inbound?.quoted).toEqual({ msgId: "8367577646050", kind: "photo" });
+  expect(sent).toEqual(["Chậu 8 cành giá 1.600.000đ."]);
+});
+
 it("thu hồi tin từ chính tài khoản Zalo báo đúng hội thoại và mã tin cho server, không gọi agent", async () => {
   const undone: Array<{ threadId: string; peerKind: string; targetMsgId: string }> = [];
   let inbound = 0;

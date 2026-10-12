@@ -19,6 +19,7 @@ describe("giữ đúng vai anh nói với em", () => {
   it("giữ câu đúng vai và không áp luật này cho hồ sơ khác", () => {
     expect(hasPersonalAddressMismatch("Ừ em, khách chọn mẫu nào thì báo anh nhé.", "anh", "em")).toBe(false);
     expect(hasPersonalAddressMismatch("Anh kiểm tra hoa rồi báo em.", "anh", "em")).toBe(false);
+    expect(hasPersonalAddressMismatch("Anh làm màu đó cho em. Chậu 8 cành giá 1.600.000đ. Em gửi Anh địa chỉ giao nhé.", "anh", "em")).toBe(false);
     expect(hasPersonalAddressMismatch("Dạ, em sẽ kiểm tra.", "em", "anh")).toBe(false);
   });
 });

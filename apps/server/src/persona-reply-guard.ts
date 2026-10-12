@@ -10,5 +10,8 @@ export function hasPersonalAddressMismatch(text: string, selfAddress: string | n
   const reply = text.trim();
   return /^[\s\p{P}\p{S}]*(?:dạ|vâng)(?:\s|[,.:;!?]|$)/iu.test(reply) ||
     /\b(?:bên|tụi|chúng)\s+em\b/iu.test(reply) ||
-    /\b(?:em|e)\s+(?:sẽ|xin|đã|đang|vừa|gửi|báo|kiểm\s+tra|làm|hỗ\s+trợ|giúp|cảm\s+ơn|xác\s+nhận|nhận|thấy|nghĩ|hiểu|hỏi|chờ)(?=\s|[,.:;!?]|$)/iu.test(reply);
+    // Chỉ chặn khi cả câu mở đầu bằng vai "em". Trong câu đúng vai
+    // "Anh báo em. Em gửi Anh địa chỉ nhé", "Em gửi" là lời nhờ khách,
+    // không phải AI tự xưng em.
+    /^[\s\p{P}\p{S}]*(?:em|e)\s+(?:sẽ|xin|đã|đang|vừa|gửi|báo|kiểm\s+tra|làm|hỗ\s+trợ|giúp|cảm\s+ơn|xác\s+nhận|nhận|thấy|nghĩ|hiểu|hỏi|chờ)(?=\s|[,.:;!?]|$)/iu.test(reply);
 }
