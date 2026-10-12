@@ -1665,7 +1665,7 @@ export const INDEX_HTML = `<!doctype html>
           if (!rows.length) return;
           zaloC.style.display = "";
           zaloC.innerHTML = '<h3>Zalo — nhóm/thread chờ duyệt <span class="pill" style="margin-left:6px">' + rows.length + '</span></h3>' +
-            '<div class="muted" style="font-size:.78rem;margin-bottom:6px">Bấm Duyệt một lần để mở hội thoại. Cá nhân được duyệt ngay; trong nhóm AI chỉ trả lời khi được gọi. Thao tác này không gửi lời chào.</div>';
+            '<div class="muted" style="font-size:.78rem;margin-bottom:6px">Zalo: bấm Duyệt một lần để mở hội thoại và duyệt cá nhân ngay; trong nhóm AI chỉ trả lời khi được gọi. Thao tác này không gửi lời chào.</div>';
           zaloC.appendChild(table(["Kênh", "Loại", "Tên", "Id", "Tin nhắn", "Lần cuối", ""], rows, function (r) {
             var p = r.p;
             var tr = el("tr");
@@ -1681,7 +1681,9 @@ export const INDEX_HTML = `<!doctype html>
             ok.onclick = function () {
               ok.disabled = true;
               ok.textContent = "Đang duyệt...";
-              api("/v1/channels/" + r.ch.id + "/personal/approve-observed", { method: "POST", body: { chatKey: p.chatKey } })
+              (r.ch.kind === "zalo_personal"
+                ? api("/v1/channels/" + r.ch.id + "/personal/approve-observed", { method: "POST", body: { chatKey: p.chatKey } })
+                : api("/v1/channels/" + r.ch.id + "/personal/demo-threads", { method: "PUT", body: { threads: r.demoThreads.concat([p.chatKey]) } }))
                 .then(function () { toast("Đã duyệt " + p.name); loadZaloPending(); })
                 .catch(function (e) { ok.disabled = false; ok.textContent = "Duyệt"; toast(e.message, 1); });
             };
