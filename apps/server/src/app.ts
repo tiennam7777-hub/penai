@@ -44,9 +44,11 @@ import {
   mapChannelSession,
   updateChannel,
   approvePairing,
+  approveObservedZaloThread,
   listPendingPairings,
   listContacts,
   listInboxObservedPeers,
+  upsertInboxObservedPeer,
   listContactsOverview,
   getContactOverview,
   findContactIdentity,
@@ -490,7 +492,11 @@ const ZaloDemoThreadsBody = z.object({
         .string()
         .regex(/^(group|direct):\S+$/, 'Mỗi thread phải có dạng "group:<id>" hoặc "direct:<id>"'),
     )
-    .max(20),
+    .max(10_000),
+});
+
+const ApproveObservedZaloThreadBody = z.object({
+  chatKey: z.string().regex(/^(direct|group):[^:]+$/),
 });
 
 const UpdateAgentBody = z.object({
@@ -2075,6 +2081,31 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     // Cập nhật nóng trên instance đang chạy — không restart, không đăng nhập lại
     runtime.setDemoThreads(parsed.data.threads);
     return { demoThreads: runtime.demoThreads() };
+  });
+
+  app.post(`/v1/channels/:id/${seg}/approve-observed`, async (req, reply) => {
+    if (!requireRole(req, reply, "ws_admin")) return;
+    const { id } = req.params as { id: string };
+    const parsed = ApproveObservedZaloThreadBody.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: zodMessage(parsed.error) });
+    const runtime = await getZaloPersonalRuntime(req, reply, id);
+    if (!runtime) return;
+    const peer = runtime.listObserved().find((item) => item.chatKey === parsed.data.chatKey);
+    if (peer) {
+      await upsertInboxObservedPeer(db, req.authCtx, id, {
+        chatKey: peer.chatKey,
+        threadId: peer.threadId,
+        kind: peer.type,
+        name: peer.name,
+        lastSenderId: peer.lastSenderId,
+        lastSenderName: peer.lastSenderName,
+        countMessage: false,
+      });
+    }
+    const result = await approveObservedZaloThread(db, req.authCtx, id, parsed.data.chatKey);
+    if (!result) return reply.code(404).send({ error: "Hội thoại Zalo chưa được quan sát" });
+    runtime.setDemoThreads(result.demoThreads);
+    return { approved: true, kind: result.kind, demoThreads: result.demoThreads };
   });
   }
 

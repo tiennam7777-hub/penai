@@ -1,4 +1,5 @@
 import { and, desc, eq, gt, ne, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import type { WorkspaceContext } from "@penai/shared";
 import type { Db } from "./client.js";
 import { withWorkspace } from "./context.js";
@@ -194,6 +195,12 @@ export async function createPairing(
   return withWorkspace(db, ctx, async (tx) => {
     // Serialize messages from this sender, including messages handled by other workers.
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${channelId}), hashtext(${externalUserId}))`);
+    const approved = await tx.select({ id: channelPairings.id }).from(channelPairings).where(and(
+      eq(channelPairings.channelId, channelId),
+      eq(channelPairings.externalUserId, externalUserId),
+      eq(channelPairings.status, "approved"),
+    )).limit(1);
+    if (approved.length) return { code: "", created: false };
     const pending = await tx.select().from(channelPairings).where(and(
       eq(channelPairings.channelId, channelId),
       eq(channelPairings.externalUserId, externalUserId),
@@ -522,4 +529,54 @@ export async function listInboxObservedPeers(
       .orderBy(sql`${zaloObservedPeers.lastSeenAt} DESC`)
       .limit(500),
   );
+}
+
+/** Duyệt một hội thoại đã quan sát: DM được ghép nối ngay; nhóm được mở theo thread. Không gửi tin. */
+export async function approveObservedZaloThread(
+  db: Db,
+  ctx: WorkspaceContext,
+  channelId: string,
+  chatKey: string,
+): Promise<{ demoThreads: string[]; kind: "direct" | "group" } | null> {
+  const match = /^(direct|group):([^:]+)$/.exec(chatKey);
+  if (!match) return null;
+  return withWorkspace(db, ctx, async (tx) => {
+    const [peer] = await tx.select().from(zaloObservedPeers).where(and(
+      eq(zaloObservedPeers.channelId, channelId),
+      eq(zaloObservedPeers.chatKey, chatKey),
+    )).limit(1);
+    if (!peer || peer.kind !== match[1] || peer.threadId !== match[2]) return null;
+    const [channel] = await tx.select().from(channels).where(eq(channels.id, channelId)).for("update").limit(1);
+    if (!channel || channel.kind !== "zalo_personal") return null;
+    const config = (channel.config as Record<string, unknown>) ?? {};
+    const threads = Array.isArray(config.demo_threads)
+      ? config.demo_threads.filter((value): value is string => typeof value === "string")
+      : [];
+    const demoThreads = [...new Set([...threads, chatKey])];
+    await tx.update(channels).set({ config: { ...config, demo_threads: demoThreads } }).where(eq(channels.id, channelId));
+    if (match[1] === "direct") {
+      const uid = match[2]!;
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${channelId}), hashtext(${uid}))`);
+      const [approved] = await tx.select({ id: channelPairings.id }).from(channelPairings).where(and(
+        eq(channelPairings.channelId, channelId),
+        eq(channelPairings.externalUserId, uid),
+        eq(channelPairings.status, "approved"),
+      )).limit(1);
+      if (!approved) await tx.insert(channelPairings).values({
+        workspaceId: ctx.workspaceId,
+        channelId,
+        code: randomUUID(),
+        externalUserId: uid,
+        status: "approved",
+        approvedAt: new Date(),
+        expiresAt: new Date(Date.now() + 60_000),
+      });
+      await tx.delete(channelPairings).where(and(
+        eq(channelPairings.channelId, channelId),
+        eq(channelPairings.externalUserId, uid),
+        eq(channelPairings.status, "pending"),
+      ));
+    }
+    return { demoThreads, kind: match[1] as "direct" | "group" };
+  });
 }

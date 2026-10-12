@@ -11,7 +11,9 @@ import {
   createPairing,
   isPaired,
   approvePairing,
+  approveObservedZaloThread,
   listPendingPairings,
+  upsertInboxObservedPeer,
   upsertContact,
   listContacts,
   type DbHandle,
@@ -87,6 +89,32 @@ describe("channels + pairing + contacts (RLS)", () => {
     expect((await listPendingPairings(dbh.db, ctxA())).filter((p) => p.externalUserId === "repeat-user")).toHaveLength(1);
     await approvePairing(dbh.db, ctxA(), ch.id, "FIRST123");
     expect((await listPendingPairings(dbh.db, ctxA())).filter((p) => p.externalUserId === "repeat-user")).toHaveLength(0);
+  });
+
+  it("duyệt hội thoại Zalo một lần: DM có pairing ngay, nhóm chỉ mở thread", async () => {
+    const ch = await createChannel(dbh.db, ctxA(), {
+      kind: "zalo_personal", name: "Zalo thử nghiệm", agentId: fx.agentA,
+    });
+    for (const [kind, uid] of [["direct", "123"], ["group", "456"]] as const) {
+      await upsertInboxObservedPeer(dbh.db, ctxA(), ch.id, {
+        chatKey: `${kind}:${uid}`, threadId: uid, kind, name: uid,
+        lastSenderId: uid, lastSenderName: uid, countMessage: true,
+      });
+    }
+    await createPairing(dbh.db, ctxA(), ch.id, "PENDING123", "123");
+    expect(await approveObservedZaloThread(dbh.db, ctxB(), ch.id, "direct:123")).toBeNull();
+    expect(await approveObservedZaloThread(dbh.db, ctxA(), ch.id, "direct:999")).toBeNull();
+    const direct = await approveObservedZaloThread(dbh.db, ctxA(), ch.id, "direct:123");
+    expect(direct?.demoThreads).toContain("direct:123");
+    expect(await isPaired(dbh.db, ctxA(), ch.id, "123")).toBe(true);
+    expect((await listPendingPairings(dbh.db, ctxA())).filter((p) => p.externalUserId === "123")).toHaveLength(0);
+    expect(await createPairing(dbh.db, ctxA(), ch.id, "LATE123", "123"))
+      .toEqual({ code: "", created: false });
+    const group = await approveObservedZaloThread(dbh.db, ctxA(), ch.id, "group:456");
+    expect(group?.demoThreads).toEqual(["direct:123", "group:456"]);
+    expect(await isPaired(dbh.db, ctxA(), ch.id, "456")).toBe(false);
+    expect((await approveObservedZaloThread(dbh.db, ctxA(), ch.id, "direct:123"))?.demoThreads)
+      .toEqual(["direct:123", "group:456"]);
   });
 
   it("mã hết hạn không hiện chờ duyệt và không được duyệt", async () => {

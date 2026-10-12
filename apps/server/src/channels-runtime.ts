@@ -595,14 +595,12 @@ export function makeInboundHandler(
       } else if (block) return { kind: "ignore" };
     }
 
-    // Group Zalo: adapter pass-through mọi tin (kèm cờ mentioned) để
-    // orchestrator thấy hết; agent MẶC ĐỊNH chỉ trả lời khi được tag/reply
-    // (31/08/2026 — user chốt). Muốn bot trả lời mọi tin trong nhóm demo
-    // (kiểu hội thoại nhóm tự nhiên) thì đặt rõ config require_mention: false.
+    // Nhóm Zalo chỉ kích hoạt khi được tag/reply/gọi lệnh, kể cả khi cấu hình cũ
+    // từng tắt require_mention. Kênh cá nhân khác giữ cấu hình hiện có.
     if (
       msg.peerKind === "group" &&
       isPersonalChannelKind(msg.channelKind) &&
-      channel.config["require_mention"] !== false &&
+      (msg.channelKind === "zalo_personal" || channel.config["require_mention"] !== false) &&
       msg.mentioned === false
     ) {
       return { kind: "ignore" };
@@ -619,8 +617,9 @@ export function makeInboundHandler(
       (logger.warn(`upsertContact (pre-pairing) lỗi: ${(err as Error).message}`), undefined),
     );
 
-    // Gate pairing (fail-closed): DM lạ chưa duyệt → cấp mã, chờ admin duyệt
-    if (channel.requirePairing && !silentPhoto) {
+    // Duyệt nhóm theo thread; không bắt từng thành viên ghép nối lần nữa.
+    // DM vẫn phải có pairing đã duyệt.
+    if (channel.requirePairing && !silentPhoto && !(msg.channelKind === "zalo_personal" && msg.peerKind === "group")) {
       const paired = await isPaired(db, ctx, channel.id, msg.senderId);
       if (!paired) {
         const pairing = await createPairing(db, ctx, channel.id, genPairingCode(), msg.senderId);
