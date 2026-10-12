@@ -161,6 +161,21 @@ it("ảnh kèm câu hỏi được trả lời, còn ảnh không chữ thì im 
   expect(sent).toEqual([]);
 });
 
+it("thu hồi tin từ chính tài khoản Zalo báo đúng hội thoại và mã tin cho server, không gọi agent", async () => {
+  const undone: Array<{ threadId: string; peerKind: string; targetMsgId: string }> = [];
+  let inbound = 0;
+  const channel = new ZaloPersonalChannel({
+    id: "zp-undo", name: "Zalo", token: "{}", config: {}, requirePairing: false,
+    onInbound: async () => { inbound++; return { kind: "ignore" }; },
+    onMessageUndo: async (event) => { undone.push(event); return true; },
+  });
+  const handleUndo = (channel as unknown as { handleUndo: (undo: unknown) => Promise<void> }).handleUndo.bind(channel);
+  await handleUndo({ isSelf: true, isGroup: false, threadId: "customer", data: { content: { globalMsgId: 8364497023559 } } });
+  await handleUndo({ isSelf: false, isGroup: false, threadId: "customer", data: { content: { globalMsgId: 8364495701458 } } });
+  expect(undone).toEqual([{ threadId: "customer", peerKind: "direct", targetMsgId: "8364497023559" }]);
+  expect(inbound).toBe(0);
+});
+
 describe("Reaction: tự thả cảm xúc + thả tay", () => {
   afterEach(() => vi.useRealTimers());
 

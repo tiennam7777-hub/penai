@@ -10,6 +10,8 @@ import {
   getMcpOauthToken,
   getMcpServerSend,
   getInboxThreadAgentBlock,
+  markAgentMessageRecalled,
+  resumeAgentAfterCustomerRequest,
   insertMcpOauthClient,
   insertMcpOauthPending,
   insertMcpOauthTokens,
@@ -74,6 +76,16 @@ const msg = (over: Record<string, unknown> = {}) => ({
 });
 
 describe("Zalo Inbox (0031)", () => {
+  it("thu hồi tin Agent khóa đúng hội thoại cho tới yêu cầu mới sau thời điểm thu hồi", async () => {
+    await recordInboxMessage(dbh.db, ctxA(), chA, msg({ threadId: "recall-1", msgId: "agent-recall-1", direction: "out", source: "agent" }));
+    expect(await markAgentMessageRecalled(dbh.db, ctxA(), chA, "recall-1", "agent-recall-1")).toBe(true);
+    expect(await getInboxThreadAgentBlock(dbh.db, ctxA(), chA, "recall-1")).toBe("recalled");
+    expect(await markAgentMessageRecalled(dbh.db, ctxA(), chB, "recall-1", "agent-recall-1")).toBe(false);
+    expect(await resumeAgentAfterCustomerRequest(dbh.db, ctxA(), chA, "recall-1", new Date(0))).toBe(false);
+    expect(await getInboxThreadAgentBlock(dbh.db, ctxA(), chA, "recall-1")).toBe("recalled");
+    expect(await resumeAgentAfterCustomerRequest(dbh.db, ctxA(), chA, "recall-1", new Date(Date.now() + 1000))).toBe(true);
+    expect(await getInboxThreadAgentBlock(dbh.db, ctxA(), chA, "recall-1")).toBeNull();
+  });
   it("ghi tin + tạo hội thoại, trùng msg_id thì bỏ qua", async () => {
     const r = await recordInboxMessage(dbh.db, ctxA(), chA, msg());
     expect(r?.thread).toMatchObject({ threadId: "1001", name: "Chị Lan", unreadCount: 1, kind: "direct" });

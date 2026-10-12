@@ -17,6 +17,7 @@ import {
   updateChannel,
   upsertInboxObservedPeer,
   getInboxThreadAgentBlock,
+  resumeAgentAfterCustomerRequest,
   getInboxMessageByMsgId,
   getPersonContextData,
   loadMessages,
@@ -44,6 +45,7 @@ import { forgetInboxChannel, inboxHooks } from "./inbox.js";
 import { isPersonalChannelKind } from "@penai/channels";
 import { classifyOrchidSalesScope } from "./orchid-sales-scope.js";
 import { hasPersonalAddressMismatch, requiresPersonalAddressGuard } from "./persona-reply-guard.js";
+import { isFreshCustomerRequest } from "./recall-policy.js";
 
 /** Handler + channel theo channelId — cho webhook route (WhatsApp, Teams) dùng. */
 export const channelHandlers = new Map<
@@ -580,8 +582,17 @@ export function makeInboundHandler(
     // (web/điện thoại) → AI im trong lúc tạm dừng.
     if (isPersonalChannelKind(msg.channelKind)) {
       const threadId = msg.chatKey.slice(msg.chatKey.indexOf(":") + 1);
-      const block = await getInboxThreadAgentBlock(db, ctx, channel.id, threadId).catch(() => null);
-      if (block) return { kind: "ignore" };
+      const block = await getInboxThreadAgentBlock(db, ctx, channel.id, threadId).catch((error) => {
+        logger.warn(`Không đọc được trạng thái AI của hội thoại ${channel.id}/${threadId}: ${String(error)}`);
+        return "unavailable" as const;
+      });
+      if (block === "recalled") {
+        if (!isFreshCustomerRequest(msg.text)) return { kind: "ignore" };
+        const resumed = await resumeAgentAfterCustomerRequest(
+          db, ctx, channel.id, threadId, msg.sentAt ?? new Date(),
+        ).catch(() => false);
+        if (!resumed) return { kind: "ignore" };
+      } else if (block) return { kind: "ignore" };
     }
 
     // Group Zalo: adapter pass-through mọi tin (kèm cờ mentioned) để
@@ -968,6 +979,7 @@ export function makeInboundHandler(
           ...(userImages.length ? { userImages } : {}),
           signal: ac.signal,
         })) {
+          if (ac.signal.aborted) break;
           if (ev.type === "text_delta") {
             streamed += ev.text;
             sinceTool += ev.text;
@@ -1014,9 +1026,11 @@ export function makeInboundHandler(
       .catch((err: unknown) => {
         traceError = err instanceof Error ? err.message : String(err);
         writeTrace();
+        if (ac.signal.aborted) return "";
         throw err;
       });
 
+    if (ac.signal.aborted) return { kind: "ignore" };
     hooks?.onStatus?.("done");
     writeTrace();
 
@@ -1127,7 +1141,10 @@ function buildChannel(
         );
       },
       // Inbox trực chat: lưu mọi tin đến/đi + danh bạ (zalo-inbox.ts)
-      ...(isPersonalChannelKind(ch.kind) ? inboxHooks(rt.db.db, ch, rt.config.dataDir) : {}),
+      ...(isPersonalChannelKind(ch.kind) ? inboxHooks(rt.db.db, ch, rt.config.dataDir, async (threadId, peerKind) => {
+        const sessionId = await getChannelSession(rt.db.db, systemContext(ch.workspaceId), ch.id, `${peerKind}:${threadId}`);
+        if (sessionId) activeRuns.get(sessionId)?.abort();
+      }) : {}),
     });
     channelHandlers.set(ch.id, { handler, channel, workspaceId: ch.workspaceId });
     return channel;

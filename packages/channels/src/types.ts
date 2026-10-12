@@ -22,6 +22,8 @@ export interface InboundMessage {
   senderId: string;
   senderName?: string;
   text: string;
+  /** Thời điểm tin gốc trên nền tảng, dùng để không mở lại AI bằng tin cũ trước lúc thu hồi. */
+  sentAt?: Date;
   /** direct | group */
   peerKind: "direct" | "group";
   media?: InboundMedia[];
@@ -142,6 +144,8 @@ export interface ChannelDeps {
    * cho agent trả lời) để server lưu và đẩy realtime cho người trực.
    */
   onMessageLog?: (entry: ChannelMessageLog) => void;
+  /** Zalo: chủ tài khoản thu hồi một tin; trả true nếu đó là tin Agent đã gửi. */
+  onMessageUndo?: (event: { threadId: string; peerKind: "direct" | "group"; targetMsgId: string }) => Promise<boolean>;
   /** Zalo Personal — danh bạ (bạn bè + nhóm) vừa đồng bộ xong. */
   onContactsSynced?: (items: ChannelContact[]) => void;
   /** Zalo Personal — tra được tên nhóm (sau khi tin đầu tiên tới). */

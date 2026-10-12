@@ -41,6 +41,7 @@ export interface InboxThread {
   unreadCount: number;
   aiMode: "auto" | "off";
   pausedUntil: string | null;
+  recallWaitingForCustomer: boolean;
 }
 
 export interface InboxReactionRow {
@@ -107,6 +108,7 @@ function mapThread(r: Raw): InboxThread {
     unreadCount: Number(r.unread_count ?? 0),
     aiMode: r.ai_mode === "off" ? "off" : "auto",
     pausedUntil: iso(r.paused_until),
+    recallWaitingForCustomer: r.recall_waiting_for_customer === true,
   };
 }
 
@@ -574,6 +576,8 @@ export async function setInboxThreadAi(
       ON CONFLICT (channel_id, thread_id) DO UPDATE SET
         ai_mode = COALESCE(${input.mode ?? null}, inbox_threads.ai_mode),
         paused_until = CASE WHEN ${input.resume === true} THEN NULL ELSE inbox_threads.paused_until END,
+        recall_waiting_for_customer = CASE WHEN ${input.resume === true} THEN false ELSE inbox_threads.recall_waiting_for_customer END,
+        agent_recalled_at = CASE WHEN ${input.resume === true} THEN NULL ELSE inbox_threads.agent_recalled_at END,
         updated_at = now()
       RETURNING *`),
   );
@@ -596,16 +600,47 @@ export async function getInboxThreadAgentBlock(
   ctx: WorkspaceContext,
   channelId: string,
   threadId: string,
-): Promise<"off" | "paused" | null> {
+): Promise<"off" | "paused" | "recalled" | null> {
   const res = await withWorkspace(db, ctx, (tx) =>
-    tx.execute(sql`SELECT ai_mode, paused_until FROM inbox_threads
+    tx.execute(sql`SELECT ai_mode, paused_until, recall_waiting_for_customer FROM inbox_threads
       WHERE channel_id = ${channelId} AND thread_id = ${threadId}`),
   );
   const r = res.rows[0] as Raw | undefined;
   if (!r) return null;
   if (r.ai_mode === "off") return "off";
   if (r.paused_until && new Date(String(r.paused_until)).getTime() > Date.now()) return "paused";
+  if (r.recall_waiting_for_customer === true) return "recalled";
   return null;
+}
+
+/** Thu hồi chỉ kích hoạt chế độ chờ khi đúng tin Agent đã gửi trong hội thoại này. */
+export async function markAgentMessageRecalled(
+  db: Db, ctx: WorkspaceContext, channelId: string, threadId: string, msgId: string,
+): Promise<boolean> {
+  if (!msgId || msgId.length > 100) return false;
+  const result = await withWorkspace(db, ctx, (tx) => tx.execute(sql`
+    UPDATE inbox_threads t SET recall_waiting_for_customer = true,
+      agent_recalled_at = now(), updated_at = now()
+    WHERE t.channel_id = ${channelId} AND t.thread_id = ${threadId}
+      AND EXISTS (SELECT 1 FROM inbox_messages m
+        WHERE m.channel_id = t.channel_id AND m.thread_id = t.thread_id
+          AND m.msg_id = ${msgId} AND m.direction = 'out' AND m.source = 'agent')
+    RETURNING t.thread_id`));
+  return result.rows.length > 0;
+}
+
+/** Chỉ tin khách gửi SAU thu hồi mới kết thúc chế độ chờ. */
+export async function resumeAgentAfterCustomerRequest(
+  db: Db, ctx: WorkspaceContext, channelId: string, threadId: string, sentAt: Date,
+): Promise<boolean> {
+  const result = await withWorkspace(db, ctx, (tx) => tx.execute(sql`
+    UPDATE inbox_threads SET recall_waiting_for_customer = false,
+      agent_recalled_at = NULL, updated_at = now()
+    WHERE channel_id = ${channelId} AND thread_id = ${threadId}
+      AND recall_waiting_for_customer = true AND agent_recalled_at <= ${sentAt.toISOString()}
+      AND ai_mode = 'auto' AND (paused_until IS NULL OR paused_until <= now())
+    RETURNING thread_id`));
+  return result.rows.length > 0;
 }
 
 /** Dọn tin nhắn cũ hơn N ngày (0 = giữ mãi). */

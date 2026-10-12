@@ -29,6 +29,7 @@ import {
   listInboxMessages,
   listInboxThreads,
   markInboxThreadRead,
+  markAgentMessageRecalled,
   recordInboxMessage,
   setInboxThreadAi,
   setInboxThreadName,
@@ -183,6 +184,7 @@ export function inboxHooks(
   db: Db,
   ch: { id: string; kind: string; workspaceId: string; config: Record<string, unknown> },
   dataDir: string,
+  onAgentMessageRecalled?: (threadId: string, peerKind: "direct" | "group") => Promise<void>,
 ) {
   const cfg = readInboxConfig(ch.config);
   inboxState.set(ch.id, { workspaceId: ch.workspaceId, enabled: cfg.enabled, pauseMinutes: cfg.pauseMinutes });
@@ -253,6 +255,20 @@ export function inboxHooks(
           }
         }
       })().catch((err) => logger.warn(`zalo.inbox_store lỗi: ${(err as Error).message}`));
+    },
+    onMessageUndo: async (event: { threadId: string; peerKind: "direct" | "group"; targetMsgId: string }) => {
+      // Tin gửi được Zalo xác nhận trước khi onMessageLog ghi DB xong; chờ ngắn
+      // để một thao tác thu hồi rất nhanh vẫn tìm thấy đúng tin của Agent.
+      let marked = false;
+      for (let attempt = 0; attempt < 4 && !marked; attempt++) {
+        if (attempt) await new Promise((resolve) => setTimeout(resolve, 150));
+        marked = await markAgentMessageRecalled(db, ctx, ch.id, event.threadId, event.targetMsgId);
+      }
+      if (!marked) return false;
+      await onAgentMessageRecalled?.(event.threadId, event.peerKind);
+      const thread = await getInboxThread(db, ctx, ch.id, event.threadId);
+      if (thread) broadcast(ch.workspaceId, ch.id, "thread", { channelId: ch.id, thread });
+      return true;
     },
     onContactsSynced: async (items: ChannelContact[]) => {
       const n = await upsertInboxContacts(

@@ -10,6 +10,7 @@ import {
   type Credentials,
   type LoginQRCallbackEvent,
   type Message,
+  type Undo,
 } from "zca-js";
 import { BoundedRunner } from "./bounded-runner.js";
 import { ZaloSendGate, isZaloSendRequest } from "./zalo-send-gate.js";
@@ -420,6 +421,7 @@ export class ZaloPersonalChannel implements Channel {
   private autoReaction: "heart" | "like" | null;
   /** Hẹn giờ tự thả theo hội thoại — khách nhắn dồn thì chỉ thả tin cuối. */
   private autoReactTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private undoPending = new Map<string, Promise<void>>();
   /** Hàng đợi thả cảm xúc toàn kênh: tối đa ~1 lần/giây (tránh bị Zalo coi là spam). */
   private reactChain: Promise<unknown> = Promise.resolve();
   private lastReactAt = 0;
@@ -986,6 +988,15 @@ export class ZaloPersonalChannel implements Channel {
     api.listener.on("message", (message) => {
       this.runner.run(() => this.handleMessage(message));
     });
+    api.listener.on("undo", (undo) => {
+      const chatKey = `${undo.isGroup ? "group" : "direct"}:${undo.threadId}`;
+      const pending = this.handleUndo(undo).catch((error) =>
+        logger.warn(`zalo.undo_event_fail: ${errorMessage(error)}`));
+      this.undoPending.set(chatKey, pending);
+      void pending.finally(() => {
+        if (this.undoPending.get(chatKey) === pending) this.undoPending.delete(chatKey);
+      });
+    });
     api.listener.on("reaction", (reaction) => {
       try {
         const data = reaction.data;
@@ -1045,6 +1056,7 @@ export class ZaloPersonalChannel implements Channel {
     const peerKind = message.type === ThreadType.Group ? "group" : "direct";
     const threadId = String(message.threadId);
     const chatKey = `${peerKind}:${threadId}`;
+    await this.undoPending.get(chatKey);
     const senderId = String(message.data.uidFrom || message.threadId);
     const senderName =
       message.data.dName || (message.isSelf ? (this.account?.name ?? senderId) : senderId);
@@ -1146,6 +1158,7 @@ export class ZaloPersonalChannel implements Channel {
           senderId,
           senderName: message.data.dName || senderId,
           text,
+          sentAt: Number(message.data.ts) > 0 ? new Date(Number(message.data.ts)) : new Date(),
           peerKind,
           mentioned,
           ...(media.length ? { media } : {}),
@@ -1179,6 +1192,18 @@ export class ZaloPersonalChannel implements Channel {
         "⚠️ Có lỗi khi xử lý tin nhắn. Vui lòng thử lại.",
       ).catch(() => {});
     }
+  }
+
+  private async handleUndo(undo: Undo): Promise<void> {
+    if (!undo.isSelf) return;
+    const targetMsgId = String(undo.data.content?.globalMsgId ?? "");
+    if (!targetMsgId || targetMsgId === "0") return;
+    const recalled = await this.deps.onMessageUndo?.({
+      threadId: String(undo.threadId),
+      peerKind: undo.isGroup ? "group" : "direct",
+      targetMsgId,
+    });
+    if (recalled) logger.info(`zalo.agent_recalled: channel ${this.id}, thread ${undo.threadId}`);
   }
 
   private async logListenerMessage(

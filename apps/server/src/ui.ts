@@ -3830,6 +3830,7 @@ export const INDEX_HTML = `<!doctype html>
     function aiBadge(t) {
       if (t.aiMode === "off") return '<span title="Đã tắt AI cho hội thoại này">🚫</span>';
       if (t.pausedUntil && new Date(t.pausedUntil).getTime() > Date.now()) return '<span title="AI đang tạm dừng vì nhân viên vừa trả lời">⏸️</span>';
+      if (t.recallWaitingForCustomer) return '<span title="Nhân viên đã thu hồi tin AI; AI chờ khách hỏi mới">⏸️</span>';
       return "";
     }
     function threadItem(t) {
@@ -3934,10 +3935,13 @@ export const INDEX_HTML = `<!doctype html>
       var t = S.cur, h = $("#ibxHead");
       if (!t) { h.innerHTML = "Chọn một hội thoại bên trái."; return; }
       var paused = t.pausedUntil && new Date(t.pausedUntil).getTime() > Date.now();
+      var recalled = t.recallWaitingForCustomer;
       h.className = "ibx-head";
       h.innerHTML = '<div><b>' + (t.kind === "group" ? "👥 " : "👤 ") + esc(t.contactAlias || t.name || t.threadId) + '</b>' + (t.contactAlias && t.name && t.contactAlias !== t.name ? '<div class="muted">Zalo: ' + esc(t.name) + '</div>' : '') + ' <span class="muted">' + (t.kind === "group" ? "nhóm" : "cá nhân") + " · uid <code>" + esc(t.threadId) + "</code>" + (t.phone ? " · " + esc(t.phone) : "") + "</span></div>" +
         '<div class="row" style="gap:6px"><span class="muted">AI trả lời:</span><select id="ibxAi" style="padding:3px 6px"><option value="auto">Theo cấu hình kênh</option><option value="off">Tắt cho hội thoại này</option></select>' +
-        (paused ? '<span class="pill">⏸️ tạm dừng tới ' + esc(ibxTime(t.pausedUntil)) + '</span><button class="ghost sm" id="ibxResume">Cho AI trả lời lại</button>' : "") + "</div>";
+        (paused ? '<span class="pill">⏸️ tạm dừng tới ' + esc(ibxTime(t.pausedUntil)) + '</span>' : "") +
+        (recalled ? '<span class="pill">⏸️ chờ khách hỏi mới sau khi thu hồi tin AI</span>' : "") +
+        (paused || recalled ? '<button class="ghost sm" id="ibxResume">Cho AI trả lời lại</button>' : "") + "</div>";
       $("#ibxAi").value = t.aiMode || "auto";
       $("#ibxAi").onchange = function () { setAi({ mode: this.value }); };
       var r = $("#ibxResume"); if (r) r.onclick = function () { setAi({ resume: true }); };
