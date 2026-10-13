@@ -162,7 +162,15 @@ export function composeSystemPrompt(
   const body = [agentPrompt, parts.context, parts.knowledge, parts.person]
     .filter((p): p is string => typeof p === "string" && p.trim().length > 0)
     .join("\n\n");
-  return body + (parts.guardNote ?? "");
+  return body +
+    "\n\n[QUY TẮC TRẢ LỜI NGẮN CHO MỌI HỘI THOẠI] " +
+    "Khi người dùng chỉ đồng ý/xác nhận, hoặc giao một việc có thể làm ngay và không cần hỏi thêm, " +
+    "hãy làm việc cần làm rồi đáp cực ngắn, thường chỉ một câu như ‘Dạ anh’, ‘Dạ chị’ hoặc ‘Ok em’ " +
+    "theo đúng vai xưng hô đã đặt cho người này. Không thêm lời chào, giải thích, giá, địa chỉ, " +
+    "câu hỏi hay lời hứa lặp lại. Không dùng câu xác nhận thay cho việc cần làm. " +
+    "Nếu họ hỏi giá, kết quả hoặc thông tin cụ thể, trả lời đủ đúng ý đó bằng ít chữ nhất; " +
+    "không rút câu trả lời thành mỗi ‘Dạ/Ok’. Các điều kiện và câu bắt buộc thật sự cần cho việc đang làm vẫn áp dụng." +
+    (parts.guardNote ?? "");
 }
 
 export interface AgentRunInput {

@@ -48,6 +48,7 @@ import { classifyOrchidSalesScope } from "./orchid-sales-scope.js";
 import { hasPersonalAddressMismatch, requiresPersonalAddressGuard } from "./persona-reply-guard.js";
 import { isFreshCustomerRequest } from "./recall-policy.js";
 import { orchidHandoffContext } from "./orchid-handoff-context.js";
+import { enhanceOrchidPhoto } from "./orchid-photo-enhance.js";
 
 /** Handler + channel theo channelId — cho webhook route (WhatsApp, Teams) dùng. */
 export const channelHandlers = new Map<
@@ -555,6 +556,9 @@ export function makeInboundHandler(
     const ctx = systemContext(channel.workspaceId);
     const hasPhoto = (msg.media ?? []).some((m) => m.kind === "photo");
     const silentPhoto = hasPhoto && !msg.text.trim();
+    const autoEditPhoto = silentPhoto && msg.channelKind === "zalo_personal" &&
+      msg.peerKind === "group" && channel.config["auto_edit_photo_group"] === msg.chatKey &&
+      (msg.media ?? []).some((m) => m.kind === "photo" && m.dataUrl);
 
     // Nhóm Zalo: đệm tin chưa tag làm ngữ cảnh (kể cả tin orchestrator sẽ
     // tiêu thụ) — người dùng hay nhắn vài tin liên tiếp rồi mới tag bot.
@@ -603,7 +607,7 @@ export function makeInboundHandler(
       msg.peerKind === "group" &&
       isPersonalChannelKind(msg.channelKind) &&
       (msg.channelKind === "zalo_personal" || channel.config["require_mention"] !== false) &&
-      msg.mentioned === false
+      msg.mentioned === false && !autoEditPhoto
     ) {
       return { kind: "ignore" };
     }
@@ -658,6 +662,32 @@ export function makeInboundHandler(
 
     // Ảnh không kèm lời nhắn chỉ được lưu làm ngữ cảnh cho lượt sau.
     // Ảnh kèm chữ đi tiếp qua luồng agent để trả lời câu hỏi của khách.
+    if (autoEditPhoto) {
+      const userKey = `${channel.kind}-${msg.senderId}`;
+      const userDir = resolve(join(rt.config.dataDir, ctx.workspaceId, "users", sanitizeUserKey(userKey)));
+      try {
+        const photos = (msg.media ?? []).filter((m) => m.kind === "photo" && m.dataUrl).slice(0, 6);
+        const saved = await saveInboundImages(userDir, photos);
+        if (!saved.length) return { kind: "ignore" };
+        const edited: string[] = [];
+        for (const original of saved) {
+          const output = join(userDir, `anh-da-chinh-${randomBytes(8).toString("hex")}.jpg`);
+          await writeFile(output, await enhanceOrchidPhoto(await readFile(original.path)));
+          edited.push(output);
+        }
+        const list = [...(recentImages.get(sessionId) ?? []), ...saved,
+          ...edited.map((path) => ({ path, name: path.split(/[\\/]/).pop() ?? "anh-da-chinh.jpg" }))];
+        recentImages.set(sessionId, list.slice(-RECENT_IMAGES_MAX));
+        await appendMessage(db, ctx, sessionId, {
+          role: "user",
+          content: { kind: "text", text: `[${msg.senderName ?? "Thành viên"} gửi ${saved.length} ảnh trong nhóm để chỉnh theo quy tắc Zalo Nội Bộ]` },
+        });
+        return { kind: "reply", text: "", media: edited };
+      } catch (error) {
+        logger.warn(`Không chỉnh được ảnh Zalo Nội Bộ ${channel.id}/${msg.chatKey}: ${String(error)}`);
+        return { kind: "reply", text: "Không chỉnh được ảnh này. Vui lòng gửi lại ảnh JPG, PNG hoặc WebP dưới 10 MB." };
+      }
+    }
     if (silentPhoto) {
       try {
         const userKey = `${channel.kind}-${msg.senderId}`;

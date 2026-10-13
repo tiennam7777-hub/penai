@@ -1166,7 +1166,7 @@ export class ZaloPersonalChannel implements Channel {
         },
         hooks,
       );
-      if (silentPhoto) return;
+      if (silentPhoto && result.kind !== "reply") return;
       if (result.kind === "pairing") {
         // Ngoại lệ Zalo cá nhân: người chưa duyệt pairing thì IM LẶNG — không
         // gửi mã pair (tài khoản thật không tự nhắn cho người lạ). Mã vẫn được

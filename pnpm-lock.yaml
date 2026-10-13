@@ -53,6 +53,9 @@ importers:
       fastify:
         specifier: ^5.2.0
         version: 5.10.0
+      sharp:
+        specifier: ^0.35.5
+        version: 0.35.5(@types/node@24.13.2)
       zod:
         specifier: ^4.0.0
         version: 4.4.3
@@ -68,7 +71,7 @@ importers:
         version: link:../shared
       '@slack/bolt':
         specifier: ^4.2.0
-        version: 4.7.3(@types/express@5.0.6)
+        version: 4.7.3(@types/express@5.0.6)(debug@4.4.3)
       baileys:
         specifier: 7.0.0-rc14
         version: 7.0.0-rc14(sharp@0.35.5(@types/node@24.13.2))
@@ -3113,15 +3116,15 @@ snapshots:
 
   '@sapphire/snowflake@3.5.5': {}
 
-  '@slack/bolt@4.7.3(@types/express@5.0.6)':
+  '@slack/bolt@4.7.3(@types/express@5.0.6)(debug@4.4.3)':
     dependencies:
       '@slack/logger': 4.0.1
-      '@slack/oauth': 3.0.5
-      '@slack/socket-mode': 2.0.7
+      '@slack/oauth': 3.0.5(debug@4.4.3)
+      '@slack/socket-mode': 2.0.7(debug@4.4.3)
       '@slack/types': 2.22.0
-      '@slack/web-api': 7.19.0
+      '@slack/web-api': 7.19.0(debug@4.4.3)
       '@types/express': 5.0.6
-      axios: 1.18.1
+      axios: 1.18.1(debug@4.4.3)
       express: 5.2.1
       path-to-regexp: 8.4.2
       raw-body: 3.0.2
@@ -3136,10 +3139,10 @@ snapshots:
     dependencies:
       '@types/node': 24.13.2
 
-  '@slack/oauth@3.0.5':
+  '@slack/oauth@3.0.5(debug@4.4.3)':
     dependencies:
       '@slack/logger': 4.0.1
-      '@slack/web-api': 7.19.0
+      '@slack/web-api': 7.19.0(debug@4.4.3)
       '@types/jsonwebtoken': 9.0.10
       '@types/node': 24.13.2
       jsonwebtoken: 9.0.3
@@ -3147,10 +3150,10 @@ snapshots:
       - debug
       - supports-color
 
-  '@slack/socket-mode@2.0.7':
+  '@slack/socket-mode@2.0.7(debug@4.4.3)':
     dependencies:
       '@slack/logger': 4.0.1
-      '@slack/web-api': 7.19.0
+      '@slack/web-api': 7.19.0(debug@4.4.3)
       '@types/node': 24.13.2
       '@types/ws': 8.18.1
       eventemitter3: 5.0.4
@@ -3163,13 +3166,13 @@ snapshots:
 
   '@slack/types@2.22.0': {}
 
-  '@slack/web-api@7.19.0':
+  '@slack/web-api@7.19.0(debug@4.4.3)':
     dependencies:
       '@slack/logger': 4.0.1
       '@slack/types': 2.22.0
       '@types/node': 24.13.2
       '@types/retry': 0.12.0
-      axios: 1.18.1
+      axios: 1.18.1(debug@4.4.3)
       eventemitter3: 5.0.4
       form-data: 4.0.6
       is-electron: 2.2.2
@@ -3378,9 +3381,9 @@ snapshots:
       '@fastify/error': 4.2.0
       fastq: 1.20.1
 
-  axios@1.18.1:
+  axios@1.18.1(debug@4.4.3):
     dependencies:
-      follow-redirects: 1.16.0
+      follow-redirects: 1.16.0(debug@4.4.3)
       form-data: 4.0.6
       https-proxy-agent: 5.0.1
       proxy-from-env: 2.1.0
@@ -3841,7 +3844,9 @@ snapshots:
       locate-path: 5.0.0
       path-exists: 4.0.0
 
-  follow-redirects@1.16.0: {}
+  follow-redirects@1.16.0(debug@4.4.3):
+    optionalDependencies:
+      debug: 4.4.3
 
   form-data@4.0.6:
     dependencies:

@@ -1,6 +1,7 @@
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import sharp from "sharp";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PenaiConfigSchema, type WorkspaceContext } from "@penai/shared";
 import { createChannel, createDb, upsertInboxContacts, upsertInboxObservedPeer, inboxPeerNames, type DbHandle, type EnabledChannel } from "@penai/db";
@@ -79,5 +80,32 @@ describe("Photo messages without text remain silent", () => {
     const settings = await app.inject({ method: "PUT", url: `/v1/inbox/${channel.id}/settings`, headers: auth(), payload: { photoAck: "short" } });
     expect(settings.statusCode).toBe(200); expect(settings.json().photoAck).toBe("off");
     expect(await handler(inbound("silent"))).toEqual({ kind: "ignore" });
+  });
+});
+
+describe("OC1 internal group photo exception", () => {
+  it("returns an edited photo only for the configured group, without a mention or agent text", async () => {
+    const dataUrl = `data:image/png;base64,${(await sharp({
+      create: { width: 80, height: 80, channels: 3, background: "#a05377" },
+    }).png().toBuffer()).toString("base64")}`;
+    const handler = makeInboundHandler(rt, new Scheduler(), {
+      ...channel,
+      config: { auto_edit_photo_group: "group:oc1" },
+      requirePairing: true,
+    });
+    const incoming: InboundMessage = {
+      channelId: channel.id, channelKind: "zalo_personal", chatKey: "group:oc1",
+      senderId: "member-1", senderName: "Thành viên", peerKind: "group",
+      mentioned: false, text: "", media: [{ kind: "photo", dataUrl }],
+    };
+    requests.length = 0;
+    const result = await handler(incoming);
+    expect(result.kind).toBe("reply");
+    if (result.kind !== "reply") return;
+    expect(result.text).toBe("");
+    expect(result.media).toHaveLength(1);
+    expect((await sharp(await readFile(result.media![0]!)).metadata()).format).toBe("jpeg");
+    expect(requests).toHaveLength(0);
+    expect(await handler({ ...incoming, chatKey: "group:other" })).toEqual({ kind: "ignore" });
   });
 });
