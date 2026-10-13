@@ -556,9 +556,8 @@ export function makeInboundHandler(
     const ctx = systemContext(channel.workspaceId);
     const hasPhoto = (msg.media ?? []).some((m) => m.kind === "photo");
     const silentPhoto = hasPhoto && !msg.text.trim();
-    const autoEditPhoto = silentPhoto && msg.channelKind === "zalo_personal" &&
-      msg.peerKind === "group" && channel.config["auto_edit_photo_group"] === msg.chatKey &&
-      (msg.media ?? []).some((m) => m.kind === "photo" && m.dataUrl);
+    const autoEditPhoto = hasPhoto && msg.channelKind === "zalo_personal" &&
+      msg.peerKind === "group" && channel.config["auto_edit_photo_group"] === msg.chatKey;
 
     // Nhóm Zalo: đệm tin chưa tag làm ngữ cảnh (kể cả tin orchestrator sẽ
     // tiêu thụ) — người dùng hay nhắn vài tin liên tiếp rồi mới tag bot.
@@ -571,7 +570,7 @@ export function makeInboundHandler(
 
     // Interceptor (bộ điều phối quy trình...): chạy TRƯỚC pairing/agent — phản hồi
     // của đại lý trong nhóm demo phải tới orchestrator dù người gửi chưa pair.
-    for (const interceptor of silentPhoto ? [] : inboundInterceptors) {
+    for (const interceptor of silentPhoto || autoEditPhoto ? [] : inboundInterceptors) {
       try {
         const res = await interceptor(msg);
         if (res) return res;
@@ -668,7 +667,7 @@ export function makeInboundHandler(
       try {
         const photos = (msg.media ?? []).filter((m) => m.kind === "photo" && m.dataUrl).slice(0, 6);
         const saved = await saveInboundImages(userDir, photos);
-        if (!saved.length) return { kind: "ignore" };
+        if (!saved.length) return { kind: "reply", text: "Không đọc được ảnh này. Vui lòng gửi lại ảnh JPG, PNG hoặc WebP dưới 10 MB." };
         const edited: string[] = [];
         for (const original of saved) {
           const output = join(userDir, `anh-da-chinh-${randomBytes(8).toString("hex")}.jpg`);
@@ -680,11 +679,11 @@ export function makeInboundHandler(
         recentImages.set(sessionId, list.slice(-RECENT_IMAGES_MAX));
         await appendMessage(db, ctx, sessionId, {
           role: "user",
-          content: { kind: "text", text: `[${msg.senderName ?? "Thành viên"} gửi ${saved.length} ảnh trong nhóm để chỉnh theo quy tắc Zalo Nội Bộ]` },
+          content: { kind: "text", text: `[${msg.senderName ?? "Thành viên"} gửi ${saved.length} ảnh trong nhóm để chỉnh ảnh]` },
         });
         return { kind: "reply", text: "", media: edited };
       } catch (error) {
-        logger.warn(`Không chỉnh được ảnh Zalo Nội Bộ ${channel.id}/${msg.chatKey}: ${String(error)}`);
+        logger.warn(`Không chỉnh được ảnh nhóm ${channel.id}/${msg.chatKey}: ${String(error)}`);
         return { kind: "reply", text: "Không chỉnh được ảnh này. Vui lòng gửi lại ảnh JPG, PNG hoặc WebP dưới 10 MB." };
       }
     }

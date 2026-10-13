@@ -82,16 +82,16 @@ describe("Photo messages without text remain silent", () => {
   });
 });
 
-describe("OC1 internal group photo exception", () => {
-  it("returns an edited photo only for the configured group, without a mention or agent text", async () => {
+describe("Configured group photo editing", () => {
+  it("returns edited photos with or without captions only in the configured group", async () => {
     const dataUrl = png;
     const handler = makeInboundHandler(rt, new Scheduler(), {
       ...channel,
-      config: { auto_edit_photo_group: "group:oc1" },
+      config: { auto_edit_photo_group: "group:oc2" },
       requirePairing: true,
     });
     const incoming: InboundMessage = {
-      channelId: channel.id, channelKind: "zalo_personal", chatKey: "group:oc1",
+      channelId: channel.id, channelKind: "zalo_personal", chatKey: "group:oc2",
       senderId: "member-1", senderName: "Thành viên", peerKind: "group",
       mentioned: false, text: "", media: [{ kind: "photo", dataUrl }],
     };
@@ -102,6 +102,10 @@ describe("OC1 internal group photo exception", () => {
     expect(result.text).toBe("");
     expect(result.media).toHaveLength(1);
     expect((await readFile(result.media![0]!)).subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]));
+    expect(requests).toHaveLength(0);
+    const captioned = await handler({ ...incoming, text: "Chỉnh ảnh này giúp tôi" });
+    expect(captioned.kind).toBe("reply");
+    if (captioned.kind === "reply") expect(captioned.media).toHaveLength(1);
     expect(requests).toHaveLength(0);
     expect(await handler({ ...incoming, chatKey: "group:other" })).toEqual({ kind: "ignore" });
   });
