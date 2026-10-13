@@ -1,7 +1,6 @@
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import sharp from "sharp";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PenaiConfigSchema, type WorkspaceContext } from "@penai/shared";
 import { createChannel, createDb, upsertInboxContacts, upsertInboxObservedPeer, inboxPeerNames, type DbHandle, type EnabledChannel } from "@penai/db";
@@ -85,9 +84,7 @@ describe("Photo messages without text remain silent", () => {
 
 describe("OC1 internal group photo exception", () => {
   it("returns an edited photo only for the configured group, without a mention or agent text", async () => {
-    const dataUrl = `data:image/png;base64,${(await sharp({
-      create: { width: 80, height: 80, channels: 3, background: "#a05377" },
-    }).png().toBuffer()).toString("base64")}`;
+    const dataUrl = png;
     const handler = makeInboundHandler(rt, new Scheduler(), {
       ...channel,
       config: { auto_edit_photo_group: "group:oc1" },
@@ -104,7 +101,7 @@ describe("OC1 internal group photo exception", () => {
     if (result.kind !== "reply") return;
     expect(result.text).toBe("");
     expect(result.media).toHaveLength(1);
-    expect((await sharp(await readFile(result.media![0]!)).metadata()).format).toBe("jpeg");
+    expect((await readFile(result.media![0]!)).subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]));
     expect(requests).toHaveLength(0);
     expect(await handler({ ...incoming, chatKey: "group:other" })).toEqual({ kind: "ignore" });
   });

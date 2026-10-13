@@ -1,48 +1,35 @@
-import sharp from "sharp";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
-const MAX_INPUT_BYTES = 10 * 1024 * 1024;
-const MAX_PIXELS = 24_000_000;
+const MAX_BYTES = 10 * 1024 * 1024;
+const SCRIPT = fileURLToPath(new URL("./orchid-photo-enhance.py", import.meta.url));
 
-/**
- * Chỉnh ảnh gốc bằng các phép ảnh xác định: sáng tự nhiên, nét nhẹ, nền ngoài
- * vùng trung tâm mờ vừa phải. Không sinh lại vật thể/chữ hay đổi bố cục.
- */
+/** Chỉnh trực tiếp ảnh gốc bằng Pillow; không gọi model sinh ảnh. */
 export async function enhanceOrchidPhoto(input: Buffer): Promise<Buffer> {
-  if (!input.length || input.length > MAX_INPUT_BYTES) throw new Error("Ảnh phải nhỏ hơn 10 MB");
-  const source = sharp(input, { limitInputPixels: MAX_PIXELS, failOn: "error" }).rotate();
-  const original = await source.metadata();
-  if (!original.width || !original.height || original.width * original.height > MAX_PIXELS) {
-    throw new Error("Kích thước ảnh không được hỗ trợ");
-  }
-
-  // Giữ toàn bộ nội dung gốc. Vùng trung tâm rộng luôn dùng ảnh đã chỉnh nét;
-  // chỉ phần rìa thường là hậu cảnh mới hòa dần vào bản làm mờ nhẹ.
-  const adjusted = await source
-    .resize({ width: 3200, height: 3200, fit: "inside", withoutEnlargement: true })
-    .flatten({ background: "#ffffff" })
-    .toColourspace("srgb")
-    .modulate({ brightness: 1.065, saturation: 1.02 })
-    .sharpen({ sigma: 0.8 })
-    .png()
-    .toBuffer();
-  const info = await sharp(adjusted).metadata();
-  const width = info.width!;
-  const height = info.height!;
-  const blurred = await sharp(adjusted).blur(1.8).png().toBuffer();
-  const mask = Buffer.from(
-    `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">` +
-    `<defs><radialGradient id="g" cx="50%" cy="50%" r="71%">` +
-    `<stop offset="72%" stop-color="white" stop-opacity="1"/>` +
-    `<stop offset="100%" stop-color="white" stop-opacity="0"/>` +
-    `</radialGradient></defs><rect width="100%" height="100%" fill="url(#g)"/></svg>`,
-  );
-  const foreground = await sharp(adjusted).ensureAlpha()
-    .composite([{ input: mask, blend: "dest-in" }]).png().toBuffer();
-  const composite = await sharp(blurred).composite([{ input: foreground, blend: "over" }])
-    .png().toBuffer();
-  for (const quality of [90, 82, 74]) {
-    const result = await sharp(composite).jpeg({ quality, mozjpeg: true }).toBuffer();
-    if (result.length <= MAX_INPUT_BYTES) return result;
-  }
-  throw new Error("Ảnh sau chỉnh vượt giới hạn gửi Zalo 10 MB");
+  if (!input.length || input.length > MAX_BYTES) throw new Error("Ảnh phải nhỏ hơn 10 MB");
+  return new Promise((resolve, reject) => {
+    const python = process.env.PENAI_PHOTO_PYTHON || (process.platform === "win32" ? "python" : "python3");
+    const child = spawn(python, [SCRIPT], { stdio: ["pipe", "pipe", "pipe"] });
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let stderr = "";
+    let timedOut = false;
+    const timeout = setTimeout(() => { timedOut = true; child.kill(); }, 60_000);
+    child.stdout.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > MAX_BYTES) child.kill();
+      else chunks.push(chunk);
+    });
+    child.stderr.on("data", (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-500); });
+    child.stdin.on("error", () => {});
+    child.on("error", (error) => { clearTimeout(timeout); reject(error); });
+    child.on("close", (code) => {
+      clearTimeout(timeout);
+      if (timedOut) return reject(new Error("Hết thời gian chỉnh ảnh"));
+      if (size > MAX_BYTES) return reject(new Error("Ảnh sau chỉnh vượt giới hạn gửi Zalo 10 MB"));
+      if (code !== 0 || !size) return reject(new Error(stderr || "Không chỉnh được ảnh"));
+      resolve(Buffer.concat(chunks));
+    });
+    child.stdin.end(input);
+  });
 }
