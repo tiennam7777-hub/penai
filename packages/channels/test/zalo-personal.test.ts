@@ -58,6 +58,48 @@ describe("Zalo contact aliases", () => {
   });
 });
 
+describe("Zalo Inbox message removal", () => {
+  it("uses platform undo for everyone and delete only for this account", async () => {
+    const calls: unknown[][] = [];
+    const channel = new ZaloPersonalChannel({
+      id: "zp-remove", name: "Zalo", token: "{}", config: {}, requirePairing: true,
+      onInbound: async () => ({ kind: "ignore" }),
+    });
+    (channel as unknown as { api: unknown; account: unknown }).api = {
+      undo: async (...args: unknown[]) => { calls.push(["undo", ...args]); return { status: 0 }; },
+      deleteMessage: async (...args: unknown[]) => { calls.push(["delete", ...args]); return { status: 0 }; },
+    };
+    (channel as unknown as { account: unknown }).account = { id: "owner-1", name: "Owner" };
+    await channel.changeMessageState({
+      threadId: "peer-1", peerKind: "direct", msgId: "g-1", cliMsgId: "c-1", action: "recalled",
+    });
+    await channel.changeMessageState({
+      threadId: "group-1", peerKind: "group", msgId: "g-2", cliMsgId: "c-2", action: "deleted",
+    });
+    expect(calls[0]).toEqual(["undo", { msgId: "g-1", cliMsgId: "c-1" }, "peer-1", expect.anything()]);
+    expect(calls[1]).toEqual(["delete", {
+      data: { msgId: "g-2", cliMsgId: "c-2", uidFrom: "owner-1" },
+      threadId: "group-1", type: expect.anything(),
+    }, true]);
+    await expect(channel.changeMessageState({
+      threadId: "peer-1", peerKind: "direct", msgId: "", cliMsgId: "", action: "recalled",
+    })).rejects.toThrow("thiếu mã");
+  });
+
+  it("passes a customer's recall event to Inbox instead of ignoring it", async () => {
+    const events: unknown[] = [];
+    const channel = new ZaloPersonalChannel({
+      id: "zp-undo", name: "Zalo", token: "{}", config: {}, requirePairing: true,
+      onInbound: async () => ({ kind: "ignore" }),
+      onMessageUndo: async (event) => { events.push(event); return false; },
+    });
+    await (channel as unknown as { handleUndo: (event: unknown) => Promise<void> }).handleUndo({
+      isSelf: false, isGroup: true, threadId: "group-1", data: { content: { globalMsgId: "g-3" } },
+    });
+    expect(events).toEqual([{ threadId: "group-1", peerKind: "group", targetMsgId: "g-3", isSelf: false }]);
+  });
+});
+
 function groupData(patch: Record<string, unknown> = {}): Message["data"] {
   return {
     actionId: "1",

@@ -754,6 +754,26 @@ export class ZaloPersonalChannel implements Channel {
     return ids;
   }
 
+  async changeMessageState(input: {
+    threadId: string;
+    peerKind: "direct" | "group";
+    msgId: string;
+    cliMsgId: string;
+    action: "recalled" | "deleted";
+  }): Promise<void> {
+    if (!this.api) throw new ZaloNotConnectedError();
+    if (!input.msgId || !input.cliMsgId) throw new Error("Tin này thiếu mã Zalo để thu hồi/xóa");
+    const type = input.peerKind === "group" ? ThreadType.Group : ThreadType.User;
+    if (input.action === "recalled") {
+      await this.api.undo({ msgId: input.msgId, cliMsgId: input.cliMsgId }, input.threadId, type);
+    } else {
+      await this.api.deleteMessage({
+        data: { msgId: input.msgId, cliMsgId: input.cliMsgId, uidFrom: this.account?.id ?? "" },
+        threadId: input.threadId, type,
+      }, true);
+    }
+  }
+
   setAutoReaction(v: "heart" | "like" | null): void {
     this.autoReaction = v;
     if (!v) {
@@ -1195,13 +1215,13 @@ export class ZaloPersonalChannel implements Channel {
   }
 
   private async handleUndo(undo: Undo): Promise<void> {
-    if (!undo.isSelf) return;
     const targetMsgId = String(undo.data.content?.globalMsgId ?? "");
     if (!targetMsgId || targetMsgId === "0") return;
     const recalled = await this.deps.onMessageUndo?.({
       threadId: String(undo.threadId),
       peerKind: undo.isGroup ? "group" : "direct",
       targetMsgId,
+      isSelf: undo.isSelf,
     });
     if (recalled) logger.info(`zalo.agent_recalled: channel ${this.id}, thread ${undo.threadId}`);
   }

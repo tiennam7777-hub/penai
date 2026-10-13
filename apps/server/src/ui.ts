@@ -204,6 +204,11 @@ export const INDEX_HTML = `<!doctype html>
   .ibx-msg { max-width: 72%; display: flex; flex-direction: column; }
   .ibx-msg.in { align-self: flex-start; }
   .ibx-msg.out { align-self: flex-end; align-items: flex-end; }
+  .ibx-msg.removed { opacity: .48; }
+  .ibx-msg.removed .ibx-bubble { text-decoration: none; }
+  .ibx-msg-state { font-size: .72rem; font-style: italic; margin-top: 3px; }
+  .ibx-msg-actions { display: flex; gap: 5px; margin-top: 3px; }
+  .ibx-msg-actions button { font-size: .7rem; padding: 2px 6px; }
   .ibx-bubble { padding: 7px 11px; border-radius: 12px; background: rgba(128,128,128,.14); font-size: .9rem; line-height: 1.4; word-wrap: break-word; overflow-wrap: anywhere; }
   .ibx-msg.out .ibx-bubble { background: var(--accent); color: #fff; }
   .ibx-msg.out .ibx-bubble a { color: #fff; }
@@ -3897,8 +3902,9 @@ export const INDEX_HTML = `<!doctype html>
         var chosenSrc = chosenMedia.file ? "/v1/inbox/" + S.ch + "/file?p=" + encodeURIComponent(chosenMedia.file) : (chosenMedia.url || "");
         q = '<div class="ibx-quote">↪ Ảnh được trích dẫn' + (chosenSrc ? '<br><button type="button" class="ibx-photo-link" title="Xem ảnh được trích dẫn"><img class="ibx-photo" src="' + esc(chosenSrc) + '" referrerpolicy="no-referrer" alt="Ảnh được trích dẫn" loading="lazy" style="max-width:90px;max-height:90px"></button>' : '') + '</div>';
       }
-      var d = el("div", { "class": "ibx-msg " + (out ? "out" : "in"), "data-id": x.id });
-      d.innerHTML = (who ? '<div class="ibx-who">' + esc(who) + "</div>" : "") + '<div class="ibx-bubble">' + q + msgBody(x) + "</div>" + rxHtml(x) + '<div class="ibx-time">' + esc(ibxTime(x.sentAt)) + "</div>";
+      var d = el("div", { "class": "ibx-msg " + (out ? "out" : "in") + (x.removed ? " removed" : ""), "data-id": x.id });
+      d.innerHTML = (who ? '<div class="ibx-who">' + esc(who) + "</div>" : "") + '<div class="ibx-bubble">' + q + msgBody(x) + "</div>" + rxHtml(x) + '<div class="ibx-time">' + esc(ibxTime(x.sentAt)) + "</div>" +
+        (x.removed ? '<div class="ibx-msg-state">' + (x.removed === "recalled" ? "Đã thu hồi" : "Đã xóa ở tài khoản này") + "</div>" : "");
       var photoLink = d.querySelector("button.ibx-photo-link");
       if (photoLink) photoLink.addEventListener("click", function () { showInboxPhoto(photoLink.querySelector("img").src); });
       if (x.canReact && !out) {
@@ -3911,7 +3917,29 @@ export const INDEX_HTML = `<!doctype html>
         });
         d.appendChild(bar);
       }
+      if (out && !x.removed && chInfo() && chInfo().kind === "zalo_personal" && x.msgId && x.meta && x.meta.cliMsgId) {
+        var actions = el("div", { "class": "ibx-msg-actions" });
+        [["recalled", "Thu hồi"], ["deleted", "Xóa ở Zalo này"]].forEach(function (item) {
+          var b = el("button", { type: "button", "class": "ghost sm" }, item[1]);
+          b.onclick = function () { changeMessageState(x, item[0]); };
+          actions.appendChild(b);
+        });
+        d.appendChild(actions);
+      }
       return d;
+    }
+    function changeMessageState(x, action) {
+      var label = action === "recalled" ? "thu hồi cho mọi người" : "xóa chỉ trên tài khoản Zalo này";
+      if (!confirm("Bạn muốn " + label + "? Nội dung vẫn được giữ mờ trong Inbox để xem lại.")) return;
+      api("/v1/inbox/" + S.ch + "/threads/" + encodeURIComponent(S.cur.threadId) + "/messages/" + x.id + "/state", {
+        method: "POST", body: { action: action }
+      }).then(function (j) {
+        if (j.message) {
+          S.msgs.forEach(function (m, i) { if (m.id === j.message.id) S.msgs[i] = j.message; });
+          replaceMsg(j.message);
+        }
+        toast(action === "recalled" ? "Đã thu hồi tin" : "Đã xóa tin trên tài khoản Zalo này");
+      }).catch(function (e) { toast(e.message, true); });
     }
     function myId() { var c = chInfo(); return c && c.account ? String(c.account.id) : ""; }
     function myReaction(x) { var me = myId(), r = (x.reactions || []).filter(function (y) { return y.reactorId === me; })[0]; return r ? r.icon : ""; }
@@ -4068,7 +4096,11 @@ export const INDEX_HTML = `<!doctype html>
       es.addEventListener("message_update", function (ev) {
         var d; try { d = JSON.parse(ev.data); } catch (e) { return; }
         if (d.channelId !== S.ch || !S.cur || S.cur.threadId !== d.threadId) return;
-        S.msgs.forEach(function (x) { if (x.id === d.message.id) { x.canReact = d.message.canReact; x.meta = d.message.meta; } });
+        S.msgs.forEach(function (x) { if (x.id === d.message.id) {
+          x.canReact = d.message.canReact; x.meta = d.message.meta;
+          x.removed = d.message.removed; x.removedAt = d.message.removedAt;
+          replaceMsg(x);
+        } });
       });
       es.addEventListener("reaction", function (ev) {
         var d; try { d = JSON.parse(ev.data); } catch (e) { return; }

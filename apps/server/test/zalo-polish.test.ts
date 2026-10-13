@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PenaiConfigSchema, type WorkspaceContext } from "@penai/shared";
-import { createChannel, createDb, upsertInboxContacts, upsertInboxObservedPeer, inboxPeerNames, type DbHandle, type EnabledChannel } from "@penai/db";
+import { createChannel, createDb, getInboxMessageById, getInboxThread, recordInboxMessage, setInboxMessageCliId, upsertInboxContacts, upsertInboxObservedPeer, inboxPeerNames, type DbHandle, type EnabledChannel } from "@penai/db";
 import { createTestFixtures, setupTestDatabase, TEST_APP_URL, type TestFixtures } from "@penai/db/testing";
 import { createProviderRegistry, type ChatRequest, type ChatResponse } from "@penai/providers";
 import { createDefaultToolRegistry } from "@penai/tools";
@@ -104,5 +104,30 @@ describe("OC1 internal group photo exception", () => {
     expect((await readFile(result.media![0]!)).subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]));
     expect(requests).toHaveLength(0);
     expect(await handler({ ...incoming, chatKey: "group:other" })).toEqual({ kind: "ignore" });
+  });
+});
+
+describe("Inbox Zalo removal", () => {
+  it("recalls a sent message once and preserves its content with a dim status", async () => {
+    const runtime = channelHandlers.get(channel.id)!.channel as ZaloPersonalChannel;
+    const calls: unknown[] = [];
+    runtime.isConnected = () => true;
+    runtime.changeMessageState = async (input) => { calls.push(input); };
+    const saved = await recordInboxMessage(dbh.db, ctx(), channel.id, {
+      threadId: "remove-peer", peerKind: "direct", msgId: "remove-g-1",
+      direction: "out", source: "web", senderId: "owner", senderName: "Owner",
+      contentType: "text", text: "Tin gửi nhầm", sentAt: new Date(),
+    });
+    expect(saved).not.toBeNull();
+    await setInboxMessageCliId(dbh.db, ctx(), channel.id, "remove-g-1", "remove-c-1");
+    const url = `/v1/inbox/${channel.id}/threads/remove-peer/messages/${saved!.message.id}/state`;
+    const response = await app.inject({ method: "POST", url, headers: auth(), payload: { action: "recalled" } });
+    expect(response.statusCode).toBe(200);
+    expect(calls).toEqual([{ threadId: "remove-peer", peerKind: "direct", msgId: "remove-g-1", cliMsgId: "remove-c-1", action: "recalled" }]);
+    expect((await getInboxMessageById(dbh.db, ctx(), channel.id, "remove-peer", saved!.message.id))).toMatchObject({
+      text: "Tin gửi nhầm", removed: "recalled", canReact: false,
+    });
+    expect((await getInboxThread(dbh.db, ctx(), channel.id, "remove-peer"))?.lastMessage).toBe("[Đã thu hồi]");
+    expect((await app.inject({ method: "POST", url, headers: auth(), payload: { action: "recalled" } })).statusCode).toBe(409);
   });
 });

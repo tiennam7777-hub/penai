@@ -144,8 +144,8 @@ export interface ChannelDeps {
    * cho agent trả lời) để server lưu và đẩy realtime cho người trực.
    */
   onMessageLog?: (entry: ChannelMessageLog) => void;
-  /** Zalo: chủ tài khoản thu hồi một tin; trả true nếu đó là tin Agent đã gửi. */
-  onMessageUndo?: (event: { threadId: string; peerKind: "direct" | "group"; targetMsgId: string }) => Promise<boolean>;
+  /** Zalo: bất kỳ người gửi nào thu hồi tin; trả true nếu đó là tin Agent đã gửi. */
+  onMessageUndo?: (event: { threadId: string; peerKind: "direct" | "group"; targetMsgId: string; isSelf: boolean }) => Promise<boolean>;
   /** Zalo Personal — danh bạ (bạn bè + nhóm) vừa đồng bộ xong. */
   onContactsSynced?: (items: ChannelContact[]) => void;
   /** Zalo Personal — tra được tên nhóm (sau khi tin đầu tiên tới). */

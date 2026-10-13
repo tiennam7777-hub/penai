@@ -71,6 +71,9 @@ export interface InboxMessageRow {
   reactions?: InboxReactionRow[];
   /** Thả cảm xúc được không (có đủ msgId + cliMsgId — tin lưu từ bản 1.5.0). */
   canReact?: boolean;
+  /** Giữ nội dung để người trực xem lại, chỉ làm nhạt khi đã xóa/thu hồi trên Zalo. */
+  removed?: "deleted" | "recalled";
+  removedAt?: string | null;
 }
 
 type Raw = Record<string, unknown>;
@@ -141,7 +144,9 @@ function mapMessage(r: Raw): InboxMessageRow {
     meta,
     sentAt: iso(r.sent_at) ?? new Date().toISOString(),
     ...(r.reactions !== undefined ? { reactions: mapReactions(r.reactions) } : {}),
-    canReact: !!r.msg_id && typeof meta?.cliMsgId === "string" && meta.cliMsgId !== "",
+    canReact: !meta?.removed && !!r.msg_id && typeof meta?.cliMsgId === "string" && meta.cliMsgId !== "",
+    removed: meta?.removed === "recalled" ? "recalled" : meta?.removed === "deleted" ? "deleted" : undefined,
+    removedAt: typeof meta?.removedAt === "string" ? meta.removedAt : null,
   };
 }
 
@@ -471,6 +476,31 @@ export async function getInboxMessageByMsgId(
   );
   const r = res.rows[0] as Raw | undefined;
   return r ? mapMessage(r) : null;
+}
+
+/** Giữ tin trong Inbox nhưng đánh dấu trạng thái sau khi Zalo xác nhận xóa/thu hồi. */
+export async function markInboxMessageRemoved(
+  db: Db, ctx: WorkspaceContext, channelId: string, threadId: string,
+  lookup: { id?: string; msgId?: string }, removed: "deleted" | "recalled",
+): Promise<InboxMessageRow | null> {
+  if (lookup.id && !/^\d{1,19}$/.test(lookup.id)) return null;
+  if (!lookup.id && (!lookup.msgId || lookup.msgId.length > 100)) return null;
+  const locator = lookup.id ? sql`m.id = ${lookup.id}::bigint` : sql`m.msg_id = ${lookup.msgId}`;
+  return withWorkspace(db, ctx, async (tx) => {
+    const res = await tx.execute(sql`UPDATE inbox_messages AS m
+      SET meta = COALESCE(m.meta, '{}'::jsonb) || jsonb_build_object(
+        'removed', ${removed}::text, 'removedAt', now()::text)
+      WHERE m.channel_id = ${channelId} AND m.thread_id = ${threadId}
+        AND ${locator} AND COALESCE(m.meta->>'removed', '') = ''
+      RETURNING m.*`);
+    const row = res.rows[0] as Raw | undefined;
+    if (!row) return null;
+    await tx.execute(sql`UPDATE inbox_threads SET last_message = ${removed === "recalled" ? "[Đã thu hồi]" : "[Đã xóa]"}, updated_at = now()
+      WHERE channel_id = ${channelId} AND thread_id = ${threadId}
+        AND last_message_at = ${iso(row.sent_at)}::timestamptz
+        AND last_message = ${inboxPreview(String(row.content_type ?? "text"), String(row.text ?? ""))}`);
+    return mapMessage(row);
+  });
 }
 
 /** Bổ sung cliMsgId vào meta của tin đã lưu (bản dội lại của tin PenAI gửi). Trả tin sau cập nhật. */

@@ -30,6 +30,7 @@ import {
   listInboxThreads,
   markInboxThreadRead,
   markAgentMessageRecalled,
+  markInboxMessageRemoved,
   recordInboxMessage,
   setInboxThreadAi,
   setInboxThreadName,
@@ -72,6 +73,7 @@ interface InboxChannelState {
 }
 
 const inboxState = new Map<string, InboxChannelState>();
+const agentRecallHandlers = new Map<string, (threadId: string, peerKind: "direct" | "group") => Promise<void>>();
 let inboxDataDir = "";
 
 export function readInboxConfig(config: Record<string, unknown>): {
@@ -188,6 +190,7 @@ export function inboxHooks(
 ) {
   const cfg = readInboxConfig(ch.config);
   inboxState.set(ch.id, { workspaceId: ch.workspaceId, enabled: cfg.enabled, pauseMinutes: cfg.pauseMinutes });
+  if (onAgentMessageRecalled) agentRecallHandlers.set(ch.id, onAgentMessageRecalled);
   const ctx = ctxOf(ch.workspaceId);
   const toInput = (entry: ChannelMessageLog) => ({
     threadId: entry.threadId,
@@ -256,9 +259,24 @@ export function inboxHooks(
         }
       })().catch((err) => logger.warn(`zalo.inbox_store lỗi: ${(err as Error).message}`));
     },
-    onMessageUndo: async (event: { threadId: string; peerKind: "direct" | "group"; targetMsgId: string }) => {
+    onMessageUndo: async (event: { threadId: string; peerKind: "direct" | "group"; targetMsgId: string; isSelf: boolean }) => {
       // Tin gửi được Zalo xác nhận trước khi onMessageLog ghi DB xong; chờ ngắn
-      // để một thao tác thu hồi rất nhanh vẫn tìm thấy đúng tin của Agent.
+      // để một thao tác thu hồi rất nhanh vẫn tìm thấy tin gốc.
+      let removed: InboxMessageRow | null = null;
+      for (let attempt = 0; attempt < 4 && !removed; attempt++) {
+        if (attempt) await new Promise((resolve) => setTimeout(resolve, 150));
+        removed = await markInboxMessageRemoved(db, ctx, ch.id, event.threadId,
+          { msgId: event.targetMsgId }, "recalled");
+      }
+      if (removed) {
+        const full = await getInboxMessageById(db, ctx, ch.id, event.threadId, removed.id);
+        if (full) broadcast(ch.workspaceId, ch.id, "message_update", {
+          channelId: ch.id, threadId: event.threadId, message: publicMessage(full, ch.workspaceId),
+        });
+        const updatedThread = await getInboxThread(db, ctx, ch.id, event.threadId);
+        if (updatedThread) broadcast(ch.workspaceId, ch.id, "thread", { channelId: ch.id, thread: updatedThread });
+      }
+      if (!event.isSelf) return false;
       let marked = false;
       for (let attempt = 0; attempt < 4 && !marked; attempt++) {
         if (attempt) await new Promise((resolve) => setTimeout(resolve, 150));
@@ -342,6 +360,7 @@ export async function reactInboxMessage(
   if (!rt?.isConnected()) throw err("NOT_CONNECTED", `Kênh ${platformOf(input.channelId)} chưa kết nối — vào Channels → Kết nối QR để quét lại.`);
   const msg = await getInboxMessageById(db, ctx, input.channelId, input.threadId, input.messageId);
   if (!msg) throw err("MESSAGE_NOT_FOUND", "Không có tin nhắn này trong hội thoại.");
+  if (msg.removed) throw err("CANNOT_REACT", "Tin đã xóa hoặc thu hồi nên không thả cảm xúc được.");
   const cli = typeof msg.meta?.cliMsgId === "string" ? msg.meta.cliMsgId : "";
   const needCli = rt.kind === "zalo_personal";
   if (!msg.msgId || (needCli ? !cli : !msg.meta?.waKey)) throw err("CANNOT_REACT", "Tin này không thả cảm xúc được (tin lưu trước bản 1.5.0 hoặc tin do hệ thống gửi).");
@@ -362,6 +381,7 @@ export { latestIncomingInboxMessages, ZALO_REACTIONS, isZaloReactionKey };
 
 export function forgetInboxChannel(channelId: string): void {
   inboxState.delete(channelId);
+  agentRecallHandlers.delete(channelId);
 }
 
 // ===== Quyền truy cập kênh =====
@@ -656,6 +676,7 @@ const InboxSettingsBody = z.object({
 });
 
 const ReactBody = z.object({ reaction: z.enum(["heart", "like", "haha", "wow", "cry", "angry", "none"]) });
+const MessageStateBody = z.object({ action: z.enum(["recalled", "deleted"]) });
 
 function sendError(reply: FastifyReply, err: unknown, channelId: string) {
   const e = err as Error & { code?: string };
@@ -874,6 +895,55 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
       return await rt.syncContacts();
     } catch (err) {
       return reply.code(502).send({ error: `Đồng bộ danh bạ lỗi: ${(err as Error).message}` });
+    }
+  });
+
+  // Thu hồi cho mọi người hoặc xóa chỉ trên tài khoản Zalo; vẫn giữ bản ghi Inbox.
+  app.post(`${base}/:channelId/threads/:threadId/messages/:messageId/state`, async (req, reply) => {
+    const { channelId, threadId, messageId } = req.params as { channelId: string; threadId: string; messageId: string };
+    if (!(await guard(req, reply, channelId))) return;
+    if (kindOf(channelId) !== "zalo_personal") return reply.code(422).send({ error: "Kênh này chưa hỗ trợ thu hồi/xóa tin" });
+    const parsed = MessageStateBody.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "Thao tác không hợp lệ" });
+    const [message, thread] = await Promise.all([
+      getInboxMessageById(db, req.authCtx, channelId, threadId, messageId),
+      getInboxThread(db, req.authCtx, channelId, threadId),
+    ]);
+    if (!message || !thread) return reply.code(404).send({ error: "Không tìm thấy tin nhắn" });
+    if (message.direction !== "out") return reply.code(422).send({ error: "Chỉ xử lý tin đã gửi từ tài khoản này" });
+    if (message.removed) return reply.code(409).send({ error: "Tin này đã xóa hoặc thu hồi" });
+    const cliMsgId = message.meta?.cliMsgId;
+    if (!message.msgId || typeof cliMsgId !== "string" || !cliMsgId) {
+      return reply.code(422).send({ error: "Chưa có đủ mã xác nhận từ Zalo để thu hồi tin này" });
+    }
+    const runtime = inboxRuntime(channelId);
+    if (!runtime?.isConnected() || !runtime.changeMessageState) {
+      return reply.code(409).send({ error: "Kênh Zalo chưa kết nối", code: "NOT_CONNECTED" });
+    }
+    try {
+      await runtime.changeMessageState({
+        threadId, peerKind: thread.kind, msgId: message.msgId, cliMsgId,
+        action: parsed.data.action,
+      });
+      await markInboxMessageRemoved(db, req.authCtx, channelId, threadId,
+        { id: messageId }, parsed.data.action);
+      const current = await getInboxMessageById(db, req.authCtx, channelId, threadId, messageId);
+      if (current) broadcast(req.authCtx.workspaceId, channelId, "message_update", {
+        channelId, threadId, message: publicMessage(current, req.authCtx.workspaceId),
+      });
+      if (parsed.data.action === "recalled" && message.source === "agent") {
+        await markAgentMessageRecalled(db, req.authCtx, channelId, threadId, message.msgId);
+        await agentRecallHandlers.get(channelId)?.(threadId, thread.kind);
+      }
+      const latestThread = await getInboxThread(db, req.authCtx, channelId, threadId);
+      if (latestThread) broadcast(req.authCtx.workspaceId, channelId, "thread", { channelId, thread: latestThread });
+      return { ok: true, message: current ? publicMessage(current, req.authCtx.workspaceId) : null };
+    } catch (error) {
+      const e = error as Error & { code?: string };
+      if (e.code === "NOT_CONNECTED") return reply.code(409).send({ error: e.message });
+      if (isPlatformRejected(e)) return reply.code(422).send({ error: `Zalo từ chối: ${e.message}` });
+      logger.warn(`zalo.inbox_message_state lỗi: ${e.message}`);
+      return reply.code(502).send({ error: `Không đổi được trạng thái tin: ${e.message}` });
     }
   });
 

@@ -58,6 +58,14 @@ export interface PersonalChannel extends Channel {
     threadName?: string;
   }): Promise<string[]>;
   sendTestMessage(threadId: string, peerKind: "direct" | "group", text: string): Promise<void>;
+  /** Zalo: thu hồi cho mọi người hoặc xóa chỉ khỏi tài khoản này. */
+  changeMessageState?(input: {
+    threadId: string;
+    peerKind: "direct" | "group";
+    msgId: string;
+    cliMsgId: string;
+    action: "recalled" | "deleted";
+  }): Promise<void>;
   setAutoReaction(v: "heart" | "like" | null): void;
   getAutoReaction(): "heart" | "like" | null;
   react(input: {
