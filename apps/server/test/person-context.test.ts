@@ -166,10 +166,12 @@ describe("composeSystemPrompt — thứ tự các phần", () => {
       person: "PERSON",
       guardNote: "\n\n[GUARD]",
     });
-    expect(s).toBe("AGENT\n\nCONTEXT\n\nKNOWLEDGE\n\nPERSON\n\n[GUARD]");
+    expect(s).toMatch(/^AGENT\n\nCONTEXT\n\nKNOWLEDGE\n\nPERSON\n\n\[QUY TẮC TRẢ LỜI NGẮN/);
+    expect(s).toMatch(/\n\n\[GUARD\]$/);
   });
 
   it("bỏ qua phần rỗng", () => {
-    expect(composeSystemPrompt("AGENT", { context: "  ", person: "PERSON" })).toBe("AGENT\n\nPERSON");
+    expect(composeSystemPrompt("AGENT", { context: "  ", person: "PERSON" }))
+      .toMatch(/^AGENT\n\nPERSON\n\n\[QUY TẮC TRẢ LỜI NGẮN/);
   });
 });
