@@ -20,6 +20,9 @@ import {
   resumeAgentAfterCustomerRequest,
   getInboxMessageByMsgId,
   listInboxMessages,
+  getInboxThread,
+  claimOrchidOrderDispatch,
+  finishOrchidOrderDispatch,
   getPersonContextData,
   loadMessages,
   type EnabledChannel,
@@ -44,13 +47,14 @@ import {
   type RunHooks,
 } from "@penai/channels";
 import { forgetInboxChannel, inboxHooks } from "./inbox.js";
-import { isPersonalChannelKind } from "@penai/channels";
+import { isPersonalChannel, isPersonalChannelKind } from "@penai/channels";
 import { classifyOrchidSalesScope } from "./orchid-sales-scope.js";
 import { hasPersonalAddressMismatch, requiresPersonalAddressGuard } from "./persona-reply-guard.js";
 import { isFreshCustomerRequest } from "./recall-policy.js";
 import { orchidHandoffContext } from "./orchid-handoff-context.js";
 import { editOrchidPhotoWithOpenAI } from "./orchid-photo-openai.js";
 import { prepareZaloPhotoPaths } from "./outbound-photo-path.js";
+import { classifyConfirmedOrchidOrder, formatOrchidOrderDispatch, orchidOrderFingerprint } from "./orchid-order-dispatch.js";
 
 /** Handler + channel theo channelId — cho webhook route (WhatsApp, Teams) dùng. */
 export const channelHandlers = new Map<
@@ -972,17 +976,61 @@ export function makeInboundHandler(
     );
     // Inbox giữ cả những tin nhân viên/khách trao đổi trước khi Agent được duyệt.
     // Session của Agent có thể chưa tồn tại lúc đó, nên nạp đúng thread trước khi trả lời.
-    const handoffContext = agent.key === "nhan-vien-kinh-doanh-orchids-world" &&
+    const handoffMessages = agent.key === "nhan-vien-kinh-doanh-orchids-world" &&
       msg.channelKind === "zalo_personal"
       ? await listInboxMessages(db, ctx, channel.id, msg.chatKey.slice(msg.chatKey.indexOf(":") + 1), { limit: 30 })
-        .then(orchidHandoffContext)
         .catch((error) => {
           logger.warn(`Không đọc được ngữ cảnh Inbox khi tiếp quản: ${String(error)}`);
-          return "";
+          return [];
         })
-      : "";
+      : [];
+    const handoffContext = orchidHandoffContext(handoffMessages);
+    let dispatchContext = "";
+    const orderGroupId = channel.config["orchid_order_dispatch_group"];
+    if (agent.key === "nhan-vien-kinh-doanh-orchids-world" && channel.kind === "zalo_personal" &&
+        msg.peerKind === "direct" && typeof orderGroupId === "string" && /^\d{1,30}$/.test(orderGroupId)) {
+      const sourceThreadId = msg.chatKey.slice(msg.chatKey.indexOf(":") + 1);
+      try {
+        const provider = rt.providers.get(agent.provider, ctx.workspaceId);
+        const limited = rt.gate
+          ? gatedProvider(rt.gate, provider, { providerKey: agent.provider, priority: 0 })
+          : provider;
+        const order = await classifyConfirmedOrchidOrder(limited, agent.model, handoffMessages,
+          { text: msg.text, senderName: msg.senderName ?? msg.senderId }, msg.sentAt ?? new Date());
+        if (order) {
+          const thread = await getInboxThread(db, ctx, channel.id, sourceThreadId);
+          const customer = thread?.profileName || thread?.contactAlias || thread?.name || msg.senderName || msg.senderId;
+          const dispatchText = formatOrchidOrderDispatch(order, customer);
+          const claimId = await claimOrchidOrderDispatch(db, ctx, {
+            channelId: channel.id, threadId: sourceThreadId,
+            fingerprint: orchidOrderFingerprint(order), targetThreadId: orderGroupId, message: dispatchText,
+          });
+          if (claimId) {
+            const runtime = channelHandlers.get(channel.id)?.channel;
+            try {
+              if (!isPersonalChannel(runtime) || !runtime.isConnected()) throw new Error("Zalo Bán Hàng Hot 6 chưa kết nối");
+              const ids = await runtime.sendManual({
+                threadId: orderGroupId, peerKind: "group", text: dispatchText,
+                source: "agent", threadName: "Phan Don Cam Hoa",
+              });
+              if (!ids.length) throw new Error("Zalo không trả mã tin đã gửi");
+              await finishOrchidOrderDispatch(db, ctx, claimId, ids[0] ?? null);
+              dispatchContext = "[HỆ THỐNG: Đã gửi thông báo đơn vào nhóm phân đơn cắm hoa thành công. Chỉ lúc này mới được nói với khách rằng đã báo các bạn làm hoa.]";
+            } catch (error) {
+              await finishOrchidOrderDispatch(db, ctx, claimId, null, String(error)).catch(() => {});
+              logger.warn(`Không gửi được đơn sang nhóm phân đơn: ${String(error)}`);
+              dispatchContext = "[HỆ THỐNG: Chưa gửi được thông báo đơn vào nhóm phân đơn cắm hoa. Không được nói với khách rằng đã báo các bạn làm hoa; cần báo nhân viên xử lý.]";
+            }
+          } else {
+            dispatchContext = "[HỆ THỐNG: Đơn này đã được ghi nhận để tránh gửi trùng. Không tự khẳng định đã báo nhóm lần nữa.]";
+          }
+        }
+      } catch (error) {
+        logger.warn(`Không kiểm tra được đơn chốt trên ${channel.name}: ${String(error)}`);
+      }
+    }
     const userMessage = handoffContext
-      ? `${handoffContext}\n\n[YÊU CẦU MỚI NHẤT CẦN TRẢ LỜI]\n${latestUserMessage}`
+      ? `${handoffContext}\n\n${dispatchContext ? `${dispatchContext}\n\n` : ""}[YÊU CẦU MỚI NHẤT CẦN TRẢ LỜI]\n${latestUserMessage}`
       : latestUserMessage;
     // Vision = ảnh lượt này + các ảnh gần đây của session (đọc lại từ đĩa) —
     // người dùng gửi ảnh trước, nhắn yêu cầu sau thì model vẫn "nhìn thấy" ảnh.
