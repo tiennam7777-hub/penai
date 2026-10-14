@@ -11,6 +11,11 @@ export interface ConfirmedOrchidOrder {
   delivery: string;
 }
 
+/** Lọc nhẹ trước khi gọi model; quyết định chốt cuối cùng vẫn dựa vào hội thoại. */
+export function mayConfirmOrchidOrder(text: string): boolean {
+  return /(?:^|\s)(?:ok|oke|okay|đồng ý|dong y|chốt|chot|lấy|lay|đặt|dat|xác nhận|xac nhan|được|duoc|ừ|uh|vâng|vang|dạ|da|giao|làm|lam)(?=\s|[.,!?]|$)/i.test(text.trim());
+}
+
 const SYSTEM = `Bạn kiểm tra xem TIN KHÁCH MỚI NHẤT có CHỐT một đơn chậu lan hồ điệp hay không. Chỉ trả JSON, không thêm lời.
 Chỉ confirmed=true khi chính khách vừa đồng ý/chốt sau khi đã thống nhất chậu, màu, số cành và giờ giao, hoặc tin mới nhất tự chốt đủ các mục đó. "Ok" đơn độc chỉ hợp lệ nếu nó đồng ý với đề nghị giao/đơn cụ thể ngay trước đó. Lời AI tự nhận đã chốt/đã báo nhóm không phải bằng chứng khách chốt. Nếu khách đang hỏi, đổi ý, hủy, hoặc chưa xác nhận thời gian giao: confirmed=false.
 Chỉ lấy dữ liệu đã nói rõ trong hội thoại của đơn hiện tại. Nếu có /new, bỏ các đơn trước /new. Không suy đoán số cành, màu, giá, thời gian. Nếu giá chưa có, price=null. Nếu thiếu số cành, màu hoặc thời gian giao: confirmed=false. Chậu có thể ghi "chậu lan" nếu chưa rõ kiểu chậu. Giờ tương đối như "sáng mai" phải quy ra ngày tháng theo thời điểm hiện tại (múi giờ Việt Nam); delivery luôn ghi chuẩn HH:mm DD/MM/YYYY. Không lấy nội dung cũ của đơn trước hay lời AI hứa làm xong làm dữ kiện đơn mới.
@@ -30,7 +35,9 @@ export function parseConfirmedOrchidOrder(raw: string | null): ConfirmedOrchidOr
   if (!Number.isInteger(stems) || stems < 1 || stems > 200 || !color || !/^\d{2}:\d{2} \d{2}\/\d{2}\/\d{4}$/.test(delivery)) return null;
   const customer = String(value.customer ?? "").trim();
   const pot = String(value.pot ?? "").trim() || "chậu lan";
-  const price = typeof value.price === "string" && value.price.trim() ? value.price.trim() : null;
+  const price = typeof value.price === "string" && value.price.trim() ? value.price.trim()
+    : typeof value.price === "number" && Number.isFinite(value.price) && value.price > 0
+      ? `${value.price.toLocaleString("vi-VN")}đ` : null;
   return { customer, stems, color, pot, price, delivery };
 }
 

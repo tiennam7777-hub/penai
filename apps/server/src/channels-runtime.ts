@@ -54,7 +54,7 @@ import { isFreshCustomerRequest } from "./recall-policy.js";
 import { orchidHandoffContext } from "./orchid-handoff-context.js";
 import { editOrchidPhotoWithOpenAI } from "./orchid-photo-openai.js";
 import { prepareZaloPhotoPaths } from "./outbound-photo-path.js";
-import { classifyConfirmedOrchidOrder, formatOrchidOrderDispatch, orchidOrderFingerprint } from "./orchid-order-dispatch.js";
+import { classifyConfirmedOrchidOrder, formatOrchidOrderDispatch, mayConfirmOrchidOrder, orchidOrderFingerprint } from "./orchid-order-dispatch.js";
 
 /** Handler + channel theo channelId — cho webhook route (WhatsApp, Teams) dùng. */
 export const channelHandlers = new Map<
@@ -988,7 +988,8 @@ export function makeInboundHandler(
     let dispatchContext = "";
     const orderGroupId = channel.config["orchid_order_dispatch_group"];
     if (agent.key === "nhan-vien-kinh-doanh-orchids-world" && channel.kind === "zalo_personal" &&
-        msg.peerKind === "direct" && typeof orderGroupId === "string" && /^\d{1,30}$/.test(orderGroupId)) {
+        msg.peerKind === "direct" && mayConfirmOrchidOrder(msg.text) &&
+        typeof orderGroupId === "string" && /^\d{1,30}$/.test(orderGroupId)) {
       const sourceThreadId = msg.chatKey.slice(msg.chatKey.indexOf(":") + 1);
       try {
         const provider = rt.providers.get(agent.provider, ctx.workspaceId);

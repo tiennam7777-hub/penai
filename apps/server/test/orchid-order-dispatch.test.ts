@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
-  classifyConfirmedOrchidOrder, formatOrchidOrderDispatch, orchidOrderFingerprint, parseConfirmedOrchidOrder,
+  classifyConfirmedOrchidOrder, formatOrchidOrderDispatch, mayConfirmOrchidOrder,
+  orchidOrderFingerprint, parseConfirmedOrchidOrder,
 } from "../src/orchid-order-dispatch.js";
 import type { Provider } from "@penai/providers";
 
 describe("orchid order dispatch", () => {
+  it("only classifies messages that might confirm an order", () => {
+    expect(mayConfirmOrchidOrder("Ok e")).toBe(true);
+    expect(mayConfirmOrchidOrder("Chốt chậu này giao sáng mai nhé")).toBe(true);
+    expect(mayConfirmOrchidOrder("Anh hỏi giá chậu 15 cành")).toBe(false);
+  });
   it("rejects inquiries and incomplete confirmations", () => {
     expect(parseConfirmedOrchidOrder('{"confirmed":false}')).toBeNull();
     expect(parseConfirmedOrchidOrder('{"confirmed":true,"stems":15,"color":"vàng","delivery":""}')).toBeNull();
