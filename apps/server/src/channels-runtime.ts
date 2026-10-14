@@ -50,6 +50,7 @@ import { hasPersonalAddressMismatch, requiresPersonalAddressGuard } from "./pers
 import { isFreshCustomerRequest } from "./recall-policy.js";
 import { orchidHandoffContext } from "./orchid-handoff-context.js";
 import { editOrchidPhotoWithOpenAI } from "./orchid-photo-openai.js";
+import { prepareZaloPhotoPaths } from "./outbound-photo-path.js";
 
 /** Handler + channel theo channelId — cho webhook route (WhatsApp, Teams) dùng. */
 export const channelHandlers = new Map<
@@ -1121,16 +1122,19 @@ export function makeInboundHandler(
 
     // model có thể lặp lại marker trong câu trả lời — gỡ đi
     const cleanText = finalText.replace(MEDIA_MARKER_RE, "").trim();
+    const outgoingMedia = channel.kind === "zalo_personal"
+      ? await prepareZaloPhotoPaths(mediaOut, userDir)
+      : mediaOut;
     if (roleMismatch(cleanText)) {
       logger.warn(`Chặn câu kết đảo vai xưng hô trên kênh ${channel.id}`);
-      return mediaOut.length ? { kind: "reply", text: "", media: mediaOut } : { kind: "ignore" };
+      return outgoingMedia.length ? { kind: "reply", text: "", media: outgoingMedia } : { kind: "ignore" };
     }
     return {
       kind: "reply",
       // Đã có media hoặc thẻ duyệt gửi đi → final rỗng là hợp lệ (nội dung nằm
       // trong thẻ/file), không chèn placeholder gây bubble "(không có nội dung)".
-      text: cleanText || (mediaOut.length || cardSent || emittedBlockReply ? "" : "(không có nội dung)"),
-      ...(mediaOut.length ? { media: mediaOut } : {}),
+      text: cleanText || (outgoingMedia.length || cardSent || emittedBlockReply ? "" : "(không có nội dung)"),
+      ...(outgoingMedia.length ? { media: outgoingMedia } : {}),
     };
   };
 }
