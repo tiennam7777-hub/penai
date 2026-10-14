@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gt, ne, notInArray, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import type { WorkspaceContext } from "@penai/shared";
 import type { Db } from "./client.js";
@@ -520,14 +520,35 @@ export async function listInboxObservedPeers(
   db: Db,
   ctx: WorkspaceContext,
   channelId: string,
+  options: { search?: string; excludeChatKeys?: string[]; excludeDirect?: boolean } = {},
 ) {
+  const search = options.search?.trim().slice(0, 100);
   return withWorkspace(db, ctx, (tx) =>
     tx
       .select()
       .from(zaloObservedPeers)
-      .where(eq(zaloObservedPeers.channelId, channelId))
+      .where(and(
+        eq(zaloObservedPeers.channelId, channelId),
+        options.excludeChatKeys?.length ? notInArray(zaloObservedPeers.chatKey, options.excludeChatKeys) : undefined,
+        options.excludeDirect ? ne(zaloObservedPeers.kind, "direct") : undefined,
+        search ? sql<boolean>`(
+          POSITION(LOWER(${search}) IN LOWER(${zaloObservedPeers.name})) > 0 OR
+          POSITION(LOWER(${search}) IN LOWER(${zaloObservedPeers.lastSenderName})) > 0 OR
+          POSITION(LOWER(${search}) IN LOWER(${zaloObservedPeers.threadId})) > 0 OR
+          EXISTS (
+            SELECT 1 FROM inbox_threads AS search_thread
+            WHERE search_thread.channel_id = ${channelId}
+              AND search_thread.kind = 'direct'
+              AND search_thread.thread_id = ${zaloObservedPeers.threadId}
+              AND (
+                POSITION(LOWER(${search}) IN LOWER(search_thread.contact_alias)) > 0 OR
+                POSITION(LOWER(${search}) IN LOWER(search_thread.name)) > 0
+              )
+          )
+        )` : undefined,
+      ))
       .orderBy(sql`${zaloObservedPeers.lastSeenAt} DESC`)
-      .limit(500),
+      .limit(search ? 200 : 500),
   );
 }
 

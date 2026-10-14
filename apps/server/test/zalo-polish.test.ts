@@ -49,6 +49,12 @@ describe("Zalo pending peers", () => {
     expect((await peers())[0].name).toBe("Khách hàng Linh");
     await upsertInboxContacts(dbh.db, ctx(), channel.id, [{ threadId: "100", kind: "direct", name: "Linh", contactAlias: "Chị Linh" }]);
     expect((await peers())[0].name).toBe("Chị Linh");
+    const foundByAlias = await app.inject({ method: "GET", url: `${url}?q=${encodeURIComponent("Chị Linh")}`, headers: auth() });
+    expect(foundByAlias.statusCode).toBe(200);
+    expect(foundByAlias.json().peers.map((p: { chatKey: string }) => p.chatKey)).toContain("direct:100");
+    const noMatch = await app.inject({ method: "GET", url: `${url}?q=${encodeURIComponent("Tên không tồn tại")}`, headers: auth() });
+    expect(noMatch.statusCode).toBe(200);
+    expect(noMatch.json().peers).toEqual([]);
     await upsertInboxContacts(dbh.db, ctx(), channel.id, [{ threadId: "100", kind: "direct", name: "Linh", contactAlias: "" }]);
     expect((await peers())[0].name).toBe("Linh");
     expect((await inboxPeerNames(dbh.db, { workspaceId: fx.wsB, userId: fx.userId, role: "ws_admin" }, channel.id, ["100"])).size).toBe(0);

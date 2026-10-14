@@ -2028,11 +2028,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     // vừa đến chưa kịp ghi. Cờ `allowed` tính theo demo threads hiện tại.
     const demoThreads = runtime.demoThreads();
     const allowed = new Set(demoThreads);
+    const rawSearch = (req.query as { q?: unknown }).q;
+    const search = typeof rawSearch === "string" ? rawSearch.trim().slice(0, 100) : "";
+    const openDirect = runtime.status().openDirect;
     const byKey = new Map<
       string,
       ReturnType<typeof runtime.listObserved>[number]
     >();
-    for (const row of await listInboxObservedPeers(db, req.authCtx, id)) {
+    for (const row of await listInboxObservedPeers(db, req.authCtx, id, search
+      ? { search, excludeChatKeys: demoThreads, excludeDirect: openDirect }
+      : {})) {
       byKey.set(row.chatKey, {
         chatKey: row.chatKey,
         threadId: row.threadId,
@@ -2048,16 +2053,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     }
     for (const peer of runtime.listObserved()) {
       const known = byKey.get(peer.chatKey);
+      if (search && !known && (
+        allowed.has(peer.chatKey) || (openDirect && peer.type === "direct") ||
+        ![peer.name, peer.lastSenderName, peer.threadId].some((value) => value.toLocaleLowerCase("vi").includes(search.toLocaleLowerCase("vi")))
+      )) continue;
       if (!known || peer.lastSeenAt > known.lastSeenAt) byKey.set(peer.chatKey, peer);
     }
     const peers = [...byKey.values()].sort((a, b) =>
       b.lastSeenAt.localeCompare(a.lastSeenAt),
-    );
+    ).slice(0, search ? 200 : undefined);
     const names = await inboxPeerNames(db, req.authCtx, id, peers.filter((p) => p.type === "direct").map((p) => p.threadId));
     for (const peer of peers) {
       if (peer.type === "direct") peer.name = names.get(peer.threadId) || peer.name || peer.threadId;
     }
-    const openDirect = runtime.status().openDirect;
     if (openDirect) {
       for (const p of peers) if (p.chatKey.startsWith("direct:")) p.allowed = true;
     }

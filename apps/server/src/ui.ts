@@ -1618,6 +1618,17 @@ export const INDEX_HTML = `<!doctype html>
     var listC = card(m, "Danh sách kênh");
     var pendingC = card(m, "Yêu cầu chờ duyệt");
     var zaloC = card(m, "Zalo — nhóm/thread chờ duyệt");
+    zaloC.innerHTML = '<h3>Zalo — nhóm/thread chờ duyệt <span id="zaloPendingCount" class="pill" style="margin-left:6px">0</span></h3>' +
+      '<div class="row" style="margin-bottom:8px"><input id="zaloPendingSearch" type="search" placeholder="Tìm tên người hoặc nhóm chờ duyệt..." aria-label="Tìm người hoặc nhóm chờ duyệt" style="max-width:420px;width:100%"></div>' +
+      '<div class="muted" style="font-size:.78rem;margin-bottom:6px">Zalo: bấm Duyệt một lần để mở hội thoại và duyệt cá nhân ngay; trong nhóm AI chỉ trả lời khi được gọi. Thao tác này không gửi lời chào.</div>' +
+      '<div id="zaloPendingResults"></div>';
+    var zaloSearchInput = $("#zaloPendingSearch", zaloC);
+    var zaloSearchTimer = null;
+    var zaloLoadSeq = 0;
+    zaloSearchInput.oninput = function () {
+      clearTimeout(zaloSearchTimer);
+      zaloSearchTimer = setTimeout(loadZaloPending, 300);
+    };
     var kinds = ["telegram", "discord", "slack", "whatsapp", "whatsapp_personal", "zalo", "zalo_personal", "feishu", "msteams"];
     function loadPending() {
       pendingC.innerHTML = '<h3>Yêu cầu chờ duyệt</h3><div class="muted">Đang tải...</div>';
@@ -1651,15 +1662,20 @@ export const INDEX_HTML = `<!doctype html>
     // Zalo Personal: thread (nhóm/cá nhân) đã nhắn tới nhưng CHƯA được duyệt
     // nhận/gửi — duyệt ở đây = thêm vào demo threads của kênh.
     function loadZaloPending() {
-      zaloC.style.display = "none";
+      var seq = ++zaloLoadSeq;
+      var search = zaloSearchInput.value.trim();
+      var resultsBox = $("#zaloPendingResults", zaloC);
+      resultsBox.innerHTML = '<div class="muted">' + (search ? "Đang tìm..." : "Đang tải...") + '</div>';
       api("/v1/channels").then(function (j) {
         var zaloChannels = (j.channels || []).filter(function (c) { return isPersonalKind(c.kind) && c.enabled; });
-        if (!zaloChannels.length) return;
+        if (!zaloChannels.length) { if (seq === zaloLoadSeq) zaloC.style.display = "none"; return; }
+        zaloC.style.display = "";
         Promise.all(zaloChannels.map(function (c) {
-          return api("/v1/channels/" + c.id + "/personal/observed")
+          return api("/v1/channels/" + c.id + "/personal/observed" + (search ? "?q=" + encodeURIComponent(search) : ""))
             .then(function (o) { return { ch: c, peers: o.peers || [], demoThreads: o.demoThreads || [] }; })
             .catch(function () { return null; }); // kênh chưa kết nối thì bỏ qua
         })).then(function (results) {
+          if (seq !== zaloLoadSeq) return;
           var rows = [];
           results.forEach(function (r) {
             if (!r) return;
@@ -1667,11 +1683,16 @@ export const INDEX_HTML = `<!doctype html>
               if (!p.allowed) rows.push({ ch: r.ch, demoThreads: r.demoThreads, p: p });
             });
           });
-          if (!rows.length) return;
-          zaloC.style.display = "";
-          zaloC.innerHTML = '<h3>Zalo — nhóm/thread chờ duyệt <span class="pill" style="margin-left:6px">' + rows.length + '</span></h3>' +
-            '<div class="muted" style="font-size:.78rem;margin-bottom:6px">Zalo: bấm Duyệt một lần để mở hội thoại và duyệt cá nhân ngay; trong nhóm AI chỉ trả lời khi được gọi. Thao tác này không gửi lời chào.</div>';
-          zaloC.appendChild(table(["Kênh", "Loại", "Tên", "Id", "Tin nhắn", "Lần cuối", ""], rows, function (r) {
+          $("#zaloPendingCount", zaloC).textContent = String(rows.length);
+          resultsBox.innerHTML = "";
+          if (!rows.length) {
+            resultsBox.innerHTML = '<div class="muted">' + (search ? "Không tìm thấy người hoặc nhóm chờ duyệt." : "Không có người hoặc nhóm chờ duyệt trong danh sách mới nhất. Có thể tìm theo tên ở ô trên.") + '</div>';
+            return;
+          }
+          if (search && results.some(function (r) { return r && r.peers.length >= 200; })) {
+            resultsBox.innerHTML = '<div class="muted" style="margin-bottom:6px">Hiển thị tối đa 200 kết quả mới nhất mỗi kênh. Hãy nhập tên cụ thể hơn nếu chưa thấy người cần tìm.</div>';
+          }
+          resultsBox.appendChild(table(["Kênh", "Loại", "Tên", "Id", "Tin nhắn", "Lần cuối", ""], rows, function (r) {
             var p = r.p;
             var tr = el("tr");
             var when = p.lastSeenAt ? new Date(p.lastSeenAt).toLocaleString("vi-VN") : "";
@@ -1695,7 +1716,7 @@ export const INDEX_HTML = `<!doctype html>
             td.appendChild(ok); tr.appendChild(td); return tr;
           }));
         });
-      }).catch(function () {});
+      }).catch(function (e) { if (seq === zaloLoadSeq) resultsBox.innerHTML = '<span class="err">' + esc(e.message) + '</span>'; });
     }
     function load() {
       api("/v1/channels").then(function (j) {
