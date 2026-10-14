@@ -46,21 +46,28 @@ export interface InboxThread {
   recallWaitingForCustomer: boolean;
 }
 
-export interface InboxTag { id: string; name: string }
+export interface InboxTag { id: string; name: string; color: string }
 
 export async function listInboxTags(db: Db, ctx: WorkspaceContext): Promise<InboxTag[]> {
   const res = await withWorkspace(db, ctx, (tx) => tx.execute(sql`
-    SELECT id, name FROM inbox_tags ORDER BY lower(name)`));
-  return (res.rows as Raw[]).map((r) => ({ id: String(r.id), name: String(r.name) }));
+    SELECT id, name, color FROM inbox_tags ORDER BY lower(name)`));
+  return (res.rows as Raw[]).map((r) => ({ id: String(r.id), name: String(r.name), color: String(r.color) }));
 }
 
-export async function createInboxTag(db: Db, ctx: WorkspaceContext, name: string): Promise<InboxTag> {
+export async function createInboxTag(db: Db, ctx: WorkspaceContext, name: string, color = "#2563EB"): Promise<InboxTag> {
   const res = await withWorkspace(db, ctx, (tx) => tx.execute(sql`
-    INSERT INTO inbox_tags (workspace_id, name) VALUES (${ctx.workspaceId}, ${name})
+    INSERT INTO inbox_tags (workspace_id, name, color) VALUES (${ctx.workspaceId}, ${name}, ${color})
     ON CONFLICT (workspace_id, lower(name)) DO UPDATE SET name = inbox_tags.name
-    RETURNING id, name`));
+    RETURNING id, name, color`));
   const row = res.rows[0] as Raw;
-  return { id: String(row.id), name: String(row.name) };
+  return { id: String(row.id), name: String(row.name), color: String(row.color) };
+}
+
+export async function updateInboxTagColor(db: Db, ctx: WorkspaceContext, tagId: string, color: string): Promise<InboxTag | null> {
+  const res = await withWorkspace(db, ctx, (tx) => tx.execute(sql`
+    UPDATE inbox_tags SET color = ${color} WHERE id = ${tagId} RETURNING id, name, color`));
+  const row = res.rows[0] as Raw | undefined;
+  return row ? { id: String(row.id), name: String(row.name), color: String(row.color) } : null;
 }
 
 export async function setInboxThreadTags(
@@ -146,7 +153,7 @@ function mapThread(r: Raw): InboxThread {
     name: String(r.name ?? ""),
     contactAlias: String(r.contact_alias ?? ""),
     profileName: r.kind === "direct" ? String(r.profile_name ?? "") : "",
-    tags: Array.isArray(r.inbox_tags) ? (r.inbox_tags as Raw[]).map((tag) => ({ id: String(tag.id), name: String(tag.name) })) : [],
+    tags: Array.isArray(r.inbox_tags) ? (r.inbox_tags as Raw[]).map((tag) => ({ id: String(tag.id), name: String(tag.name), color: String(tag.color) })) : [],
     avatar: String(r.avatar ?? ""),
     phone: String(r.phone ?? ""),
     isContact: r.is_contact === true,
@@ -397,7 +404,7 @@ export async function listInboxThreads(
   const from = sql`FROM inbox_threads t
     LEFT JOIN contacts c ON c.channel_id = t.channel_id AND c.external_id = t.thread_id
     LEFT JOIN principal_profiles pp ON pp.principal_id = c.principal_id`;
-  const tags = sql`LEFT JOIN LATERAL (SELECT COALESCE(json_agg(json_build_object('id', it.id, 'name', it.name)
+  const tags = sql`LEFT JOIN LATERAL (SELECT COALESCE(json_agg(json_build_object('id', it.id, 'name', it.name, 'color', it.color)
     ORDER BY lower(it.name)), '[]'::json) AS inbox_tags FROM inbox_thread_tags itt
     JOIN inbox_tags it ON it.id = itt.tag_id WHERE itt.channel_id = t.channel_id AND itt.thread_id = t.thread_id) td ON true`;
   return withWorkspace(db, ctx, async (tx) => {
@@ -423,7 +430,7 @@ export async function listAllInboxThreads(
     tx.execute(sql`SELECT t.*, pp.display_name AS profile_name, td.inbox_tags FROM inbox_threads t
       LEFT JOIN contacts c ON c.channel_id = t.channel_id AND c.external_id = t.thread_id
       LEFT JOIN principal_profiles pp ON pp.principal_id = c.principal_id
-      LEFT JOIN LATERAL (SELECT COALESCE(json_agg(json_build_object('id', it.id, 'name', it.name)
+      LEFT JOIN LATERAL (SELECT COALESCE(json_agg(json_build_object('id', it.id, 'name', it.name, 'color', it.color)
         ORDER BY lower(it.name)), '[]'::json) AS inbox_tags FROM inbox_thread_tags itt
         JOIN inbox_tags it ON it.id = itt.tag_id WHERE itt.channel_id = t.channel_id AND itt.thread_id = t.thread_id) td ON true
       WHERE t.channel_id = ${channelId}
@@ -442,7 +449,7 @@ export async function getInboxThread(
     tx.execute(sql`SELECT t.*, pp.display_name AS profile_name, td.inbox_tags FROM inbox_threads t
       LEFT JOIN contacts c ON c.channel_id = t.channel_id AND c.external_id = t.thread_id
       LEFT JOIN principal_profiles pp ON pp.principal_id = c.principal_id
-      LEFT JOIN LATERAL (SELECT COALESCE(json_agg(json_build_object('id', it.id, 'name', it.name)
+      LEFT JOIN LATERAL (SELECT COALESCE(json_agg(json_build_object('id', it.id, 'name', it.name, 'color', it.color)
         ORDER BY lower(it.name)), '[]'::json) AS inbox_tags FROM inbox_thread_tags itt
         JOIN inbox_tags it ON it.id = itt.tag_id WHERE itt.channel_id = t.channel_id AND itt.thread_id = t.thread_id) td ON true
       WHERE t.channel_id = ${channelId} AND t.thread_id = ${threadId}`),

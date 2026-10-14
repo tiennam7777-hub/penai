@@ -14,6 +14,7 @@ import {
   listUserInboxChannelIds,
   recordInboxMessage,
   setInboxThreadTags,
+  updateInboxTagColor,
   setUserInboxChannels,
   type DbHandle,
 } from "../src/index.js";
@@ -58,10 +59,15 @@ describe("Inbox dùng chung (0034)", () => {
     const threadId = "untagged-contact-1";
     await recordInboxMessage(dbh.db, ctxA(), wa, msg({ threadId, senderId: threadId, msgId: "tag-msg-1" }));
     const tag = await createInboxTag(dbh.db, ctxA(), "Cần gọi lại");
+    expect(tag.color).toBe("#2563EB");
     expect((await listInboxTags(dbh.db, ctxA())).some((x) => x.id === tag.id)).toBe(true);
     expect(await setInboxThreadTags(dbh.db, ctxA(), wa, threadId, [tag.id])).toEqual([tag]);
+    const recolored = await updateInboxTagColor(dbh.db, ctxA(), tag.id, "#E11D48");
+    expect(recolored).toEqual({ ...tag, color: "#E11D48" });
+    expect((await getInboxThread(dbh.db, ctxA(), wa, threadId))?.tags).toEqual([recolored]);
+    expect(await updateInboxTagColor(dbh.db, ctxB(), tag.id, "#000000")).toBeNull();
     expect((await listInboxThreads(dbh.db, ctxA(), wa, { tagId: tag.id })).threads.map((t) => t.threadId)).toContain(threadId);
-    expect((await getInboxThread(dbh.db, ctxA(), wa, threadId))?.tags).toEqual([tag]);
+    expect((await getInboxThread(dbh.db, ctxA(), wa, threadId))?.tags).toEqual([recolored]);
     expect((await listInboxTags(dbh.db, ctxB()))).toEqual([]);
     expect(await setInboxThreadTags(dbh.db, ctxA(), wa, threadId, [])).toEqual([]);
     expect((await listInboxThreads(dbh.db, ctxA(), wa, { tagId: tag.id })).threads).toEqual([]);

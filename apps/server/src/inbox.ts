@@ -30,6 +30,7 @@ import {
   listInboxThreads,
   listInboxTags,
   createInboxTag,
+  updateInboxTagColor,
   setInboxThreadTags,
   markInboxThreadRead,
   markAgentMessageRecalled,
@@ -798,9 +799,21 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
   app.post(`${base}/:channelId/tags`, async (req, reply) => {
     const { channelId } = req.params as { channelId: string };
     if (!(await guard(req, reply, channelId))) return;
-    const parsed = z.object({ name: z.string().trim().min(1).max(40) }).safeParse(req.body);
-    if (!parsed.success) return reply.code(400).send({ error: "Tên nhãn phải có 1–40 ký tự" });
-    const tag = await createInboxTag(db, req.authCtx, parsed.data.name);
+    const parsed = z.object({ name: z.string().trim().min(1).max(40), color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional() }).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "Tên hoặc màu nhãn không hợp lệ" });
+    const tag = await createInboxTag(db, req.authCtx, parsed.data.name, parsed.data.color);
+    broadcast(req.authCtx.workspaceId, channelId, "inbox_tags", { channelId });
+    return { tag };
+  });
+
+  app.put(`${base}/:channelId/tags/:tagId/color`, async (req, reply) => {
+    const { channelId, tagId } = req.params as { channelId: string; tagId: string };
+    if (!(await guard(req, reply, channelId))) return;
+    if (!z.string().uuid().safeParse(tagId).success) return reply.code(400).send({ error: "Nhãn không hợp lệ" });
+    const parsed = z.object({ color: z.string().regex(/^#[0-9A-Fa-f]{6}$/) }).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "Màu nhãn phải có dạng #RRGGBB" });
+    const tag = await updateInboxTagColor(db, req.authCtx, tagId, parsed.data.color);
+    if (!tag) return reply.code(404).send({ error: "Không tìm thấy nhãn" });
     broadcast(req.authCtx.workspaceId, channelId, "inbox_tags", { channelId });
     return { tag };
   });

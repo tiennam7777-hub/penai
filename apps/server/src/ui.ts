@@ -217,7 +217,8 @@ export const INDEX_HTML = `<!doctype html>
   .ibx-quote { font-size: .78rem; opacity: .75; border-left: 3px solid rgba(128,128,128,.5); padding-left: 6px; margin-bottom: 4px; }
   .ibx-photo { max-width: 260px; max-height: 260px; border-radius: 8px; display: block; cursor: zoom-in; }
   .ibx-photo-link { padding: 0; border: 0; background: none; cursor: zoom-in; }
-  .ibx-tag { display:inline-block; margin:2px 3px 0 0; padding:1px 6px; border-radius:999px; background:rgba(47,103,235,.13); color:var(--accent); font-size:.7rem; white-space:nowrap; }
+  .ibx-tag { display:inline-block; margin:2px 3px 0 0; padding:2px 7px; border-radius:999px; font-size:.7rem; font-weight:600; white-space:nowrap; }
+  .ibx-tag-color { width:32px; height:28px; padding:2px; flex:none; cursor:pointer; }
   .ibx-file-download { display: inline-block; margin-left: 6px; padding: 2px 7px; border: 1px solid currentColor; border-radius: 6px; font-size: .78rem; text-decoration: none; white-space: nowrap; }
   .ibx-sticker { width: 90px; height: 90px; object-fit: contain; }
   .ibx-compose { border-top: 1px solid var(--border); padding: 8px 10px; }
@@ -3864,7 +3865,12 @@ export const INDEX_HTML = `<!doctype html>
       if (t.recallWaitingForCustomer) return '<span title="Nhân viên đã thu hồi tin AI; AI chờ khách hỏi mới">⏸️</span>';
       return "";
     }
-    function inboxTagPills(t) { return (t.tags || []).map(function (tag) { return '<span class="ibx-tag">' + esc(tag.name) + '</span>'; }).join(""); }
+    function inboxTagColor(tag) { return tag && /^#[0-9a-fA-F]{6}$/.test(tag.color || "") ? tag.color : "#2563EB"; }
+    function inboxTagTextColor(color) {
+      var r = parseInt(color.slice(1, 3), 16), g = parseInt(color.slice(3, 5), 16), b = parseInt(color.slice(5, 7), 16);
+      return (r * 299 + g * 587 + b * 114) / 1000 > 150 ? "#111827" : "#FFFFFF";
+    }
+    function inboxTagPills(t) { return (t.tags || []).map(function (tag) { var color = inboxTagColor(tag); return '<span class="ibx-tag" style="background-color:' + color + ';color:' + inboxTagTextColor(color) + '">' + esc(tag.name) + '</span>'; }).join(""); }
     function threadItem(t) {
       var a = el("div", { "class": "ibx-item" + (S.cur && S.cur.threadId === t.threadId ? " active" : "") });
       var displayName = t.profileName || t.contactAlias || t.name || t.threadId;
@@ -3884,6 +3890,8 @@ export const INDEX_HTML = `<!doctype html>
       if (!S.ch) return;
       api("/v1/inbox/" + S.ch + "/tags").then(function (j) {
         S.tags = j.tags || [];
+        function syncColors(thread) { if (!thread) return; (thread.tags || []).forEach(function (tag) { var fresh = S.tags.find(function (item) { return item.id === tag.id; }); if (fresh) tag.color = fresh.color; }); }
+        S.threads.forEach(syncColors); syncColors(S.cur); renderThreads(); if (S.cur) renderHead();
         var sel = $("#ibxTag");
         sel.innerHTML = '<option value="">Mọi nhãn Inbox</option>' + S.tags.map(function (tag) { return '<option value="' + esc(tag.id) + '">' + esc(tag.name) + '</option>'; }).join("");
         if (!S.tags.some(function (tag) { return tag.id === S.tag; })) S.tag = "";
@@ -4054,20 +4062,29 @@ export const INDEX_HTML = `<!doctype html>
       (S.cur.tags || []).forEach(function (tag) { selected[tag.id] = true; });
       var dlg = el("dialog", { style: "width:400px;max-width:95vw;padding:18px" });
       dlg.innerHTML = '<h3 style="margin:0 0 10px">Nhãn Inbox</h3><div class="muted" style="margin-bottom:8px">Nhãn chỉ dùng để sắp xếp hội thoại, không đổi nhãn Contacts hoặc cách AI trả lời.</div><div id="ibxTagChoices"></div>' +
-        '<div class="row" style="margin-top:12px"><input id="ibxNewTag" maxlength="40" placeholder="Tên nhãn mới"><button type="button" class="ghost sm" id="ibxAddTag">＋ Tạo</button></div>' +
+        '<div class="row" style="margin-top:12px"><input id="ibxNewTag" maxlength="40" placeholder="Tên nhãn mới"><input type="color" id="ibxNewTagColor" class="ibx-tag-color" value="#2563eb" title="Chọn màu nhãn mới" aria-label="Màu nhãn mới"><button type="button" class="ghost sm" id="ibxAddTag">＋ Tạo</button></div>' +
         '<div class="dialog-actions"><button type="button" class="ghost" id="ibxTagCancel">Hủy</button><button type="button" id="ibxTagSave">Lưu nhãn</button></div>';
       document.body.appendChild(dlg);
       function choices() {
         var box = $("#ibxTagChoices", dlg);
-        box.innerHTML = S.tags.length ? S.tags.map(function (tag) { return '<label style="display:flex;align-items:center;gap:8px;margin:5px 0"><input type="checkbox" value="' + esc(tag.id) + '"' + (selected[tag.id] ? ' checked' : '') + '> ' + esc(tag.name) + '</label>'; }).join("") : '<div class="muted">Chưa có nhãn Inbox.</div>';
+        box.innerHTML = S.tags.length ? S.tags.map(function (tag) { return '<div style="display:flex;align-items:center;gap:8px;margin:5px 0"><label style="display:flex;align-items:center;gap:8px;flex:1"><input type="checkbox" value="' + esc(tag.id) + '"' + (selected[tag.id] ? ' checked' : '') + '> ' + inboxTagPills({ tags: [tag] }) + '</label><input type="color" class="ibx-tag-color" data-tag-id="' + esc(tag.id) + '" value="' + inboxTagColor(tag) + '" title="Đổi màu nhãn ' + esc(tag.name) + '" aria-label="Đổi màu nhãn ' + esc(tag.name) + '"></div>'; }).join("") : '<div class="muted">Chưa có nhãn Inbox.</div>';
         Array.prototype.forEach.call(box.querySelectorAll('input[type="checkbox"]'), function (cb) { cb.onchange = function () { selected[cb.value] = cb.checked; }; });
+        Array.prototype.forEach.call(box.querySelectorAll('input[type="color"]'), function (input) { input.onchange = function () {
+          var id = this.getAttribute("data-tag-id"), color = this.value, picker = this; picker.disabled = true;
+          api("/v1/inbox/" + S.ch + "/tags/" + encodeURIComponent(id) + "/color", { method: "PUT", body: { color: color } }).then(function (j) {
+            S.tags.forEach(function (tag) { if (tag.id === id) tag.color = j.tag.color; });
+            S.threads.forEach(function (thread) { (thread.tags || []).forEach(function (tag) { if (tag.id === id) tag.color = j.tag.color; }); });
+            if (S.cur) (S.cur.tags || []).forEach(function (tag) { if (tag.id === id) tag.color = j.tag.color; });
+            renderThreads(); if (S.cur) renderHead(); choices();
+          }).catch(function (e) { toast(e.message, true); picker.value = inboxTagColor(S.tags.find(function (tag) { return tag.id === id; })); picker.disabled = false; });
+        }; });
       }
       choices();
       $("#ibxTagCancel", dlg).onclick = function () { dlg.close(); dlg.remove(); };
       $("#ibxAddTag", dlg).onclick = function () {
         var name = $("#ibxNewTag", dlg).value.trim(); if (!name) return;
         var btn = this; btn.disabled = true;
-        api("/v1/inbox/" + S.ch + "/tags", { method: "POST", body: { name: name } }).then(function (j) {
+        api("/v1/inbox/" + S.ch + "/tags", { method: "POST", body: { name: name, color: $("#ibxNewTagColor", dlg).value } }).then(function (j) {
           if (!S.tags.some(function (tag) { return tag.id === j.tag.id; })) S.tags.push(j.tag);
           S.tags.sort(function (a, b) { return a.name.localeCompare(b.name, "vi"); });
           selected[j.tag.id] = true; $("#ibxNewTag", dlg).value = ""; choices(); loadTags();
