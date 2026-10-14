@@ -28,11 +28,11 @@ const mustChange = args.includes("--must-change");
 
 if (!email || !workspace || !password) {
   console.error(
-    "Cách dùng: PENAI_USER_PASSWORD='...' pnpm user:create -- --email <email> --workspace <slug> [--name <tên>] [--role ws_admin|operator|viewer|member] [--must-change]",
+    "Cách dùng: PENAI_USER_PASSWORD='...' pnpm user:create -- --email <email> --workspace <slug> [--name <tên>] [--role ws_admin|operator|viewer|moderator|member] [--must-change]",
   );
   process.exit(2);
 }
-if (!["ws_admin", "operator", "viewer", "member"].includes(role)) {
+if (!["ws_admin", "operator", "viewer", "moderator", "member"].includes(role)) {
   console.error(`Role không hợp lệ: ${role}`);
   process.exit(2);
 }

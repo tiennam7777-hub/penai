@@ -12,6 +12,7 @@ import {
   decryptSecret,
   canChat,
   hasRole,
+  usesAgentGrants,
   isValidTimeZone,
   logger,
   type WorkspaceContext,
@@ -271,6 +272,7 @@ import {
   allowedWhileMustChange,
   isCrossSiteMutation,
   memberAllowed,
+  moderatorAllowed,
   registerAuthRoutes,
   resolveRequestAuth,
   type ResolvedAuth,
@@ -704,6 +706,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (req.authCtx.role === "member" && !memberAllowed(req.method, path)) {
       return reply.code(403).send({ error: "Tài khoản của bạn chỉ được dùng trang Chat" });
     }
+    if (req.authCtx.role === "moderator" && !moderatorAllowed(req.method, path)) {
+      return reply.code(403).send({ error: "Tài khoản kiểm duyệt không có quyền dùng chức năng này" });
+    }
   });
 
   function requireRole(
@@ -716,6 +721,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       return false;
     }
     return true;
+  }
+
+  function requireModeratorOrRole(req: FastifyRequest, reply: FastifyReply, min: WorkspaceRole): boolean {
+    return req.authCtx.role === "moderator" || requireRole(req, reply, min);
   }
 
   /** Được chat: operator trở lên HOẶC member (agent được gán kiểm ở tầng repo). */
@@ -1093,7 +1102,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // ===== Agents =====
   app.get("/v1/agents", async (req) => {
     const agents = await listAgents(db, req.authCtx);
-    if (req.authCtx.role === "member") {
+    if (usesAgentGrants(req.authCtx.role)) {
       // member không được xem system prompt / cấu hình — chỉ đủ để chọn agent chat
       return {
         agents: agents.map((a) => ({
@@ -1641,6 +1650,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     };
   });
 
+  // Chỉ tên/ID kênh Zalo để lọc danh sách chờ; không lộ cấu hình danh sách kênh.
+  app.get("/v1/channels/pending-sources", async (req, reply) => {
+    if (!requireModeratorOrRole(req, reply, "ws_admin")) return;
+    const rows = await listChannels(db, req.authCtx);
+    return { channels: rows.filter((c) => c.kind === "zalo_personal" && c.enabled)
+      .map((c) => ({ id: c.id, kind: c.kind, name: c.name, enabled: true })) };
+  });
+
   /** ChannelRow → shape EnabledChannel cho runtime khởi động lại. */
   const toEnabledChannel = (c: {
     id: string;
@@ -1784,7 +1801,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   };
 
   app.get("/v1/channel-pairings/pending", async (req, reply) => {
-    if (!requireRole(req, reply, "ws_admin")) return;
+    if (!requireModeratorOrRole(req, reply, "ws_admin")) return;
     const [rows, channelRows] = await Promise.all([
       listPendingPairings(db, req.authCtx),
       listChannels(db, req.authCtx),
@@ -1831,13 +1848,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   });
 
   app.post("/v1/channels/:id/pairings/:code/approve", async (req, reply) => {
-    if (!requireRole(req, reply, "ws_admin")) return;
+    if (!requireModeratorOrRole(req, reply, "ws_admin")) return;
     const { id, code } = req.params as { id: string; code: string };
     const approved = await approvePairing(db, req.authCtx, id, code);
     if (!approved) return reply.code(404).send({ error: "Mã pairing không hợp lệ hoặc đã duyệt" });
     // Tin chào mừng do CHÍNH AGENT của kênh tự soạn (mỗi bot một vai) — chạy
     // nền để duyệt trả về ngay; lỗi ở bước nào thì fallback câu chào chung.
-    const ctx = req.authCtx;
+    const ctx = req.authCtx.role === "moderator" ? { ...req.authCtx, role: "operator" as const } : req.authCtx;
     if (approved.externalUserId) {
       const chatKey = approved.externalUserId;
       void (async () => {
@@ -2026,7 +2043,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // Chế độ an toàn Zalo: danh sách người/nhóm đã nhắn tới (metadata) và
   // allowlist thread demo. Ngoài allowlist: chỉ quan sát, không gửi/không chạy agent.
   app.get(`/v1/channels/:id/${seg}/observed`, async (req, reply) => {
-    if (!requireRole(req, reply, "ws_admin")) return;
+    if (!requireModeratorOrRole(req, reply, "ws_admin")) return;
     const { id } = req.params as { id: string };
     const runtime = await getZaloPersonalRuntime(req, reply, id);
     if (!runtime) return;
@@ -2035,6 +2052,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const demoThreads = runtime.demoThreads();
     const allowed = new Set(demoThreads);
     const query = req.query as { q?: unknown; review?: unknown };
+    if (req.authCtx.role === "moderator" && !["pending", "hidden", "not_needed", "all"].includes(String(query.review ?? ""))) {
+      return reply.code(403).send({ error: "Chỉ được xem mục chưa duyệt" });
+    }
     const rawSearch = query.q;
     const search = typeof rawSearch === "string" ? rawSearch.trim().slice(0, 100) : "";
     const openDirect = runtime.status().openDirect;
@@ -2056,7 +2076,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           lastSeenAt: row.lastSeenAt.toISOString(), allowed: false,
           hiddenInPending: row.hiddenInPending, noApprovalNeeded: row.noApprovalNeeded,
         })),
-        demoThreads, openDirect,
+        demoThreads: req.authCtx.role === "moderator" ? [] : demoThreads,
+        openDirect: req.authCtx.role === "moderator" ? false : openDirect,
       };
     }
     const byKey = new Map<
@@ -2120,7 +2141,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   });
 
   app.post(`/v1/channels/:id/${seg}/approve-observed`, async (req, reply) => {
-    if (!requireRole(req, reply, "ws_admin")) return;
+    if (!requireModeratorOrRole(req, reply, "ws_admin")) return;
     const { id } = req.params as { id: string };
     const parsed = ApproveObservedZaloThreadBody.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: zodMessage(parsed.error) });
@@ -2141,10 +2162,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const result = await approveObservedZaloThread(db, req.authCtx, id, parsed.data.chatKey);
     if (!result) return reply.code(404).send({ error: "Hội thoại Zalo chưa được quan sát" });
     runtime.setDemoThreads(result.demoThreads);
-    return { approved: true, kind: result.kind, demoThreads: result.demoThreads };
+    return req.authCtx.role === "moderator"
+      ? { approved: true, kind: result.kind }
+      : { approved: true, kind: result.kind, demoThreads: result.demoThreads };
   });
   app.patch(`/v1/channels/:id/${seg}/observed-review`, async (req, reply) => {
-    if (!requireRole(req, reply, "ws_admin")) return;
+    if (!requireModeratorOrRole(req, reply, "ws_admin")) return;
     const { id } = req.params as { id: string };
     const parsed = ObservedPeerReviewBody.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: zodMessage(parsed.error) });
@@ -2168,7 +2191,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // một người: operator trở lên. Nhãn có chỉ dẫn áp cho NHIỀU người → ws_admin.
   // Xuất Contacts ra Excel (.xlsx) — lọc theo kênh; kênh Zalo cá nhân kèm thêm sheet danh bạ Zalo đầy đủ.
   app.get("/v1/contacts/export.xlsx", async (req, reply) => {
-    if (!requireRole(req, reply, "operator")) return;
+    if (!requireModeratorOrRole(req, reply, "operator")) return;
     const q = req.query as { channelId?: string };
     const channelId = q.channelId && /^[0-9a-f-]{36}$/i.test(q.channelId) ? q.channelId : null;
     const allChannels = await listChannels(db, req.authCtx);
@@ -2226,12 +2249,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return { contacts: await listContactsOverview(db, req.authCtx) };
   });
 
+  app.get("/v1/contacts/agents", async (req, reply) => {
+    if (!requireModeratorOrRole(req, reply, "operator")) return;
+    const ctx = req.authCtx.role === "moderator" ? { ...req.authCtx, role: "operator" as const } : req.authCtx;
+    return { agents: (await listAgents(db, ctx)).map((a) => ({ id: a.id, key: a.key, name: a.name })) };
+  });
+
   const contactUserDir = (ctx: WorkspaceContext, userKey: string) =>
     resolve(join(deps.config.dataDir, ctx.workspaceId, "users", sanitizeUserKey(userKey)));
   const USER_MD_MAX = 8000; // cùng mức agent-runtime nạp vào ngữ cảnh
 
   app.get("/v1/contacts/:id", async (req, reply) => {
-    if (!requireRole(req, reply, "operator")) return;
+    if (!requireModeratorOrRole(req, reply, "operator")) return;
     const { id } = req.params as { id: string };
     const ctx = req.authCtx;
     const contact = await getContactOverview(db, ctx, id);
@@ -2252,7 +2281,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       fsReadFile(userMdPath, "utf8").catch(() => null),
       contact.channelId ? getChannelById(db, ctx, contact.channelId) : null,
     ]);
-    const agent = channel ? await getAgentById(db, ctx, channel.agentId) : null;
+    const contactAgentCtx = ctx.role === "moderator" ? { ...ctx, role: "operator" as const } : ctx;
+    const agent = channel ? await getAgentById(db, contactAgentCtx, channel.agentId) : null;
     return {
       contact,
       profile,
@@ -2303,7 +2333,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   });
 
   app.put("/v1/contacts/:id/profile", async (req, reply) => {
-    if (!requireRole(req, reply, "operator")) return;
+    if (!requireModeratorOrRole(req, reply, "operator")) return;
     const { id } = req.params as { id: string };
     const parsed = ProfileBody.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: zodMessage(parsed.error) });
@@ -2338,7 +2368,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   });
 
   app.put("/v1/contacts/:id/tags", async (req, reply) => {
-    if (!requireRole(req, reply, "operator")) return;
+    if (!requireModeratorOrRole(req, reply, "operator")) return;
     const { id } = req.params as { id: string };
     const parsed = z
       .object({ tagIds: z.array(z.string().uuid()).max(30, "tối đa 30 nhãn") })
@@ -2357,7 +2387,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   });
 
   app.put("/v1/contacts/:id/user-md", async (req, reply) => {
-    if (!requireRole(req, reply, "operator")) return;
+    if (!requireModeratorOrRole(req, reply, "operator")) return;
     const { id } = req.params as { id: string };
     const parsed = z
       .object({ content: z.string().max(USER_MD_MAX, `tối đa ${USER_MD_MAX} ký tự`) })
@@ -2379,16 +2409,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   // Xem trước đúng system prompt agent sẽ nhận khi người này nhắn (tool không kèm).
   app.get("/v1/contacts/:id/context-preview", async (req, reply) => {
-    if (!requireRole(req, reply, "operator")) return;
+    if (!requireModeratorOrRole(req, reply, "operator")) return;
     const { id } = req.params as { id: string };
     const q = req.query as { agent?: string; message?: string; group?: string };
     const ctx = req.authCtx;
     const contact = await getContactOverview(db, ctx, id);
     if (!contact) return reply.code(404).send({ error: "Contact không tồn tại" });
-    let agent = q.agent ? await getAgentByKey(db, ctx, q.agent) : null;
+    const contactAgentCtx = ctx.role === "moderator" ? { ...ctx, role: "operator" as const } : ctx;
+    let agent = q.agent ? await getAgentByKey(db, contactAgentCtx, q.agent) : null;
     if (!agent && contact.channelId) {
       const ch = await getChannelById(db, ctx, contact.channelId);
-      agent = ch ? await getAgentById(db, ctx, ch.agentId) : null;
+      agent = ch ? await getAgentById(db, contactAgentCtx, ch.agentId) : null;
     }
     if (!agent) return reply.code(404).send({ error: "Chưa chọn được agent để xem trước" });
     const message = (q.message ?? "").slice(0, 2000) || "Xin chào";
@@ -2425,6 +2456,54 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     };
   });
 
+  // Tác vụ trong hồ sơ Contacts: kiểm tra quan hệ với đúng contact trước khi
+  // cho người kiểm duyệt đọc/sửa dữ liệu ghi nhớ hoặc hội thoại.
+  app.patch("/v1/contacts/:id/memories/:memoryId", async (req, reply) => {
+    if (!requireModeratorOrRole(req, reply, "operator")) return;
+    const { id, memoryId } = req.params as { id: string; memoryId: string };
+    const contact = await getContactOverview(db, req.authCtx, id);
+    if (!contact || !(await listMemoriesForUserKey(db, req.authCtx, contact.userKey)).some((m) => m.id === memoryId)) {
+      return reply.code(404).send({ error: "Ghi nhớ không thuộc contact này" });
+    }
+    const b = req.body as { content?: string; importance?: number; pinned?: boolean };
+    const memory = await updateMemory(db, req.authCtx, memoryId, b);
+    if (!memory) return reply.code(404).send({ error: "Memory không tồn tại / không có gì để sửa" });
+    return { memory };
+  });
+  app.delete("/v1/contacts/:id/memories/:memoryId", async (req, reply) => {
+    if (!requireModeratorOrRole(req, reply, "operator")) return;
+    const { id, memoryId } = req.params as { id: string; memoryId: string };
+    const contact = await getContactOverview(db, req.authCtx, id);
+    if (!contact || !(await listMemoriesForUserKey(db, req.authCtx, contact.userKey)).some((m) => m.id === memoryId)) {
+      return reply.code(404).send({ error: "Ghi nhớ không thuộc contact này" });
+    }
+    return { deleted: await deleteMemory(db, req.authCtx, memoryId) };
+  });
+  const relatedForContact = async (ctx: WorkspaceContext, id: string) => {
+    const contact = await getContactOverview(db, ctx, id);
+    if (!contact) return null;
+    return getPersonRelated(db, ctx, {
+      userKey: contact.userKey, principalId: contact.principalId,
+      channelId: contact.channelId, externalId: contact.externalId,
+    });
+  };
+  app.get("/v1/contacts/:id/memory-docs/:docId", async (req, reply) => {
+    if (!requireModeratorOrRole(req, reply, "operator")) return;
+    const { id, docId } = req.params as { id: string; docId: string };
+    const related = await relatedForContact(req.authCtx, id);
+    if (!related?.memoryDocs.some((d) => d.id === docId)) return reply.code(404).send({ error: "File không thuộc contact này" });
+    const doc = await getMemoryDocById(db, req.authCtx, docId);
+    if (!doc) return reply.code(404).send({ error: "File ghi nhớ không tồn tại" });
+    return { doc };
+  });
+  app.get("/v1/contacts/:id/sessions/:sessionId/messages", async (req, reply) => {
+    if (!requireModeratorOrRole(req, reply, "operator")) return;
+    const { id, sessionId } = req.params as { id: string; sessionId: string };
+    const related = await relatedForContact(req.authCtx, id);
+    if (!related?.sessions.some((s) => s.id === sessionId)) return reply.code(404).send({ error: "Hội thoại không thuộc contact này" });
+    return { messages: await loadMessages(db, req.authCtx, sessionId) };
+  });
+
   // Nhãn — chỉ dẫn theo nhãn áp cho mọi người mang nhãn nên sửa cần ws_admin
   const TagColor = z.string().regex(/^(#[0-9a-fA-F]{6})?$/, "màu dạng #rrggbb");
   const TagBody = z.object({
@@ -2449,7 +2528,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   });
 
   app.post("/v1/contact-tags", async (req, reply) => {
-    if (!requireRole(req, reply, "ws_admin")) return;
+    if (!requireModeratorOrRole(req, reply, "ws_admin")) return;
     const parsed = TagBody.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: zodMessage(parsed.error) });
     try {
@@ -2468,7 +2547,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   });
 
   app.patch("/v1/contact-tags/:id", async (req, reply) => {
-    if (!requireRole(req, reply, "ws_admin")) return;
+    if (!requireModeratorOrRole(req, reply, "ws_admin")) return;
     const { id } = req.params as { id: string };
     const parsed = TagBody.partial()
       .refine((v) => Object.keys(v).length > 0, "Không có trường nào để sửa")
@@ -2492,7 +2571,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   });
 
   app.delete("/v1/contact-tags/:id", async (req, reply) => {
-    if (!requireRole(req, reply, "ws_admin")) return;
+    if (!requireModeratorOrRole(req, reply, "ws_admin")) return;
     const { id } = req.params as { id: string };
     const ok = await deleteContactTag(db, req.authCtx, id);
     if (!ok) return reply.code(404).send({ error: "Nhãn không tồn tại" });
@@ -4251,7 +4330,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         ...agentOpts(agent),
         userKey: webUserKey(req.authCtx),
         // operator/ws_admin giữ quyền MCP như dashboard cũ; member chịu lớp user (fail-closed)
-        skipUserMcpLayer: req.authCtx.role !== "member",
+        skipUserMcpLayer: !usesAgentGrants(req.authCtx.role),
         attachFile: (p) => collector.attachFile(p),
         // Người đăng nhập Dashboard là người thật đang chat → khối "Người đang chat"
         ...(req.authInfo?.kind === "web" ? { person: { channelKind: "web", peerKind: "direct" as const } } : {}),

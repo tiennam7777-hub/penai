@@ -152,6 +152,28 @@ describe("Đăng nhập web (cookie) + role member + agent grants", () => {
     expect(nv).toMatchObject({ role: "member", agentIds: [fx.agentA] });
   });
 
+  it("người kiểm duyệt được chat, duyệt, quản lý Contacts/Thư viện nhưng không xem cấu hình kênh", async () => {
+    const email = "kiemduyet@test.local";
+    const password = "matkhau-kiemduyet-123";
+    const created = await app.inject({
+      method: "POST", url: "/v1/users", headers: withCookie(adminCookie),
+      payload: { email, password, role: "moderator", agentIds: [fx.agentA] },
+    });
+    expect(created.statusCode).toBe(201);
+    const signed = await login(email, password);
+    expect(signed.res.statusCode).toBe(200);
+    expect(signed.res.json()).toMatchObject({ role: "moderator", roleLabel: "Người kiểm duyệt" });
+    const headers = withCookie(signed.cookie);
+    for (const url of ["/v1/agents", "/v1/channel-pairings/pending", "/v1/channels/pending-sources", "/v1/library", "/v1/contacts", "/v1/contact-tags"]) {
+      expect((await app.inject({ method: "GET", url, headers })).statusCode).toBe(200);
+    }
+    const agents = await app.inject({ method: "GET", url: "/v1/agents", headers });
+    expect(agents.json()).toMatchObject({ agents: [{ id: fx.agentA }] });
+    expect((await app.inject({ method: "GET", url: "/v1/channels", headers })).statusCode).toBe(403);
+    expect((await app.inject({ method: "POST", url: "/v1/channels", headers, payload: {} })).statusCode).toBe(403);
+    expect((await app.inject({ method: "GET", url: "/v1/users", headers })).statusCode).toBe(403);
+  });
+
   it("member: chỉ thấy agent được gán (không lộ systemPrompt), bị chặn mọi route khác", async () => {
     const l = await login(MEMBER_EMAIL, MEMBER_PASS);
     expect(l.res.statusCode).toBe(200);

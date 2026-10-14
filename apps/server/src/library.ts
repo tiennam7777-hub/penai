@@ -142,7 +142,7 @@ async function resolveScope(
     };
   }
   if (!UUID_RE.test(scopeId)) throw new HttpError(404, "Không có thư viện này");
-  const agent = await getAgentById(db, ctx, scopeId);
+  const agent = await getAgentById(db, ctx.role === "moderator" ? { ...ctx, role: "operator" } : ctx, scopeId);
   if (!agent) throw new HttpError(404, "Agent không tồn tại");
   return {
     id: agent.id,
@@ -236,7 +236,7 @@ export function registerLibraryRoutes(app: FastifyInstance, deps: { db: Db; data
   const { db, dataDir } = deps;
 
   const guard = (req: FastifyRequest, reply: FastifyReply): boolean => {
-    if (!hasRole(req.authCtx.role, "operator")) {
+    if (req.authCtx.role !== "moderator" && !hasRole(req.authCtx.role, "operator")) {
       void reply.code(403).send({ error: "Cần quyền operator trở lên" });
       return false;
     }
@@ -258,7 +258,7 @@ export function registerLibraryRoutes(app: FastifyInstance, deps: { db: Db; data
   app.get("/v1/library", async (req, reply) => {
     if (!guard(req, reply)) return;
     const ctx = req.authCtx;
-    const agents = await listAgents(db, ctx);
+    const agents = await listAgents(db, ctx.role === "moderator" ? { ...ctx, role: "operator" } : ctx);
     const shared = await dirSize(sharedDirFor(dataDir, ctx.workspaceId), ["skills"]);
     const scopes: Array<Record<string, unknown>> = [
       {

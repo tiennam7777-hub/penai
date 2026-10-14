@@ -417,7 +417,7 @@ export async function allowedInboxChannelIds(db: Db, ctx: WorkspaceContext): Pro
   if (hasRole(ctx.role, "operator")) {
     return (await listChannels(db, ctx)).filter((c) => isPersonalChannelKind(c.kind)).map((c) => c.id);
   }
-  if (ctx.role === "member") return listUserInboxChannelIds(db, ctx, ctx.userId);
+  if (ctx.role === "member" || ctx.role === "moderator") return listUserInboxChannelIds(db, ctx, ctx.userId);
   return [];
 }
 

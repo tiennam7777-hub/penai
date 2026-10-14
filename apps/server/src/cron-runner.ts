@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import { canChat, logger, type WorkspaceContext, type WorkspaceRole } from "@penai/shared";
+import { canChat, logger, usesAgentGrants, type WorkspaceContext, type WorkspaceRole } from "@penai/shared";
 import {
   appendMessage,
   canAccessAgent,
@@ -146,7 +146,7 @@ export class CronRunner {
         return { ok: false, reason: "Người đặt lịch không còn trong workspace, bị khóa hoặc hết quyền chat — lịch được tắt.", disable: true };
       }
       const ctx: WorkspaceContext = { workspaceId: job.workspaceId, userId: origin.userId, role };
-      if (role === "member" && !(await canAccessAgent(db, ctx, job.agentId))) {
+      if (usesAgentGrants(role) && !(await canAccessAgent(db, ctx, job.agentId))) {
         return { ok: false, reason: "Người đặt lịch không còn được dùng agent này — lịch được tắt.", disable: true };
       }
       return { ok: true, ctx, role };
@@ -206,7 +206,7 @@ export class CronRunner {
           // Quyền của người đặt lịch: web theo vai trò HIỆN TẠI, kênh = người ngoài
           accessRole: webOrigin ? prep.role! : null,
           ...(job.ownerKey ? { userKey: job.ownerKey } : {}),
-          ...(webOrigin ? { skipUserMcpLayer: prep.role !== "member" } : {}),
+          ...(webOrigin ? { skipUserMcpLayer: !usesAgentGrants(prep.role ?? "operator") } : {}),
           ...(origin?.principalId ? { principalId: origin.principalId } : {}),
           ...(origin?.kind === "channel" && origin.channelIdentityId
             ? { channelIdentityId: origin.channelIdentityId }

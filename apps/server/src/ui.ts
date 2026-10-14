@@ -326,7 +326,9 @@ export const INDEX_HTML = `<!doctype html>
   }
   window.__api = api;
   function isMember() { return !!(state.me && state.me.role === "member"); }
+  function isModerator() { return !!(state.me && state.me.role === "moderator"); }
   function isAdmin() { return !!(state.me && state.me.role === "ws_admin"); }
+  function canManageContacts() { return isAdmin() || isModerator(); }
 
   // ===== Sidebar =====
   var NAV = [
@@ -362,12 +364,20 @@ export const INDEX_HTML = `<!doctype html>
   ];
   function renderNav() {
     var nav = $("#nav"); nav.innerHTML = "";
-    var cur = (location.hash.replace("#/", "") || (isMember() ? "chat" : "overview")).split("?")[0];
+    var cur = (location.hash.replace("#/", "") || (isMember() || isModerator() ? "chat" : "overview")).split("?")[0];
     if (isMember()) {
       // Thành viên: chỉ có trang Chat
       nav.appendChild(el("div", { "class": "grp" }, "Trợ lý AI"));
       nav.appendChild(el("a", { href: "#/chat", "class": cur === "inbox" ? "" : "active" }, "💬 <span>Chat</span>"));
       if ((state.inboxChannels || []).length) nav.appendChild(el("a", { href: "#/inbox", "class": cur === "inbox" ? "active" : "" }, "📥 <span>Inbox Zalo</span>"));
+      return;
+    }
+    if (isModerator()) {
+      nav.appendChild(el("div", { "class": "grp" }, "Công việc"));
+      ["chat", "channels", "library", "contacts"].concat((state.inboxChannels || []).length ? ["inbox"] : []).forEach(function (id) {
+        var n = NAV.find(function (item) { return item.id === id; });
+        nav.appendChild(el("a", { href: "#/" + id, "class": cur === id ? "active" : "" }, n.icon + " <span>" + (id === "channels" ? "Chờ duyệt" : n.label) + "</span>"));
+      });
       return;
     }
     var pendingGrp = null;
@@ -1619,11 +1629,13 @@ export const INDEX_HTML = `<!doctype html>
   }
 
   PAGES.channels = function () {
-    var m = page("Channels", "Kênh nhắn tin (Telegram, Discord...) — mỗi kênh gắn 1 agent trả lời");
-    var top = card(m);
-    top.innerHTML = '<div class="row" style="justify-content:space-between;align-items:center"><span class="muted">Thêm/sửa kênh áp dụng ngay, không cần restart server. Yêu cầu pairing mới xuất hiện trong mục chờ duyệt ngay bên dưới.</span><button id="chAdd">＋ Thêm kênh</button></div>';
+    var m = page(isModerator() ? "Chờ duyệt" : "Channels", isModerator() ? "Xem và duyệt yêu cầu từ các kênh" : "Kênh nhắn tin (Telegram, Discord...) — mỗi kênh gắn 1 agent trả lời");
+    if (!isModerator()) {
+      var top = card(m);
+      top.innerHTML = '<div class="row" style="justify-content:space-between;align-items:center"><span class="muted">Thêm/sửa kênh áp dụng ngay, không cần restart server. Yêu cầu pairing mới xuất hiện trong mục chờ duyệt ngay bên dưới.</span><button id="chAdd">＋ Thêm kênh</button></div>';
+    }
     // Danh sách kênh đứng đầu (hay dùng nhất), rồi mới tới các mục chờ duyệt
-    var listC = card(m, "Danh sách kênh");
+    var listC = isModerator() ? null : card(m, "Danh sách kênh");
     var pendingC = card(m, "Yêu cầu chờ duyệt");
     var zaloC = card(m, "Zalo — nhóm/thread chờ duyệt");
     zaloC.innerHTML = '<h3>Zalo — nhóm/thread chờ duyệt <span id="zaloPendingCount" class="pill" style="margin-left:6px">0</span></h3>' +
@@ -1678,7 +1690,7 @@ export const INDEX_HTML = `<!doctype html>
       var review = $("#zaloPendingView", zaloC).value;
       var resultsBox = $("#zaloPendingResults", zaloC);
       resultsBox.innerHTML = '<div class="muted">' + (search ? "Đang tìm..." : "Đang tải...") + '</div>';
-      api("/v1/channels").then(function (j) {
+      api(isModerator() ? "/v1/channels/pending-sources" : "/v1/channels").then(function (j) {
         if (seq !== zaloLoadSeq) return;
         var zaloChannels = (j.channels || []).filter(function (c) { return isPersonalKind(c.kind) && c.enabled; });
         if (!zaloChannels.length) { if (seq === zaloLoadSeq) zaloC.style.display = "none"; return; }
@@ -1750,6 +1762,7 @@ export const INDEX_HTML = `<!doctype html>
       }).catch(function (e) { if (seq === zaloLoadSeq) resultsBox.innerHTML = '<span class="err">' + esc(e.message) + '</span>'; });
     }
     function load() {
+      if (!listC) return;
       api("/v1/channels").then(function (j) {
         if (j.supportedKinds && j.supportedKinds.length) kinds = j.supportedKinds;
         listC.innerHTML = "<h3>Danh sách kênh</h3>";
@@ -1791,7 +1804,7 @@ export const INDEX_HTML = `<!doctype html>
         }));
       }).catch(function (e) { listC.innerHTML = '<span class="err">' + esc(e.message) + "</span>"; });
     }
-    $("#chAdd").onclick = function () { openChannelDialog(null, kinds, load); };
+    if (!isModerator()) $("#chAdd").onclick = function () { openChannelDialog(null, kinds, load); };
     loadPending();
     loadZaloPending();
     load();
@@ -2952,11 +2965,12 @@ export const INDEX_HTML = `<!doctype html>
     load();
   };
 
-  var ROLE_LABELS = { ws_admin: "Quản trị", operator: "Vận hành", viewer: "Chỉ xem", member: "Thành viên (chỉ chat)" };
+  var ROLE_LABELS = { ws_admin: "Quản trị", operator: "Vận hành", viewer: "Chỉ xem", moderator: "Người kiểm duyệt", member: "Thành viên (chỉ chat)" };
   var ROLE_HELP = {
     ws_admin: "Toàn quyền: cấu hình, tạo người dùng, khóa API.",
     operator: "Vận hành: chat mọi agent, kênh, cron, kho tri thức. Không tạo người dùng.",
     viewer: "Chỉ xem dữ liệu, không chat.",
+    moderator: "Chat với agent được gán; duyệt yêu cầu, quản lý Contacts và Thư viện file. Không xem cấu hình kênh.",
     member: "Chỉ thấy trang Chat và chỉ chat với các agent được gán bên dưới."
   };
   PAGES.users = function () {
@@ -2974,8 +2988,8 @@ export const INDEX_HTML = `<!doctype html>
         c.innerHTML = "";
         c.appendChild(table(["Tên", "Email", "Vai trò", "Agent được chat", "Đăng nhập gần nhất", "Trạng thái", ""], j.users, function (u) {
           var tr = el("tr");
-          var agentsTxt = u.role === "member" ? (u.agentIds.length ? u.agentIds.map(function (id) { return '<span class="pill">' + esc(agentName(id)) + "</span>"; }).join(" ") : '<span class="err">chưa gán</span>') : '<span class="muted">tất cả</span>';
-          if (u.role === "member" && (u.zaloChannelIds || []).length) agentsTxt += '<div style="margin-top:3px">' + u.zaloChannelIds.map(function (id) { return '<span class="pill">📥 ' + esc(zaloName(id)) + "</span>"; }).join(" ") + "</div>";
+          var agentsTxt = (u.role === "member" || u.role === "moderator") ? (u.agentIds.length ? u.agentIds.map(function (id) { return '<span class="pill">' + esc(agentName(id)) + "</span>"; }).join(" ") : '<span class="err">chưa gán</span>') : '<span class="muted">tất cả</span>';
+          if ((u.role === "member" || u.role === "moderator") && (u.zaloChannelIds || []).length) agentsTxt += '<div style="margin-top:3px">' + u.zaloChannelIds.map(function (id) { return '<span class="pill">📥 ' + esc(zaloName(id)) + "</span>"; }).join(" ") + "</div>";
           var me = state.me && state.me.user && state.me.user.id === u.id;
           tr.innerHTML = "<td>" + esc(u.name) + (me ? ' <span class="pill">bạn</span>' : "") + "</td><td>" + esc(u.email) + "</td><td><span class='role-pill'>" + esc(ROLE_LABELS[u.role] || u.role) + "</span></td><td>" + agentsTxt + "</td><td class='muted'>" + esc(u.lastLoginAt ? String(u.lastLoginAt).slice(0, 16).replace("T", " ") : "chưa") + "</td><td>" + (u.isActive ? '<span class="ok">hoạt động</span>' : '<span class="err">đã khóa</span>') + (u.mustChangePassword ? ' <span class="pill">phải đổi MK</span>' : "") + "</td>";
           var td = el("td", { style: "white-space:nowrap" });
@@ -3025,7 +3039,7 @@ export const INDEX_HTML = `<!doctype html>
       $("#uZaloWrap", dlg).appendChild(zbox);
       if (isEdit) { $("#uName", dlg).value = u.name; $("#uEmail", dlg).value = u.email; $("#uRole", dlg).value = u.role; }
       else { $("#uRole", dlg).value = "member"; }
-      function syncRole() { var r = $("#uRole", dlg).value; $("#uRoleHelp", dlg).textContent = ROLE_HELP[r] || ""; $("#uAgentWrap", dlg).style.display = r === "member" ? "block" : "none"; $("#uZaloWrap", dlg).style.display = r === "member" ? "block" : "none"; }
+      function syncRole() { var r = $("#uRole", dlg).value; $("#uRoleHelp", dlg).textContent = ROLE_HELP[r] || ""; $("#uAgentWrap", dlg).style.display = (r === "member" || r === "moderator") ? "block" : "none"; $("#uZaloWrap", dlg).style.display = (r === "member" || r === "moderator") ? "block" : "none"; }
       $("#uRole", dlg).onchange = syncRole; syncRole();
       $("#uCancel", dlg).onclick = function () { dlg.close(); dlg.remove(); };
       $("#uSave", dlg).onclick = function () {
@@ -3102,8 +3116,8 @@ export const INDEX_HTML = `<!doctype html>
       '<input id="ctQ" placeholder="🔍 Tìm theo tên, UID/ID hoặc SĐT">' +
       '<select id="ctCh"><option value="">Mọi kênh</option></select>' +
       '<select id="ctTag"><option value="">Mọi nhãn</option></select>' +
-      (isAdmin() ? '<button id="ctTags" class="ghost">🏷️ Quản lý nhãn</button>' : "") +
-      (state.me && (state.me.role === "ws_admin" || state.me.role === "operator") ? '<button id="ctExport" class="ghost" title="Tải file Excel toàn bộ thông tin contact của kênh đang chọn (kênh Zalo cá nhân kèm danh bạ Zalo đầy đủ)">⬇ Xuất Excel</button>' : "") +
+      (canManageContacts() ? '<button id="ctTags" class="ghost">🏷️ Quản lý nhãn</button>' : "") +
+      (state.me && (state.me.role === "ws_admin" || state.me.role === "operator" || state.me.role === "moderator") ? '<button id="ctExport" class="ghost" title="Tải file Excel toàn bộ thông tin contact của kênh đang chọn (kênh Zalo cá nhân kèm danh bạ Zalo đầy đủ)">⬇ Xuất Excel</button>' : "") +
       "</div>" +
       '<div id="ctList" style="margin-top:12px"><span class="muted">Đang tải…</span></div>';
     var all = [];
@@ -3143,7 +3157,7 @@ export const INDEX_HTML = `<!doctype html>
       box.appendChild(el("div", { "class": "muted", style: "margin-top:8px" }, rows.length + " / " + all.length + " người"));
     }
     function load() {
-      Promise.all([api("/v1/contacts"), api("/v1/contact-tags"), api("/v1/channels").then(function (j) { return j.channels || []; }).catch(function () { return []; })]).then(function (res) {
+      Promise.all([api("/v1/contacts"), api("/v1/contact-tags"), isModerator() ? Promise.resolve([]) : api("/v1/channels").then(function (j) { return j.channels || []; }).catch(function () { return []; })]).then(function (res) {
         if (!$("#ctList")) return;
         all = res[0].contacts || [];
         var tags = res[1].tags || [];
@@ -3196,7 +3210,7 @@ export const INDEX_HTML = `<!doctype html>
     var dlg = modal("ct-dialog");
     dlg.innerHTML = '<span class="muted">Đang tải hồ sơ…</span>';
     dlg.showModal();
-    Promise.all([api("/v1/contacts/" + id), api("/v1/contact-tags"), api("/v1/agents")]).then(function (res) {
+    Promise.all([api("/v1/contacts/" + id), api("/v1/contact-tags"), api(isModerator() ? "/v1/contacts/agents" : "/v1/agents")]).then(function (res) {
       renderContact(dlg, res[0], res[1].tags || [], res[2].agents || [], onChange);
     }).catch(function (e) {
       dlg.innerHTML = '<p class="err">' + esc(e.message) + '</p><div class="dialog-actions"><button class="ghost" data-x="1">Đóng</button></div>';
@@ -3280,7 +3294,7 @@ export const INDEX_HTML = `<!doctype html>
       addField("", "");
     };
     var tbox = $("#pfTags", box);
-    if (!allTags.length) tbox.innerHTML = '<span class="muted">Chưa có nhãn nào' + (isAdmin() ? " — tạo bằng nút 🏷️ Quản lý nhãn ở trang Contacts" : "") + ".</span>";
+    if (!allTags.length) tbox.innerHTML = '<span class="muted">Chưa có nhãn nào' + (canManageContacts() ? " — tạo bằng nút 🏷️ Quản lý nhãn ở trang Contacts" : "") + ".</span>";
     allTags.forEach(function (t) {
       var lb = el("label", { "class": "tagchk" });
       lb.innerHTML = '<input type="checkbox" value="' + esc(t.id) + '"' + (mine[t.id] ? " checked" : "") + "> " + tagPill(t);
@@ -3353,7 +3367,7 @@ export const INDEX_HTML = `<!doctype html>
         cell.querySelector("[data-ok]").onclick = function () {
           var v = t.value.trim();
           if (!v) return;
-          api("/v1/memories/" + r.id, { method: "PATCH", body: { content: v } })
+          api(isModerator() ? "/v1/contacts/" + c.id + "/memories/" + r.id : "/v1/memories/" + r.id, { method: "PATCH", body: { content: v } })
             .then(function () { r.content = v; cell.textContent = v; })
             .catch(function (e) { alert(e.message); });
         };
@@ -3361,7 +3375,7 @@ export const INDEX_HTML = `<!doctype html>
       var del = el("button", { "class": "ghost sm" }, "Xóa");
       del.onclick = function () {
         if (!confirm("Xóa ghi nhớ này?")) return;
-        api("/v1/memories/" + r.id, { method: "DELETE" }).then(function () { tr.remove(); }).catch(function (e) { alert(e.message); });
+        api(isModerator() ? "/v1/contacts/" + c.id + "/memories/" + r.id : "/v1/memories/" + r.id, { method: "DELETE" }).then(function () { tr.remove(); }).catch(function (e) { alert(e.message); });
       };
       td.appendChild(ed); td.appendChild(document.createTextNode(" ")); td.appendChild(del);
       tr.appendChild(td);
@@ -3374,7 +3388,7 @@ export const INDEX_HTML = `<!doctype html>
       var td = el("td");
       var v = el("button", { "class": "ghost sm" }, "Xem");
       v.onclick = function () {
-        api("/v1/memory-docs/" + r.id).then(function (j) {
+        api(isModerator() ? "/v1/contacts/" + c.id + "/memory-docs/" + r.id : "/v1/memory-docs/" + r.id).then(function (j) {
           var out = $("#umDocView", box);
           out.innerHTML = "";
           var pre = el("div", { "class": "ct-pre" });
@@ -3401,7 +3415,7 @@ export const INDEX_HTML = `<!doctype html>
       b.onclick = function () {
         var out = $("#hsView", box);
         out.innerHTML = '<span class="muted">Đang tải…</span>';
-        api("/v1/sessions/" + s.id + "/messages").then(function (j) {
+        api(isModerator() ? "/v1/contacts/" + d.contact.id + "/sessions/" + s.id + "/messages" : "/v1/sessions/" + s.id + "/messages").then(function (j) {
           var list = (j.messages || []).filter(function (msg) {
             var ct = msg.content || {};
             return (msg.role === "user" && ct.kind === "text") || (msg.role === "assistant" && ct.text);
@@ -3660,7 +3674,7 @@ export const INDEX_HTML = `<!doctype html>
           ? "Mọi agent trong bộ phận đọc được qua <code>shared/</code> — chỉ để thứ thật sự dùng chung. Thư mục <code>skills/</code> do trang Skills quản lý."
           : "Agent thấy qua <code>thu-vien/</code> · trong lệnh exec: <code>" + esc(s.absRoot) + "/</code>") + "</div>";
       h.appendChild(t);
-      if (s.kind === "agent") {
+      if (s.kind === "agent" && !isModerator()) {
         var can = !!(info && info.canToggleWrite);
         var w = el("label", { style: "display:flex;align-items:center;gap:6px;font-size:.85rem;white-space:nowrap" });
         w.innerHTML = '<input type="checkbox" id="libW" style="flex:0"' + (s.libraryWritable ? " checked" : "") + (can ? "" : " disabled") + "> Cho agent ghi vào thư viện" + (can ? "" : ' <span class="muted">(chỉ quản trị bộ phận đổi được)</span>');
@@ -4495,9 +4509,10 @@ export const INDEX_HTML = `<!doctype html>
     if (!state.me) { showLogin(); return; }
     if (state.pageCleanup) { try { state.pageCleanup(); } catch (e) {} state.pageCleanup = null; }
     renderNav();
-    var id = location.hash.replace("#/", "") || (isMember() ? "chat" : "overview");
+    var id = location.hash.replace("#/", "") || (isMember() || isModerator() ? "chat" : "overview");
     var qi = id.indexOf("?"); state.routeQuery = qi >= 0 ? id.slice(qi + 1) : ""; if (qi >= 0) id = id.slice(0, qi);
     if (isMember() && !(id === "inbox" && (state.inboxChannels || []).length)) id = "chat";
+    if (isModerator() && ["chat", "channels", "library", "contacts"].indexOf(id) < 0 && !(id === "inbox" && (state.inboxChannels || []).length)) id = "chat";
     var n = null; for (var i = 0; i < NAV.length; i++) if (NAV[i].id === id) n = NAV[i];
     if (n && n.admin && !isAdmin()) id = "overview";
     var fn = PAGES[id] || PAGES.overview;

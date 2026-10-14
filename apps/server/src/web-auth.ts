@@ -192,6 +192,22 @@ export function memberAllowed(method: string, path: string): boolean {
   return MEMBER_ALLOW.some((r) => r.methods.includes(m) && r.path.test(path));
 }
 
+/** Quyền kiểm duyệt là allowlist riêng; không kế thừa các API vận hành kênh. */
+export function moderatorAllowed(method: string, path: string): boolean {
+  const m = method.toUpperCase();
+  if (memberAllowed(m, path)) return true;
+  if (/^\/v1\/library(?:\/|$)/.test(path)) return ["GET", "POST", "PUT", "PATCH", "DELETE"].includes(m);
+  if (/^\/v1\/contacts(?:\/|$)/.test(path) || /^\/v1\/contact-tags(?:\/|$)/.test(path)) {
+    return ["GET", "POST", "PUT", "PATCH", "DELETE"].includes(m);
+  }
+  if (m === "GET" && (path === "/v1/channel-pairings/pending" || path === "/v1/channels/pending-sources")) return true;
+  if (m === "POST" && /^\/v1\/channels\/[^/]+\/pairings\/[^/]+\/approve$/.test(path)) return true;
+  if (m === "GET" && /^\/v1\/channels\/[^/]+\/personal\/observed$/.test(path)) return true;
+  if (m === "POST" && /^\/v1\/channels\/[^/]+\/personal\/approve-observed$/.test(path)) return true;
+  if (m === "PATCH" && /^\/v1\/channels\/[^/]+\/personal\/observed-review$/.test(path)) return true;
+  return false;
+}
+
 /** Khi bắt đổi mật khẩu, chỉ cho vài route. */
 export function allowedWhileMustChange(path: string): boolean {
   return path === "/auth/me" || path === "/auth/logout" || path === "/auth/change-password";
@@ -415,11 +431,11 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
       return reply.code(409).send({ error: (err as Error).message });
     }
     const agentIds = Array.isArray(b.agentIds) ? b.agentIds.filter((x): x is string => typeof x === "string") : [];
-    if (role === "member" && agentIds.length) {
+    if ((role === "member" || role === "moderator") && agentIds.length) {
       await setUserAgentGrants(db, req.authCtx, created.id, agentIds);
     }
     const zaloIds = Array.isArray(b.zaloChannelIds) ? b.zaloChannelIds.filter((x): x is string => typeof x === "string") : [];
-    if (role === "member" && zaloIds.length) {
+    if ((role === "member" || role === "moderator") && zaloIds.length) {
       await setUserInboxChannels(db, req.authCtx, created.id, zaloIds);
     }
     await recordAudit(db, req.authCtx, "user.create", { userId: created.id, email: b.email, role });

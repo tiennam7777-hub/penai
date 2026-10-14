@@ -1,13 +1,14 @@
 /** Vai trò trong 1 workspace (bộ phận). */
-export type WorkspaceRole = "ws_admin" | "operator" | "viewer" | "member";
+export type WorkspaceRole = "ws_admin" | "operator" | "viewer" | "moderator" | "member";
 
-export const WORKSPACE_ROLES: readonly WorkspaceRole[] = ["ws_admin", "operator", "viewer", "member"];
+export const WORKSPACE_ROLES: readonly WorkspaceRole[] = ["ws_admin", "operator", "viewer", "moderator", "member"];
 
 /** Nhãn tiếng Việt cho UI. */
 export const ROLE_LABELS: Record<WorkspaceRole, string> = {
   ws_admin: "Quản trị",
   operator: "Vận hành",
   viewer: "Chỉ xem",
+  moderator: "Người kiểm duyệt",
   member: "Thành viên (chỉ chat)",
 };
 
@@ -26,6 +27,7 @@ export interface WorkspaceContext {
 
 const ROLE_RANK: Record<WorkspaceRole, number> = {
   member: -1, // ngoài thang: chỉ chat với agent được gán, không đọc gì khác
+  moderator: -1, // quyền riêng theo tính năng, không kế thừa operator/viewer
   viewer: 0,
   operator: 1,
   ws_admin: 2,
@@ -38,5 +40,10 @@ export function hasRole(role: WorkspaceRole, min: WorkspaceRole): boolean {
 
 /** Được chat (tạo phiên + gửi tin) không: operator trở lên, hoặc member. */
 export function canChat(role: WorkspaceRole): boolean {
-  return role === "member" || hasRole(role, "operator");
+  return role === "member" || role === "moderator" || hasRole(role, "operator");
+}
+
+/** Hai vai trò chat bằng agent được quản trị gán, chỉ thấy phiên của mình. */
+export function usesAgentGrants(role: WorkspaceRole): boolean {
+  return role === "member" || role === "moderator";
 }

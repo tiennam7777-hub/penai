@@ -5,6 +5,7 @@ import type {
   StoredMessage,
   WorkspaceContext,
 } from "@penai/shared";
+import { usesAgentGrants } from "@penai/shared";
 import type { Db } from "./client.js";
 import { withWorkspace } from "./context.js";
 import { agentUserGrants, agents, messages, sessions } from "./schema.js";
@@ -20,7 +21,7 @@ export type SessionRow = typeof sessions.$inferSelect;
  */
 export async function listAgents(db: Db, ctx: WorkspaceContext): Promise<AgentRow[]> {
   return withWorkspace(db, ctx, async (tx) => {
-    if (ctx.role !== "member") {
+    if (!usesAgentGrants(ctx.role)) {
       return tx.select().from(agents).orderBy(asc(agents.createdAt));
     }
     const rows = await tx
@@ -37,7 +38,7 @@ export async function listAgents(db: Db, ctx: WorkspaceContext): Promise<AgentRo
 
 /** Member có được gán agent này không (ws_admin/operator/viewer: luôn true). */
 export async function canAccessAgent(db: Db, ctx: WorkspaceContext, agentId: string): Promise<boolean> {
-  if (ctx.role !== "member") return true;
+  if (!usesAgentGrants(ctx.role)) return true;
   const rows = await withWorkspace(db, ctx, (tx) =>
     tx
       .select({ id: agentUserGrants.id })
@@ -162,7 +163,7 @@ export async function createSession(
 /** Member chỉ thấy phiên của chính mình (owner_user_id, 0024). */
 export async function listSessions(db: Db, ctx: WorkspaceContext): Promise<SessionRow[]> {
   return withWorkspace(db, ctx, (tx) => {
-    if (ctx.role === "member") {
+    if (usesAgentGrants(ctx.role)) {
       return tx
         .select()
         .from(sessions)
@@ -183,7 +184,7 @@ export async function getSession(
       .select()
       .from(sessions)
       .where(
-        ctx.role === "member"
+        usesAgentGrants(ctx.role)
           ? and(eq(sessions.id, id), eq(sessions.ownerUserId, ctx.userId))
           : eq(sessions.id, id),
       )

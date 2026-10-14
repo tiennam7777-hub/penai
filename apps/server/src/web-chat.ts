@@ -250,7 +250,7 @@ export async function resolveDownload(
     root = dirs.sharedDir;
     rel = clean.slice("shared/".length);
   } else if (clean.startsWith("ws/")) {
-    if (ctx.role === "member" || ctx.role === "viewer") return null;
+    if (ctx.role === "member" || ctx.role === "moderator" || ctx.role === "viewer") return null;
     root = dirs.wsDir;
     rel = clean.slice("ws/".length);
   } else {
