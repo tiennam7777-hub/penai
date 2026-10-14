@@ -28,6 +28,9 @@ import {
   listUserInboxChannelIds,
   listInboxMessages,
   listInboxThreads,
+  listInboxTags,
+  createInboxTag,
+  setInboxThreadTags,
   markInboxThreadRead,
   markAgentMessageRecalled,
   markInboxMessageRemoved,
@@ -771,9 +774,11 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
   app.get(`${base}/:channelId/threads`, async (req, reply) => {
     const { channelId } = req.params as { channelId: string };
     if (!(await guard(req, reply, channelId))) return;
-    const q = req.query as { q?: string; kind?: string; unread?: string; limit?: string; offset?: string; all?: string };
+    const q = req.query as { q?: string; kind?: string; unread?: string; tagId?: string; limit?: string; offset?: string; all?: string };
+    if (q.tagId && !z.string().uuid().safeParse(q.tagId).success) return reply.code(400).send({ error: "Nhãn không hợp lệ" });
     const res = await listInboxThreads(db, req.authCtx, channelId, {
       ...(q.q ? { q: q.q.slice(0, 100) } : {}),
+      ...(q.tagId ? { tagId: q.tagId } : {}),
       ...(q.kind === "direct" || q.kind === "group" ? { kind: q.kind } : {}),
       unreadOnly: q.unread === "1",
       // Không tìm kiếm → chỉ hội thoại đã có tin; tìm kiếm → cả danh bạ chưa chat
@@ -782,6 +787,34 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
       offset: Number(q.offset) || 0,
     });
     return res;
+  });
+
+  app.get(`${base}/:channelId/tags`, async (req, reply) => {
+    const { channelId } = req.params as { channelId: string };
+    if (!(await guard(req, reply, channelId))) return;
+    return { tags: await listInboxTags(db, req.authCtx) };
+  });
+
+  app.post(`${base}/:channelId/tags`, async (req, reply) => {
+    const { channelId } = req.params as { channelId: string };
+    if (!(await guard(req, reply, channelId))) return;
+    const parsed = z.object({ name: z.string().trim().min(1).max(40) }).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "Tên nhãn phải có 1–40 ký tự" });
+    const tag = await createInboxTag(db, req.authCtx, parsed.data.name);
+    broadcast(req.authCtx.workspaceId, channelId, "inbox_tags", { channelId });
+    return { tag };
+  });
+
+  app.put(`${base}/:channelId/threads/:threadId/tags`, async (req, reply) => {
+    const { channelId, threadId } = req.params as { channelId: string; threadId: string };
+    if (!(await guard(req, reply, channelId))) return;
+    const parsed = z.object({ tagIds: z.array(z.string().uuid()).max(20) }).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "Danh sách nhãn không hợp lệ (tối đa 20)" });
+    const tags = await setInboxThreadTags(db, req.authCtx, channelId, threadId, parsed.data.tagIds);
+    if (!tags) return reply.code(404).send({ error: "Không tìm thấy hội thoại hoặc nhãn" });
+    const thread = await getInboxThread(db, req.authCtx, channelId, threadId);
+    if (thread) broadcast(req.authCtx.workspaceId, channelId, "inbox_thread_tags", { channelId, threadId, tags });
+    return { tags, thread };
   });
 
   app.get(`${base}/:channelId/threads/:threadId/messages`, async (req, reply) => {

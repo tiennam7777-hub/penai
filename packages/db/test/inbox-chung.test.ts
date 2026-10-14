@@ -6,10 +6,14 @@ import {
   createDb,
   getInboxThread,
   clearInboxPauses,
+  createInboxTag,
   getInboxThreadAgentBlock,
+  listInboxTags,
+  listInboxThreads,
   listInboxMessages,
   listUserInboxChannelIds,
   recordInboxMessage,
+  setInboxThreadTags,
   setUserInboxChannels,
   type DbHandle,
 } from "../src/index.js";
@@ -50,6 +54,18 @@ const msg = (over: Record<string, unknown> = {}) => ({
 });
 
 describe("Inbox dùng chung (0034)", () => {
+  it("gắn và lọc nhãn Inbox cho hội thoại chưa có Contact, tách khỏi workspace khác", async () => {
+    const threadId = "untagged-contact-1";
+    await recordInboxMessage(dbh.db, ctxA(), wa, msg({ threadId, senderId: threadId, msgId: "tag-msg-1" }));
+    const tag = await createInboxTag(dbh.db, ctxA(), "Cần gọi lại");
+    expect((await listInboxTags(dbh.db, ctxA())).some((x) => x.id === tag.id)).toBe(true);
+    expect(await setInboxThreadTags(dbh.db, ctxA(), wa, threadId, [tag.id])).toEqual([tag]);
+    expect((await listInboxThreads(dbh.db, ctxA(), wa, { tagId: tag.id })).threads.map((t) => t.threadId)).toContain(threadId);
+    expect((await getInboxThread(dbh.db, ctxA(), wa, threadId))?.tags).toEqual([tag]);
+    expect((await listInboxTags(dbh.db, ctxB()))).toEqual([]);
+    expect(await setInboxThreadTags(dbh.db, ctxA(), wa, threadId, [])).toEqual([]);
+    expect((await listInboxThreads(dbh.db, ctxA(), wa, { tagId: tag.id })).threads).toEqual([]);
+  });
   it("kênh WhatsApp: mã hội thoại dạng số điện thoại và dạng nhóm @g.us", async () => {
     const r = await recordInboxMessage(dbh.db, ctxA(), wa, msg());
     expect(r?.thread).toMatchObject({ threadId: "84938583264", unreadCount: 1, kind: "direct" });
