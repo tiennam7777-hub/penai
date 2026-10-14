@@ -1009,7 +1009,7 @@ export function makeInboundHandler(
           if (claimId) {
             const runtime = channelHandlers.get(channel.id)?.channel;
             try {
-              if (!isPersonalChannel(runtime) || !runtime.isConnected()) throw new Error("Zalo Bán Hàng Hot 6 chưa kết nối");
+              if (!isPersonalChannel(runtime) || !runtime.isConnected()) throw new Error(`${channel.name} chưa kết nối Zalo`);
               const ids = await runtime.sendManual({
                 threadId: orderGroupId, peerKind: "group", text: dispatchText,
                 source: "agent", threadName: "Phan Don Cam Hoa",
