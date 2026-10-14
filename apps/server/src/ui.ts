@@ -195,6 +195,7 @@ export const INDEX_HTML = `<!doctype html>
   .ibx-av img { width: 100%; height: 100%; object-fit: cover; }
   .ibx-mid { flex: 1; min-width: 0; }
   .ibx-nm { font-weight: 600; font-size: .9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ibx-tags-row { display:flex; justify-content:center; flex-wrap:wrap; gap:3px; margin:4px 0; min-width:0; }
   .ibx-last { font-size: .8rem; opacity: .65; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .ibx-meta { font-size: .72rem; opacity: .8; text-align: right; flex-shrink: 0; }
   .ibx-badge { display: inline-block; background: #ef4444; color: #fff; border-radius: 999px; padding: 0 7px; font-size: .72rem; margin-top: 3px; }
@@ -217,7 +218,9 @@ export const INDEX_HTML = `<!doctype html>
   .ibx-quote { font-size: .78rem; opacity: .75; border-left: 3px solid rgba(128,128,128,.5); padding-left: 6px; margin-bottom: 4px; }
   .ibx-photo { max-width: 260px; max-height: 260px; border-radius: 8px; display: block; cursor: zoom-in; }
   .ibx-photo-link { padding: 0; border: 0; background: none; cursor: zoom-in; }
-  .ibx-tag { display:inline-block; margin:2px 3px 0 0; padding:2px 7px; border-radius:999px; font-size:.7rem; font-weight:600; white-space:nowrap; }
+  .ibx-tag { display:inline-block; max-width:100%; overflow:hidden; text-overflow:ellipsis; padding:2px 7px; border-radius:999px; font-size:.7rem; font-weight:600; white-space:nowrap; }
+  .ibx-head-person { flex:1; min-width:180px; }
+  .ibx-head-tags { flex:1; min-width:120px; display:flex; justify-content:center; flex-wrap:wrap; gap:3px; }
   .ibx-tag-color { width:32px; height:28px; padding:2px; flex:none; cursor:pointer; }
   .ibx-file-download { display: inline-block; margin-left: 6px; padding: 2px 7px; border: 1px solid currentColor; border-radius: 6px; font-size: .78rem; text-decoration: none; white-space: nowrap; }
   .ibx-sticker { width: 90px; height: 90px; object-fit: contain; }
@@ -3875,7 +3878,7 @@ export const INDEX_HTML = `<!doctype html>
       var a = el("div", { "class": "ibx-item" + (S.cur && S.cur.threadId === t.threadId ? " active" : "") });
       var displayName = t.profileName || t.contactAlias || t.name || t.threadId;
       a.innerHTML = '<div class="ibx-av' + (t.kind === "group" ? " grp" : "") + '">' + (t.avatar ? '<img src="' + esc(t.avatar) + '" referrerpolicy="no-referrer" alt="">' : ibxInitial(displayName)) + '</div>' +
-        '<div class="ibx-mid"><div class="ibx-nm">' + (t.kind === "group" ? "👥 " : "") + esc(displayName) + " " + inboxTagPills(t) + " " + aiBadge(t) + '</div>' + (t.name && displayName !== t.name ? '<div class="ibx-last">Zalo: ' + esc(t.name) + '</div>' : '') + '<div class="ibx-last">' + esc(t.lastMessage || (t.isContact ? "(chưa có tin nhắn)" : "")) + "</div></div>" +
+        '<div class="ibx-mid"><div class="ibx-nm">' + (t.kind === "group" ? "👥 " : "") + esc(displayName) + " " + aiBadge(t) + '</div>' + (t.tags && t.tags.length ? '<div class="ibx-tags-row">' + inboxTagPills(t) + '</div>' : '') + (t.name && displayName !== t.name ? '<div class="ibx-last">Zalo: ' + esc(t.name) + '</div>' : '') + '<div class="ibx-last">' + esc(t.lastMessage || (t.isContact ? "(chưa có tin nhắn)" : "")) + "</div></div>" +
         '<div class="ibx-meta"><div>' + esc(ibxTime(t.lastMessageAt)) + "</div>" + (t.unreadCount ? '<span class="ibx-badge">' + t.unreadCount + "</span>" : "") + "</div>";
       a.onclick = function () { openThread(t); };
       return a;
@@ -4045,7 +4048,8 @@ export const INDEX_HTML = `<!doctype html>
       var recalled = t.recallWaitingForCustomer;
       h.className = "ibx-head";
       var displayName = t.profileName || t.contactAlias || t.name || t.threadId;
-      h.innerHTML = '<div><b>' + (t.kind === "group" ? "👥 " : "👤 ") + esc(displayName) + '</b> ' + inboxTagPills(t) + (t.kind === "direct" ? ' <button type="button" class="ghost sm" id="ibxEditTags">🏷 Gắn/bỏ nhãn</button>' : '') + (t.name && displayName !== t.name ? '<div class="muted">Zalo: ' + esc(t.name) + '</div>' : '') + ' <span class="muted">' + (t.kind === "group" ? "nhóm" : "cá nhân") + " · uid <code>" + esc(t.threadId) + "</code>" + (t.phone ? " · " + esc(t.phone) : "") + "</span></div>" +
+      h.innerHTML = '<div class="ibx-head-person"><b>' + (t.kind === "group" ? "👥 " : "👤 ") + esc(displayName) + '</b> ' + (t.kind === "direct" ? ' <button type="button" class="ghost sm" id="ibxEditTags">🏷 Gắn/bỏ nhãn</button>' : '') + (t.name && displayName !== t.name ? '<div class="muted">Zalo: ' + esc(t.name) + '</div>' : '') + ' <span class="muted">' + (t.kind === "group" ? "nhóm" : "cá nhân") + " · uid <code>" + esc(t.threadId) + "</code>" + (t.phone ? " · " + esc(t.phone) : "") + "</span></div>" +
+        (t.tags && t.tags.length ? '<div class="ibx-head-tags">' + inboxTagPills(t) + '</div>' : '') +
         '<div class="row" style="gap:6px"><span class="muted">AI trả lời:</span><select id="ibxAi" style="padding:3px 6px"><option value="auto">Theo cấu hình kênh</option><option value="off">Tắt cho hội thoại này</option></select>' +
         (paused ? '<span class="pill">⏸️ tạm dừng tới ' + esc(ibxTime(t.pausedUntil)) + '</span>' : "") +
         (recalled ? '<span class="pill">⏸️ chờ khách hỏi mới sau khi thu hồi tin AI</span>' : "") +
