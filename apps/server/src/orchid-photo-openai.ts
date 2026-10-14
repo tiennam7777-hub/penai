@@ -16,8 +16,9 @@ export interface OrchidPhotoEditor {
 }
 
 const REQUIRED_EDIT = `Edit the supplied original photograph, not a newly imagined orchid arrangement.
-Produce a natural, professional product photograph: bright, balanced studio-like light; crisp orchids, foliage, sign and pot; smooth, strong, even background defocus with no patchy blur, halos or rough cutout edges.
-Keep the original framing and the exact flowers, stems, buds, leaves, colors, pot shape, decorations, sign and every readable letter. Do not add, remove or rearrange any part of the orchid arrangement or change its price or text.
+Produce a natural, professional product photograph: bright, balanced studio-like light; crisp orchids, foliage and pot; smooth, strong, even background defocus with no patchy blur, halos or rough cutout edges.
+Treat the entire sign, including its border, background, logos, lettering and every tiny detail, as a protected part of the original photograph. Keep its exact position, size, shape, colors, layout, strokes, spelling, punctuation and even faint or unreadable marks. Do not redraw, retype, reconstruct, sharpen, blur, denoise, repaint, inpaint or replace any part of the sign. Do not guess or improve any letters. On the sign, only a gentle exposure or brightness adjustment is allowed; preserve all other visual details exactly as photographed.
+Keep the original framing and the exact flowers, stems, buds, leaves, colors, pot shape, decorations and other small details. Do not add, remove or rearrange any part of the orchid arrangement or change its price or text.
 If a chair or stool is visible under or behind the pot, remove that distracting support cleanly while keeping the pot in the same position and giving it a believable neutral surface. Do not add unrelated objects, new text, logos or watermarks. The result must remain a realistic photo of the same physical product.`;
 
 function inputInfo(input: Buffer): { mime: string; width: number; height: number } {

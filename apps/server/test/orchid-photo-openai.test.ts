@@ -16,6 +16,8 @@ describe("OC2 OpenAI image editing", () => {
     }));
     expect(generateImage.mock.calls[0]![0].prompt).toContain("Giữ nguyên chữ trên bảng");
     expect(generateImage.mock.calls[0]![0].prompt).toContain("no patchy blur");
+    expect(generateImage.mock.calls[0]![0].prompt).toContain("Do not redraw, retype, reconstruct");
+    expect(generateImage.mock.calls[0]![0].prompt).toContain("only a gentle exposure or brightness adjustment is allowed");
   });
 
   it("rejects wrong output instead of sending the original or a failed edit", async () => {
