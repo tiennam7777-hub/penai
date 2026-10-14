@@ -4050,16 +4050,15 @@ export const INDEX_HTML = `<!doctype html>
       var recalled = t.recallWaitingForCustomer;
       h.className = "ibx-head";
       var displayName = t.profileName || t.contactAlias || t.name || t.threadId;
-      h.innerHTML = '<div class="ibx-head-person"><b>' + (t.kind === "group" ? "👥 " : "👤 ") + esc(displayName) + '</b> ' + (t.kind === "direct" ? ' <button type="button" class="ghost sm" id="ibxEditTags">🏷 Gắn/bỏ nhãn</button>' : '') + ' <button type="button" class="ghost sm" id="ibxHideThread">' + (t.hiddenInInbox ? "👁 Hiện lại" : "🙈 Ẩn trò chuyện") + '</button>' + (t.name && displayName !== t.name ? '<div class="muted">Zalo: ' + esc(t.name) + '</div>' : '') + ' <span class="muted">' + (t.kind === "group" ? "nhóm" : "cá nhân") + " · uid <code>" + esc(t.threadId) + "</code>" + (t.phone ? " · " + esc(t.phone) : "") + "</span></div>" +
+      h.innerHTML = '<div class="ibx-head-person"><b>' + (t.kind === "group" ? "👥 " : "👤 ") + esc(displayName) + '</b> ' + (!t.virtual && t.kind === "direct" ? ' <button type="button" class="ghost sm" id="ibxEditTags">🏷 Gắn/bỏ nhãn</button>' : '') + (!t.virtual ? ' <button type="button" class="ghost sm" id="ibxHideThread">' + (t.hiddenInInbox ? "👁 Hiện lại" : "🙈 Ẩn trò chuyện") + '</button>' : '') + (t.name && displayName !== t.name ? '<div class="muted">Zalo: ' + esc(t.name) + '</div>' : '') + ' <span class="muted">' + (t.kind === "group" ? "nhóm" : "cá nhân") + " · uid <code>" + esc(t.threadId) + "</code>" + (t.phone ? " · " + esc(t.phone) : "") + "</span></div>" +
         (t.tags && t.tags.length ? '<div class="ibx-head-tags">' + inboxTagPills(t) + '</div>' : '') +
-        '<div class="row" style="gap:6px"><span class="muted">AI trả lời:</span><select id="ibxAi" style="padding:3px 6px"><option value="auto">Theo cấu hình kênh</option><option value="off">Tắt cho hội thoại này</option></select>' +
+        '<div class="row" style="gap:6px">' + (t.virtual ? '<span class="muted">Hội thoại sẽ xuất hiện trong Inbox sau khi gửi tin đầu tiên.</span>' : '<span class="muted">AI trả lời:</span><select id="ibxAi" style="padding:3px 6px"><option value="auto">Theo cấu hình kênh</option><option value="off">Tắt cho hội thoại này</option></select>') +
         (paused ? '<span class="pill">⏸️ tạm dừng tới ' + esc(ibxTime(t.pausedUntil)) + '</span>' : "") +
         (recalled ? '<span class="pill">⏸️ chờ khách hỏi mới sau khi thu hồi tin AI</span>' : "") +
         (paused || recalled ? '<button class="ghost sm" id="ibxResume">Cho AI trả lời lại</button>' : "") + "</div>";
-      $("#ibxAi").value = t.aiMode || "auto";
-      $("#ibxAi").onchange = function () { setAi({ mode: this.value }); };
+      var aiSelect = $("#ibxAi"); if (aiSelect) { aiSelect.value = t.aiMode || "auto"; aiSelect.onchange = function () { setAi({ mode: this.value }); }; }
       var tagButton = $("#ibxEditTags"); if (tagButton) tagButton.onclick = editInboxTags;
-      $("#ibxHideThread").onclick = function () {
+      var hideButton = $("#ibxHideThread"); if (hideButton) hideButton.onclick = function () {
         var btn = this, tid = S.cur.threadId, hidden = !S.cur.hiddenInInbox; btn.disabled = true;
         api("/v1/inbox/" + S.ch + "/threads/" + encodeURIComponent(tid) + "/visibility", { method: "PUT", body: { hidden: hidden } }).then(function () {
           S.cur = null; S.msgs = []; renderHead(); $("#ibxMsgs").innerHTML = ""; $("#ibxCompose").style.display = "none";
@@ -4206,6 +4205,7 @@ export const INDEX_HTML = `<!doctype html>
         if (!body.text || body.image || body.file) { toast("Trả lời trích dẫn cần lời nhắn; gửi ảnh/file ở lượt riêng", true); return; }
         body.replyToId = S.reply.id;
       }
+      if (S.cur.virtual && S.cur.name) body.threadName = S.cur.name;
       if (!body.text && !body.image && !body.file) return;
       var btn = $("#ibxSend"); btn.disabled = true;
       var tid = S.cur.threadId;
@@ -4336,9 +4336,15 @@ export const INDEX_HTML = `<!doctype html>
           if (!j.found || !j.user) { $("#frResult", dlg).textContent = "Không tìm thấy tài khoản Zalo này."; return; }
           candidate = j.user;
           var relation = candidate.relationship === "friend" ? "Đã là bạn bè" : candidate.relationship === "pending" ? "Đã có lời mời đang chờ" : "Có thể gửi lời mời";
-          $("#frResult", dlg).innerHTML = '<div class="row" style="align-items:center;gap:9px">' +
+          $("#frResult", dlg).innerHTML = '<button type="button" class="ghost" id="frOpenChat" style="display:flex;align-items:center;gap:9px;width:100%;text-align:left;padding:9px" title="Mở chat với tài khoản này">' +
             (candidate.avatar ? '<img src="' + esc(candidate.avatar) + '" alt="" style="width:38px;height:38px;border-radius:50%;object-fit:cover">' : '') +
-            '<div><b>' + esc(candidate.name) + '</b><div class="muted">' + esc(relation) + '</div></div></div>';
+            '<span style="flex:1"><b>' + esc(candidate.name) + '</b><span class="muted" style="display:block">' + esc(relation) + '</span></span><span>Mở chat →</span></button>';
+          $("#frOpenChat", dlg).onclick = function () {
+            if (!candidate || S.ch !== channelId) return;
+            var found = candidate, existing = S.threads.find(function (t) { return t.threadId === found.uid; });
+            dlg.close(); dlg.remove();
+            openThread(existing || { threadId: found.uid, kind: "direct", name: found.name || found.uid, avatar: found.avatar || "", virtual: true, unreadCount: 0, tags: [] });
+          };
           $("#frSend", dlg).disabled = candidate.relationship !== "none";
         }).catch(function (e) { if (seq === searchSeq) $("#frResult", dlg).innerHTML = '<span class="err">' + esc(e.message) + '</span>'; })
           .then(function () { if (seq === searchSeq) btn.disabled = false; });

@@ -668,6 +668,7 @@ const SendBody = z
     image: z.string().max(15_000_000).optional(),
     file: z.object({ name: z.string().max(120), contentB64: z.string().max(14_000_000) }).optional(),
     peerKind: z.enum(["direct", "group"]).optional(),
+    threadName: z.string().trim().min(1).max(120).optional(),
     replyToId: z.string().regex(/^\d{1,19}$/).optional(),
   })
   .refine((v) => (v.text && v.text.trim()) || v.image || v.file, { message: "Cần nội dung hoặc file" })
@@ -893,6 +894,7 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
         ...(parsed.data.file ? { file: parsed.data.file } : {}),
         source: "web",
         webUserId: req.authCtx.userId,
+        ...(!thread && peerKind === "direct" && parsed.data.threadName ? { threadName: parsed.data.threadName } : {}),
         ...(quote ? { quote } : {}),
       });
       return { sent: true, msgIds: out.msgIds };
