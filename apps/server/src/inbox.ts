@@ -31,6 +31,7 @@ import {
   listInboxTags,
   createInboxTag,
   updateInboxTagColor,
+  deleteInboxTag,
   setInboxThreadTags,
   setInboxThreadHidden,
   markInboxThreadRead,
@@ -126,6 +127,14 @@ function broadcast(workspaceId: string, channelId: string, event: string, data: 
     } catch {
       sseClients.delete(c);
     }
+  }
+}
+
+function broadcastWorkspace(workspaceId: string, event: string, data: unknown): void {
+  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const c of sseClients) {
+    if (c.workspaceId !== workspaceId) continue;
+    try { c.write(payload); } catch { sseClients.delete(c); }
   }
 }
 
@@ -830,6 +839,15 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
     if (!tag) return reply.code(404).send({ error: "Không tìm thấy nhãn" });
     broadcast(req.authCtx.workspaceId, channelId, "inbox_tags", { channelId });
     return { tag };
+  });
+
+  app.delete(`${base}/:channelId/tags/:tagId`, async (req, reply) => {
+    const { channelId, tagId } = req.params as { channelId: string; tagId: string };
+    if (!(await guard(req, reply, channelId))) return;
+    if (!z.string().uuid().safeParse(tagId).success) return reply.code(400).send({ error: "Nhãn không hợp lệ" });
+    if (!(await deleteInboxTag(db, req.authCtx, tagId))) return reply.code(404).send({ error: "Không tìm thấy nhãn" });
+    broadcastWorkspace(req.authCtx.workspaceId, "inbox_tags", { allChannels: true });
+    return { deleted: true };
   });
 
   app.put(`${base}/:channelId/threads/:threadId/tags`, async (req, reply) => {

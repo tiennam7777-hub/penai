@@ -7,6 +7,7 @@ import {
   getInboxThread,
   clearInboxPauses,
   createInboxTag,
+  deleteInboxTag,
   getInboxThreadAgentBlock,
   listInboxTags,
   listInboxThreads,
@@ -85,7 +86,11 @@ describe("Inbox dùng chung (0034)", () => {
     expect((await listInboxThreads(dbh.db, ctxA(), wa, { tagId: tag.id })).threads.map((t) => t.threadId)).toContain(threadId);
     expect((await getInboxThread(dbh.db, ctxA(), wa, threadId))?.tags).toEqual([recolored]);
     expect((await listInboxTags(dbh.db, ctxB()))).toEqual([]);
-    expect(await setInboxThreadTags(dbh.db, ctxA(), wa, threadId, [])).toEqual([]);
+    expect(await deleteInboxTag(dbh.db, ctxB(), tag.id)).toBe(false);
+    expect(await deleteInboxTag(dbh.db, ctxA(), tag.id)).toBe(true);
+    expect(await deleteInboxTag(dbh.db, ctxA(), tag.id)).toBe(false);
+    expect((await listInboxTags(dbh.db, ctxA())).some((x) => x.id === tag.id)).toBe(false);
+    expect((await getInboxThread(dbh.db, ctxA(), wa, threadId))?.tags).toEqual([]);
     expect((await listInboxThreads(dbh.db, ctxA(), wa, { tagId: tag.id })).threads).toEqual([]);
   });
   it("kênh WhatsApp: mã hội thoại dạng số điện thoại và dạng nhóm @g.us", async () => {

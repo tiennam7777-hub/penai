@@ -3895,12 +3895,14 @@ export const INDEX_HTML = `<!doctype html>
       if (!S.ch) return;
       api("/v1/inbox/" + S.ch + "/tags").then(function (j) {
         S.tags = j.tags || [];
-        function syncColors(thread) { if (!thread) return; (thread.tags || []).forEach(function (tag) { var fresh = S.tags.find(function (item) { return item.id === tag.id; }); if (fresh) tag.color = fresh.color; }); }
+        function syncColors(thread) { if (!thread) return; thread.tags = (thread.tags || []).filter(function (tag) { var fresh = S.tags.find(function (item) { return item.id === tag.id; }); if (fresh) tag.color = fresh.color; return !!fresh; }); }
         S.threads.forEach(syncColors); syncColors(S.cur); renderThreads(); if (S.cur) renderHead();
         var sel = $("#ibxTag");
         sel.innerHTML = '<option value="">Mọi nhãn Inbox</option>' + S.tags.map(function (tag) { return '<option value="' + esc(tag.id) + '">' + esc(tag.name) + '</option>'; }).join("");
+        var oldTag = S.tag;
         if (!S.tags.some(function (tag) { return tag.id === S.tag; })) S.tag = "";
         sel.value = S.tag;
+        if (oldTag !== S.tag) loadThreads();
       }).catch(function (e) { toast(e.message, true); });
     }
     function loadThreads(append) {
@@ -4079,7 +4081,7 @@ export const INDEX_HTML = `<!doctype html>
       document.body.appendChild(dlg);
       function choices() {
         var box = $("#ibxTagChoices", dlg);
-        box.innerHTML = S.tags.length ? S.tags.map(function (tag) { return '<div style="display:flex;align-items:center;gap:8px;margin:5px 0"><label style="display:flex;align-items:center;gap:8px;flex:1"><input type="checkbox" value="' + esc(tag.id) + '"' + (selected[tag.id] ? ' checked' : '') + '> ' + inboxTagPills({ tags: [tag] }) + '</label><input type="color" class="ibx-tag-color" data-tag-id="' + esc(tag.id) + '" value="' + inboxTagColor(tag) + '" title="Đổi màu nhãn ' + esc(tag.name) + '" aria-label="Đổi màu nhãn ' + esc(tag.name) + '"></div>'; }).join("") : '<div class="muted">Chưa có nhãn Inbox.</div>';
+        box.innerHTML = S.tags.length ? S.tags.map(function (tag) { return '<div style="display:flex;align-items:center;gap:8px;margin:5px 0"><label style="display:flex;align-items:center;gap:8px;flex:1"><input type="checkbox" value="' + esc(tag.id) + '"' + (selected[tag.id] ? ' checked' : '') + '> ' + inboxTagPills({ tags: [tag] }) + '</label><input type="color" class="ibx-tag-color" data-tag-id="' + esc(tag.id) + '" value="' + inboxTagColor(tag) + '" title="Đổi màu nhãn ' + esc(tag.name) + '" aria-label="Đổi màu nhãn ' + esc(tag.name) + '"><button type="button" class="ghost sm ibx-delete-tag" data-tag-id="' + esc(tag.id) + '" title="Xóa nhãn ' + esc(tag.name) + ' khỏi mọi hội thoại" aria-label="Xóa nhãn ' + esc(tag.name) + '">Xóa</button></div>'; }).join("") : '<div class="muted">Chưa có nhãn Inbox.</div>';
         Array.prototype.forEach.call(box.querySelectorAll('input[type="checkbox"]'), function (cb) { cb.onchange = function () { selected[cb.value] = cb.checked; }; });
         Array.prototype.forEach.call(box.querySelectorAll('input[type="color"]'), function (input) { input.onchange = function () {
           var id = this.getAttribute("data-tag-id"), color = this.value, picker = this; picker.disabled = true;
@@ -4089,6 +4091,15 @@ export const INDEX_HTML = `<!doctype html>
             if (S.cur) (S.cur.tags || []).forEach(function (tag) { if (tag.id === id) tag.color = j.tag.color; });
             renderThreads(); if (S.cur) renderHead(); choices();
           }).catch(function (e) { toast(e.message, true); picker.value = inboxTagColor(S.tags.find(function (tag) { return tag.id === id; })); picker.disabled = false; });
+        }; });
+        Array.prototype.forEach.call(box.querySelectorAll('.ibx-delete-tag'), function (button) { button.onclick = function () {
+          var id = this.getAttribute("data-tag-id"), tag = S.tags.find(function (item) { return item.id === id; });
+          if (!tag || !confirm('Xóa nhãn "' + tag.name + '" khỏi tất cả hội thoại trong Inbox? Tin nhắn không bị xóa.')) return;
+          button.disabled = true;
+          api("/v1/inbox/" + S.ch + "/tags/" + encodeURIComponent(id), { method: "DELETE" }).then(function () {
+            S.tags = S.tags.filter(function (item) { return item.id !== id; }); delete selected[id]; choices(); loadTags();
+            toast("Đã xóa nhãn " + tag.name);
+          }).catch(function (e) { toast(e.message, true); button.disabled = false; });
         }; });
       }
       choices();
@@ -4243,7 +4254,7 @@ export const INDEX_HTML = `<!doctype html>
         renderThreads();
         if (S.cur && S.cur.threadId === d.thread.threadId) { if (!d.thread.tags || !d.thread.tags.length) d.thread.tags = S.cur.tags || []; S.cur = d.thread; renderHead(); }
       });
-      es.addEventListener("inbox_tags", function (ev) { var d; try { d = JSON.parse(ev.data); } catch (e) { return; } if (d.channelId === S.ch) loadTags(); });
+      es.addEventListener("inbox_tags", function (ev) { var d; try { d = JSON.parse(ev.data); } catch (e) { return; } if (d.channelId === S.ch || d.allChannels) loadTags(); });
       es.addEventListener("inbox_thread_tags", function (ev) {
         var d; try { d = JSON.parse(ev.data); } catch (e) { return; }
         if (d.channelId !== S.ch) return;

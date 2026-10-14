@@ -71,6 +71,12 @@ export async function updateInboxTagColor(db: Db, ctx: WorkspaceContext, tagId: 
   return row ? { id: String(row.id), name: String(row.name), color: String(row.color) } : null;
 }
 
+export async function deleteInboxTag(db: Db, ctx: WorkspaceContext, tagId: string): Promise<boolean> {
+  const res = await withWorkspace(db, ctx, (tx) => tx.execute(sql`
+    DELETE FROM inbox_tags WHERE id = ${tagId} AND workspace_id = ${ctx.workspaceId} RETURNING id`));
+  return res.rows.length > 0;
+}
+
 export async function setInboxThreadTags(
   db: Db, ctx: WorkspaceContext, channelId: string, threadId: string, tagIds: string[],
 ): Promise<InboxTag[] | null> {
