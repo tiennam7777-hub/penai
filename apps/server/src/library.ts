@@ -16,8 +16,8 @@
  * vào thùng rác. Mọi thay đổi ghi audit_log (action "library.*").
  */
 import { randomBytes } from "node:crypto";
-import { cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, join, resolve, sep } from "node:path";
+import { cp, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { hasRole, logger, type WorkspaceContext } from "@penai/shared";
@@ -34,6 +34,7 @@ import {
   type TrashMeta,
 } from "./library-trash.js";
 import { resolveDownload, sendDownload, webDirs } from "./web-chat.js";
+import { libraryImageName } from "./library-image-name.js";
 
 const MB = 1024 * 1024;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -101,6 +102,18 @@ async function absIn(root: string, rel: string): Promise<string> {
     throw new HttpError(400, "Đường dẫn nằm ngoài thư viện");
   }
   return abs;
+}
+
+async function imageNameFromFile(name: string, path: string): Promise<string> {
+  if (extname(name)) return name;
+  const file = await open(path, "r");
+  const header = Buffer.alloc(12);
+  try {
+    const { bytesRead } = await file.read(header, 0, header.length, 0);
+    return libraryImageName(name, header.subarray(0, bytesRead));
+  } finally {
+    await file.close();
+  }
 }
 
 // ===== Scope =====
@@ -288,6 +301,7 @@ export function registerLibraryRoutes(app: FastifyInstance, deps: { db: Db; data
       const entries = [];
       for (const e of await readdir(abs, { withFileTypes: true })) {
         if (e.name.startsWith(".")) continue; // file tạm khi tải lên
+        if (e.isSymbolicLink()) continue; // tên cũ chỉ giữ để các liên kết lịch sử vẫn mở được
         const p = join(abs, e.name);
         const est = await stat(p).catch(() => null);
         if (!est) continue;
@@ -357,11 +371,11 @@ export function registerLibraryRoutes(app: FastifyInstance, deps: { db: Db; data
         if (!raw) throw new HttpError(400, "Thiếu tên file");
         await mkdir(scope.root, { recursive: true });
         const dirRel = await targetDir(scope.root, raw.includes("/") ? raw.slice(0, raw.lastIndexOf("/")) : "");
-        const name = safeLibName(raw.split("/").pop() ?? "");
-        const rel = dirRel ? `${dirRel}/${name}` : name;
-        assertMutable(scope, rel);
         const body = req.body;
         if (!Buffer.isBuffer(body)) throw new HttpError(400, "Body phải là nội dung file (application/octet-stream)");
+        const name = libraryImageName(safeLibName(raw.split("/").pop() ?? ""), body.subarray(0, 12));
+        const rel = dirRel ? `${dirRel}/${name}` : name;
+        assertMutable(scope, rel);
         if (body.length > maxFileBytes) {
           throw new HttpError(413, `File vượt ${(maxFileBytes / MB).toFixed(0)} MB`);
         }
@@ -433,7 +447,8 @@ export function registerLibraryRoutes(app: FastifyInstance, deps: { db: Db; data
       const st = await stat(fromAbs).catch(() => null);
       if (!st) throw new HttpError(404, "Không tìm thấy mục cần chuyển");
       const toDir = await targetDir(scope.root, toRaw.includes("/") ? toRaw.slice(0, toRaw.lastIndexOf("/")) : "");
-      const toName = safeLibName(toRaw.split("/").pop() ?? "", st.isDirectory());
+      const requestedName = safeLibName(toRaw.split("/").pop() ?? "", st.isDirectory());
+      const toName = st.isFile() ? await imageNameFromFile(requestedName, fromAbs) : requestedName;
       const to = toDir ? `${toDir}/${toName}` : toName;
       assertMutable(scope, to);
       if (to === from) return { ok: true, path: to };
@@ -559,7 +574,8 @@ export function registerLibraryRoutes(app: FastifyInstance, deps: { db: Db; data
       const dirAbs = await absIn(to.root, toDir);
       await mkdir(dirAbs, { recursive: true });
       await assertQuota(dataDir, ctx, size);
-      const target = await uniqueTarget(dirAbs, basename(srcAbs), st.isDirectory());
+      const name = st.isFile() ? await imageNameFromFile(basename(srcAbs), srcAbs) : basename(srcAbs);
+      const target = await uniqueTarget(dirAbs, name, st.isDirectory());
       await absIn(to.root, relOf(to.root, target));
       await cp(srcAbs, target, { recursive: true, errorOnExist: true, force: false });
       const path = relOf(to.root, target);
@@ -596,7 +612,7 @@ export function registerLibraryRoutes(app: FastifyInstance, deps: { db: Db; data
       const dirAbs = await absIn(to.root, toDir);
       await mkdir(dirAbs, { recursive: true });
       await assertQuota(dataDir, ctx, st.size);
-      const target = await uniqueTarget(dirAbs, safeLibName(basename(src)), false);
+      const target = await uniqueTarget(dirAbs, await imageNameFromFile(safeLibName(basename(src)), src), false);
       await absIn(to.root, relOf(to.root, target));
       await cp(src, target, { errorOnExist: true, force: false });
       const path = relOf(to.root, target);
