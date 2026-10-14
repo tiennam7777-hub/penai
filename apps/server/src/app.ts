@@ -48,6 +48,7 @@ import {
   listPendingPairings,
   listContacts,
   listInboxObservedPeers,
+  setInboxObservedPeerReview,
   upsertInboxObservedPeer,
   listContactsOverview,
   getContactOverview,
@@ -498,6 +499,11 @@ const ZaloDemoThreadsBody = z.object({
 const ApproveObservedZaloThreadBody = z.object({
   chatKey: z.string().regex(/^(direct|group):[^:]+$/),
 });
+const ObservedPeerReviewBody = z.object({
+  chatKey: z.string().regex(/^(direct|group):[^:]+$/),
+  hiddenInPending: z.boolean().optional(),
+  noApprovalNeeded: z.boolean().optional(),
+}).refine((value) => value.hiddenInPending !== undefined || value.noApprovalNeeded !== undefined);
 
 const UpdateAgentBody = z.object({
   name: z.string().min(1).optional(),
@@ -2028,9 +2034,31 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     // vừa đến chưa kịp ghi. Cờ `allowed` tính theo demo threads hiện tại.
     const demoThreads = runtime.demoThreads();
     const allowed = new Set(demoThreads);
-    const rawSearch = (req.query as { q?: unknown }).q;
+    const query = req.query as { q?: unknown; review?: unknown };
+    const rawSearch = query.q;
     const search = typeof rawSearch === "string" ? rawSearch.trim().slice(0, 100) : "";
     const openDirect = runtime.status().openDirect;
+    if (query.review === "pending" || query.review === "hidden" ||
+        query.review === "not_needed" || query.review === "all") {
+      // Trang Channels lọc trên DB trước LIMIT, nên tìm được cả mục cũ.
+      const rows = await listInboxObservedPeers(db, req.authCtx, id, {
+        ...(search ? { search } : {}), review: query.review,
+        excludeChatKeys: demoThreads, excludeDirect: openDirect,
+      });
+      const names = await inboxPeerNames(db, req.authCtx, id,
+        rows.filter((row) => row.kind === "direct").map((row) => row.threadId));
+      return {
+        peers: rows.map((row) => ({
+          chatKey: row.chatKey, threadId: row.threadId, type: row.kind,
+          name: names.get(row.threadId) || row.name || row.threadId,
+          lastSenderId: row.lastSenderId, lastSenderName: row.lastSenderName,
+          messageCount: row.messageCount, firstSeenAt: row.firstSeenAt.toISOString(),
+          lastSeenAt: row.lastSeenAt.toISOString(), allowed: false,
+          hiddenInPending: row.hiddenInPending, noApprovalNeeded: row.noApprovalNeeded,
+        })),
+        demoThreads, openDirect,
+      };
+    }
     const byKey = new Map<
       string,
       ReturnType<typeof runtime.listObserved>[number]
@@ -2114,6 +2142,24 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (!result) return reply.code(404).send({ error: "Hội thoại Zalo chưa được quan sát" });
     runtime.setDemoThreads(result.demoThreads);
     return { approved: true, kind: result.kind, demoThreads: result.demoThreads };
+  });
+  app.patch(`/v1/channels/:id/${seg}/observed-review`, async (req, reply) => {
+    if (!requireRole(req, reply, "ws_admin")) return;
+    const { id } = req.params as { id: string };
+    const parsed = ObservedPeerReviewBody.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: zodMessage(parsed.error) });
+    const runtime = await getZaloPersonalRuntime(req, reply, id);
+    if (!runtime) return;
+    if (runtime.demoThreads().includes(parsed.data.chatKey) ||
+        (runtime.status().openDirect && parsed.data.chatKey.startsWith("direct:"))) {
+      return reply.code(409).send({ error: "Hội thoại này đã được duyệt" });
+    }
+    const result = await setInboxObservedPeerReview(db, req.authCtx, id, parsed.data.chatKey, {
+      ...(parsed.data.hiddenInPending !== undefined ? { hiddenInPending: parsed.data.hiddenInPending } : {}),
+      ...(parsed.data.noApprovalNeeded !== undefined ? { noApprovalNeeded: parsed.data.noApprovalNeeded } : {}),
+    });
+    if (!result) return reply.code(404).send({ error: "Hội thoại chưa được quan sát" });
+    return result;
   });
   }
 

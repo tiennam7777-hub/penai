@@ -1627,8 +1627,8 @@ export const INDEX_HTML = `<!doctype html>
     var pendingC = card(m, "Yêu cầu chờ duyệt");
     var zaloC = card(m, "Zalo — nhóm/thread chờ duyệt");
     zaloC.innerHTML = '<h3>Zalo — nhóm/thread chờ duyệt <span id="zaloPendingCount" class="pill" style="margin-left:6px">0</span></h3>' +
-      '<div class="row" style="margin-bottom:8px"><input id="zaloPendingSearch" type="search" placeholder="Tìm tên người hoặc nhóm chờ duyệt..." aria-label="Tìm người hoặc nhóm chờ duyệt" style="max-width:420px;width:100%"></div>' +
-      '<div class="muted" style="font-size:.78rem;margin-bottom:6px">Zalo: bấm Duyệt một lần để mở hội thoại và duyệt cá nhân ngay; trong nhóm AI chỉ trả lời khi được gọi. Thao tác này không gửi lời chào.</div>' +
+      '<div class="row" style="margin-bottom:8px;gap:8px;flex-wrap:wrap"><input id="zaloPendingSearch" type="search" placeholder="Tìm tên người hoặc nhóm chờ duyệt..." aria-label="Tìm người hoặc nhóm chờ duyệt" style="max-width:420px;width:100%"><select id="zaloPendingChannel" aria-label="Lọc kênh Zalo" style="max-width:230px"><option value="">Tất cả kênh</option></select><select id="zaloPendingView" aria-label="Lọc trạng thái chờ duyệt" style="max-width:190px"><option value="pending">Cần duyệt</option><option value="hidden">Đã ẩn</option><option value="not_needed">Không cần duyệt</option><option value="all">Tất cả chưa duyệt</option></select></div>' +
+      '<div class="muted" style="font-size:.78rem;margin-bottom:6px">Ẩn và Không cần duyệt chỉ sắp xếp danh sách; không bật AI hay duyệt contact. Duyệt một lần sẽ mở hội thoại, không gửi lời chào.</div>' +
       '<div id="zaloPendingResults"></div>';
     var zaloSearchInput = $("#zaloPendingSearch", zaloC);
     var zaloSearchTimer = null;
@@ -1637,6 +1637,8 @@ export const INDEX_HTML = `<!doctype html>
       clearTimeout(zaloSearchTimer);
       zaloSearchTimer = setTimeout(loadZaloPending, 300);
     };
+    $("#zaloPendingChannel", zaloC).onchange = loadZaloPending;
+    $("#zaloPendingView", zaloC).onchange = loadZaloPending;
     var kinds = ["telegram", "discord", "slack", "whatsapp", "whatsapp_personal", "zalo", "zalo_personal", "feishu", "msteams"];
     function loadPending() {
       pendingC.innerHTML = '<h3>Yêu cầu chờ duyệt</h3><div class="muted">Đang tải...</div>';
@@ -1672,14 +1674,22 @@ export const INDEX_HTML = `<!doctype html>
     function loadZaloPending() {
       var seq = ++zaloLoadSeq;
       var search = zaloSearchInput.value.trim();
+      var selectedChannel = $("#zaloPendingChannel", zaloC).value;
+      var review = $("#zaloPendingView", zaloC).value;
       var resultsBox = $("#zaloPendingResults", zaloC);
       resultsBox.innerHTML = '<div class="muted">' + (search ? "Đang tìm..." : "Đang tải...") + '</div>';
       api("/v1/channels").then(function (j) {
+        if (seq !== zaloLoadSeq) return;
         var zaloChannels = (j.channels || []).filter(function (c) { return isPersonalKind(c.kind) && c.enabled; });
         if (!zaloChannels.length) { if (seq === zaloLoadSeq) zaloC.style.display = "none"; return; }
         zaloC.style.display = "";
-        Promise.all(zaloChannels.map(function (c) {
-          return api("/v1/channels/" + c.id + "/personal/observed" + (search ? "?q=" + encodeURIComponent(search) : ""))
+        var channelSelect = $("#zaloPendingChannel", zaloC);
+        channelSelect.innerHTML = '<option value="">Tất cả kênh</option>' + zaloChannels.map(function (c) { return '<option value="' + esc(c.id) + '">' + esc(c.name) + '</option>'; }).join("");
+        if (selectedChannel && zaloChannels.some(function (c) { return c.id === selectedChannel; })) channelSelect.value = selectedChannel;
+        else selectedChannel = "";
+        Promise.all(zaloChannels.filter(function (c) { return !selectedChannel || c.id === selectedChannel; }).map(function (c) {
+          var query = "?review=" + encodeURIComponent(review) + (search ? "&q=" + encodeURIComponent(search) : "");
+          return api("/v1/channels/" + c.id + "/personal/observed" + query)
             .then(function (o) { return { ch: c, peers: o.peers || [], demoThreads: o.demoThreads || [] }; })
             .catch(function () { return null; }); // kênh chưa kết nối thì bỏ qua
         })).then(function (results) {
@@ -1694,7 +1704,7 @@ export const INDEX_HTML = `<!doctype html>
           $("#zaloPendingCount", zaloC).textContent = String(rows.length);
           resultsBox.innerHTML = "";
           if (!rows.length) {
-            resultsBox.innerHTML = '<div class="muted">' + (search ? "Không tìm thấy người hoặc nhóm chờ duyệt." : "Không có người hoặc nhóm chờ duyệt trong danh sách mới nhất. Có thể tìm theo tên ở ô trên.") + '</div>';
+            resultsBox.innerHTML = '<div class="muted">' + (search ? "Không tìm thấy mục phù hợp." : "Không có mục nào trong bộ lọc này. Có thể tìm theo tên ở ô trên.") + '</div>';
             return;
           }
           if (search && results.some(function (r) { return r && r.peers.length >= 200; })) {
@@ -1707,11 +1717,13 @@ export const INDEX_HTML = `<!doctype html>
             tr.innerHTML =
               "<td>" + esc(r.ch.name) + "</td>" +
               "<td>" + (p.type === "group" ? '<span class="pill">nhóm</span>' : '<span class="pill ok">cá nhân</span>') + "</td>" +
-              "<td>" + esc(p.name) + (p.type === "group" ? ' <span class="muted" style="font-size:.75rem">· gửi bởi ' + esc(p.lastSenderName) + "</span>" : "") + "</td>" +
+              "<td>" + esc(p.name) + (p.noApprovalNeeded ? ' <span class="pill" style="background:#fef3c7;color:#92400e;border-color:#fbbf24">Không cần duyệt</span>' : "") + (p.hiddenInPending ? ' <span class="pill">Đã ẩn</span>' : "") + (p.type === "group" ? ' <span class="muted" style="font-size:.75rem">· gửi bởi ' + esc(p.lastSenderName) + "</span>" : "") + "</td>" +
               '<td><code style="font-size:.75rem">' + esc(p.threadId) + "</code></td>" +
               "<td>" + p.messageCount + '</td><td class="muted">' + esc(when) + "</td>";
             var td = el("td");
             var ok = el("button", { "class": "sm" }, "Duyệt");
+            ok.disabled = !!p.noApprovalNeeded;
+            if (p.noApprovalNeeded) ok.title = "Bỏ dấu Không cần duyệt trước khi duyệt";
             ok.onclick = function () {
               ok.disabled = true;
               ok.textContent = "Đang duyệt...";
@@ -1721,7 +1733,18 @@ export const INDEX_HTML = `<!doctype html>
                 .then(function () { toast("Đã duyệt " + p.name); loadZaloPending(); })
                 .catch(function (e) { ok.disabled = false; ok.textContent = "Duyệt"; toast(e.message, 1); });
             };
-            td.appendChild(ok); tr.appendChild(td); return tr;
+            function changeReview(patch, button) {
+              button.disabled = true;
+              api("/v1/channels/" + r.ch.id + "/personal/observed-review", { method: "PATCH", body: Object.assign({ chatKey: p.chatKey }, patch) })
+                .then(function () { loadZaloPending(); })
+                .catch(function (e) { button.disabled = false; toast(e.message, 1); });
+            }
+            var hide = el("button", { "class": "ghost sm" }, p.hiddenInPending ? "Hiện" : "Ẩn");
+            hide.onclick = function () { changeReview({ hiddenInPending: !p.hiddenInPending }, hide); };
+            var mark = el("button", { "class": "ghost sm" }, p.noApprovalNeeded ? "Bỏ dấu" : "Không cần duyệt");
+            mark.onclick = function () { changeReview({ noApprovalNeeded: !p.noApprovalNeeded }, mark); };
+            td.style.whiteSpace = "nowrap";
+            td.appendChild(ok); td.appendChild(hide); td.appendChild(mark); tr.appendChild(td); return tr;
           }));
         });
       }).catch(function (e) { if (seq === zaloLoadSeq) resultsBox.innerHTML = '<span class="err">' + esc(e.message) + '</span>'; });

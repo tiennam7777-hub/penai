@@ -373,6 +373,8 @@ export const zaloObservedPeers = pgTable(
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
+    hiddenInPending: boolean("hidden_in_pending").notNull().default(false),
+    noApprovalNeeded: boolean("no_approval_needed").notNull().default(false),
   },
   (t) => [uniqueIndex("zalo_observed_uq").on(t.channelId, t.chatKey)],
 );

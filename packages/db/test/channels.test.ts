@@ -14,6 +14,8 @@ import {
   approveObservedZaloThread,
   listPendingPairings,
   upsertInboxObservedPeer,
+  listInboxObservedPeers,
+  setInboxObservedPeerReview,
   upsertContact,
   listContacts,
   type DbHandle,
@@ -115,6 +117,31 @@ describe("channels + pairing + contacts (RLS)", () => {
     expect(await isPaired(dbh.db, ctxA(), ch.id, "456")).toBe(false);
     expect((await approveObservedZaloThread(dbh.db, ctxA(), ch.id, "direct:123"))?.demoThreads)
       .toEqual(["direct:123", "group:456"]);
+  });
+
+  it("ẩn và đánh dấu không cần duyệt theo từng kênh, tin mới không xóa dấu", async () => {
+    const ch = await createChannel(dbh.db, ctxA(), {
+      kind: "zalo_personal", name: "Zalo phân loại", agentId: fx.agentA,
+    });
+    for (const id of ["701", "702"]) await upsertInboxObservedPeer(dbh.db, ctxA(), ch.id, {
+      chatKey: `direct:${id}`, threadId: id, kind: "direct", name: `Khách ${id}`,
+      lastSenderId: id, lastSenderName: `Khách ${id}`, countMessage: true,
+    });
+    expect(await setInboxObservedPeerReview(dbh.db, ctxB(), ch.id, "direct:701", { hiddenInPending: true })).toBeNull();
+    expect(await setInboxObservedPeerReview(dbh.db, ctxA(), ch.id, "direct:701", { hiddenInPending: true }))
+      .toMatchObject({ hiddenInPending: true, noApprovalNeeded: false });
+    expect(await setInboxObservedPeerReview(dbh.db, ctxA(), ch.id, "direct:702", { noApprovalNeeded: true }))
+      .toMatchObject({ hiddenInPending: false, noApprovalNeeded: true });
+    await upsertInboxObservedPeer(dbh.db, ctxA(), ch.id, {
+      chatKey: "direct:701", threadId: "701", kind: "direct", name: "Khách 701 mới",
+      lastSenderId: "701", lastSenderName: "Khách 701 mới", countMessage: true,
+    });
+    expect(await listInboxObservedPeers(dbh.db, ctxA(), ch.id, { review: "pending" })).toHaveLength(0);
+    expect((await listInboxObservedPeers(dbh.db, ctxA(), ch.id, { review: "hidden" }))[0]?.name)
+      .toBe("Khách 701 mới");
+    expect((await listInboxObservedPeers(dbh.db, ctxA(), ch.id, { review: "not_needed" }))[0]?.chatKey)
+      .toBe("direct:702");
+    expect(await listInboxObservedPeers(dbh.db, ctxA(), ch.id, { review: "all" })).toHaveLength(2);
   });
 
   it("mã hết hạn không hiện chờ duyệt và không được duyệt", async () => {

@@ -520,7 +520,10 @@ export async function listInboxObservedPeers(
   db: Db,
   ctx: WorkspaceContext,
   channelId: string,
-  options: { search?: string; excludeChatKeys?: string[]; excludeDirect?: boolean } = {},
+  options: {
+    search?: string; excludeChatKeys?: string[]; excludeDirect?: boolean;
+    review?: "pending" | "hidden" | "not_needed" | "all";
+  } = {},
 ) {
   const search = options.search?.trim().slice(0, 100);
   return withWorkspace(db, ctx, (tx) =>
@@ -531,6 +534,11 @@ export async function listInboxObservedPeers(
         eq(zaloObservedPeers.channelId, channelId),
         options.excludeChatKeys?.length ? notInArray(zaloObservedPeers.chatKey, options.excludeChatKeys) : undefined,
         options.excludeDirect ? ne(zaloObservedPeers.kind, "direct") : undefined,
+        options.review === "pending" ? and(
+          eq(zaloObservedPeers.hiddenInPending, false),
+          eq(zaloObservedPeers.noApprovalNeeded, false),
+        ) : options.review === "hidden" ? eq(zaloObservedPeers.hiddenInPending, true)
+          : options.review === "not_needed" ? eq(zaloObservedPeers.noApprovalNeeded, true) : undefined,
         search ? sql<boolean>`(
           POSITION(LOWER(${search}) IN LOWER(${zaloObservedPeers.name})) > 0 OR
           POSITION(LOWER(${search}) IN LOWER(${zaloObservedPeers.lastSenderName})) > 0 OR
@@ -550,6 +558,20 @@ export async function listInboxObservedPeers(
       .orderBy(sql`${zaloObservedPeers.lastSeenAt} DESC`)
       .limit(search ? 200 : 500),
   );
+}
+
+/** Chỉ đổi cách quản trị danh sách chờ; không duyệt pairing hoặc bật AI. */
+export async function setInboxObservedPeerReview(
+  db: Db, ctx: WorkspaceContext, channelId: string, chatKey: string,
+  patch: { hiddenInPending?: boolean; noApprovalNeeded?: boolean },
+): Promise<{ hiddenInPending: boolean; noApprovalNeeded: boolean } | null> {
+  if (patch.hiddenInPending === undefined && patch.noApprovalNeeded === undefined) return null;
+  const [row] = await withWorkspace(db, ctx, (tx) => tx.update(zaloObservedPeers)
+    .set(patch)
+    .where(and(eq(zaloObservedPeers.channelId, channelId), eq(zaloObservedPeers.chatKey, chatKey)))
+    .returning({ hiddenInPending: zaloObservedPeers.hiddenInPending,
+      noApprovalNeeded: zaloObservedPeers.noApprovalNeeded }));
+  return row ?? null;
 }
 
 /** Duyệt một hội thoại đã quan sát: DM được ghép nối ngay; nhóm được mở theo thread. Không gửi tin. */
