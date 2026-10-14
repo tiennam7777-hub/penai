@@ -7,6 +7,7 @@ import {
   stat,
   writeFile,
   mkdir,
+  open,
 } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { z } from "zod";
@@ -258,6 +259,24 @@ export const sendFileTool: ToolHandler<typeof sendSchema> = {
     if (!toolCtx.attachFile) {
       return `Kênh hiện tại chưa hỗ trợ gửi file. File nằm tại ${res.display}`;
     }
+    // Ảnh cũ trong shared/ hoặc thư viện có thể là JPEG hợp lệ nhưng thiếu đuôi.
+    // Zalo chọn gửi ảnh hay tài liệu theo đuôi đường dẫn: tạo bản sao có đuôi
+    // đúng trong thư mục người dùng, không đổi tên hoặc xóa ảnh gốc.
+    if (!extname(res.abs)) {
+      const file = await open(res.abs, "r");
+      const header = Buffer.alloc(12);
+      try { await file.read(header, 0, header.length, 0); }
+      finally { await file.close(); }
+      const imageExt = header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff ? ".jpg"
+        : header.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ? ".png"
+        : header.toString("ascii", 0, 4) === "RIFF" && header.toString("ascii", 8, 12) === "WEBP" ? ".webp"
+        : "";
+      if (imageExt) {
+        const copy = await copyIntoWorkDir(res.abs, workDirOf(toolCtx), basename(res.abs) + imageExt);
+        toolCtx.attachFile(copy);
+        return `Đã gửi bản sao ảnh ${res.display} cho người dùng${args.caption ? ` (${args.caption})` : ""}`;
+      }
+    }
     // File trong thư viện: gửi BẢN SAO nằm trong thư mục làm việc — mọi kênh
     // (kể cả chat web, vốn chỉ phục vụ file trong thư mục người dùng) đều giao
     // được, người dùng có bản của riêng họ, bản gốc thư viện không bị đụng.
@@ -275,8 +294,8 @@ export const sendFileTool: ToolHandler<typeof sendSchema> = {
  * Chép file vào gốc thư mục làm việc (giữ tên; đã có file cùng tên và cùng nội
  * dung thì dùng lại, khác nội dung thì thêm hậu tố -2, -3...).
  */
-async function copyIntoWorkDir(src: string, workDir: string): Promise<string> {
-  const name = basename(src);
+async function copyIntoWorkDir(src: string, workDir: string, targetName?: string): Promise<string> {
+  const name = targetName ?? basename(src);
   const ext = extname(name);
   const stem = ext ? name.slice(0, -ext.length) : name;
   const data = await readFile(src);

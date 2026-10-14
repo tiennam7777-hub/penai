@@ -132,6 +132,23 @@ describe("tiền tố thu-vien/ — thư viện riêng của agent", () => {
     expect((await readdir(userDir)).filter((n) => n.startsWith("mau"))).toEqual(["mau.txt"]);
   });
 
+  it("gửi JPEG thiếu đuôi từ shared/ và thư viện dưới dạng ảnh mà giữ nguyên bản gốc", async () => {
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46]);
+    await writeFile(join(sharedDir, "20-cay-243-chau-ly"), jpeg);
+    await writeFile(join(libA, "20-cay-a33-chau-beo"), jpeg);
+    sent.length = 0;
+    await sendFileTool.execute({ path: "shared/20-cay-243-chau-ly" }, tc);
+    await sendFileTool.execute({ path: "thu-vien/20-cay-a33-chau-beo" }, tc);
+    expect(sent.map((p) => p.split(/[\\/]/).pop())).toEqual([
+      "20-cay-243-chau-ly.jpg", "20-cay-a33-chau-beo.jpg",
+    ]);
+    for (const p of sent) expect(await readFile(p)).toEqual(jpeg);
+    expect(await readFile(join(sharedDir, "20-cay-243-chau-ly"))).toEqual(jpeg);
+    expect(await readFile(join(libA, "20-cay-a33-chau-beo"))).toEqual(jpeg);
+    await sendFileTool.execute({ path: "shared/20-cay-243-chau-ly" }, tc);
+    expect(sent[2]).toBe(sent[0]);
+  });
+
   it("bật canWriteLibrary: ghi được, xóa đi qua thùng rác", async () => {
     const w: ToolContext = { ...tc, canWriteLibrary: true };
     await writeFileTool.execute({ path: "thu-vien/ghi-chu.md", content: "agent ghi", append: false }, w);
