@@ -37,6 +37,7 @@ import {
   updateChannel,
   upsertInboxReaction,
   setInboxMessageCliId,
+  setInboxMessageQuoteSource,
   upsertContact,
   getInboxMessageById,
   latestIncomingInboxMessages,
@@ -63,6 +64,7 @@ import {
 } from "@penai/channels";
 import { channelHandlers } from "./channels-runtime.js";
 import { readPhotoAcknowledgement } from "./photo-burst.js";
+import { inboxZaloQuote, type InboxZaloQuote } from "./inbox-quote.js";
 
 // ===== Cấu hình sống theo kênh =====
 
@@ -319,6 +321,16 @@ export function inboxHooks(
             else if (retry) setTimeout(() => void apply(false), 3_000).unref?.();
           })
           .catch((err) => logger.warn(`zalo.cli_id_store lỗi: ${(err as Error).message}`));
+      void apply(true);
+    },
+    onMessageQuoteSource: (msgId: string, source: Record<string, unknown>) => {
+      const apply = (retry: boolean) =>
+        setInboxMessageQuoteSource(db, ctx, ch.id, msgId, source)
+          .then((m) => {
+            if (m) broadcast(ch.workspaceId, ch.id, "message_update", { channelId: ch.id, threadId: m.threadId, message: publicMessage(m, ch.workspaceId) });
+            else if (retry) setTimeout(() => void apply(false), 3_000).unref?.();
+          })
+          .catch((err) => logger.warn(`zalo.quote_source_store lỗi: ${(err as Error).message}`));
       void apply(true);
     },
     onReaction: (r: ChannelReaction) => {
@@ -579,6 +591,7 @@ export interface InboxSendRequest {
   source: ZaloSendSource;
   webUserId?: string;
   threadName?: string;
+  quote?: InboxZaloQuote;
 }
 
 /** Nạp + kiểm tra + lưu ảnh gửi đi. Lỗi → ImageInputError (chưa gửi gì). */
@@ -633,6 +646,7 @@ export async function sendInbox(dataDir: string, req: InboxSendRequest): Promise
     source: req.source,
     ...(req.webUserId ? { webUserId: req.webUserId } : {}),
     ...(req.threadName ? { threadName: req.threadName } : {}),
+    ...(req.quote ? { quote: req.quote } : {}),
   });
   return { msgIds };
 }
@@ -649,6 +663,7 @@ const SendBody = z
     image: z.string().max(15_000_000).optional(),
     file: z.object({ name: z.string().max(120), contentB64: z.string().max(14_000_000) }).optional(),
     peerKind: z.enum(["direct", "group"]).optional(),
+    replyToId: z.string().regex(/^\d{1,19}$/).optional(),
   })
   .refine((v) => (v.text && v.text.trim()) || v.image || v.file, { message: "Cần nội dung hoặc file" })
   .refine((v) => !(v.image && v.file), { message: "Chỉ gửi một file mỗi lần" });
@@ -798,6 +813,16 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" });
     const thread = await getInboxThread(db, req.authCtx, channelId, threadId);
     const peerKind = thread?.kind ?? parsed.data.peerKind ?? "direct";
+    let quote: InboxZaloQuote | null = null;
+    if (parsed.data.replyToId) {
+      if (kindOf(channelId) !== "zalo_personal") return reply.code(422).send({ error: "Trích dẫn hiện chỉ hỗ trợ Zalo cá nhân" });
+      if (!parsed.data.text?.trim() || parsed.data.image || parsed.data.file) {
+        return reply.code(400).send({ error: "Khi trả lời trích dẫn, hãy nhập lời nhắn; gửi ảnh/file ở lượt riêng" });
+      }
+      const target = await getInboxMessageById(db, req.authCtx, channelId, threadId, parsed.data.replyToId);
+      quote = target ? inboxZaloQuote(target) : null;
+      if (!quote) return reply.code(422).send({ error: "Tin này thiếu thông tin Zalo để trích dẫn; vui lòng chọn tin khác" });
+    }
     try {
       const out = await sendInbox(dataDir, {
         channelId,
@@ -809,6 +834,7 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
         ...(parsed.data.file ? { file: parsed.data.file } : {}),
         source: "web",
         webUserId: req.authCtx.userId,
+        ...(quote ? { quote } : {}),
       });
       return { sent: true, msgIds: out.msgIds };
     } catch (err) {

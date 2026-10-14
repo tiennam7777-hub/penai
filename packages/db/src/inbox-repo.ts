@@ -519,6 +519,22 @@ export async function setInboxMessageCliId(
   return r ? mapMessage(r) : null;
 }
 
+/** Bản dội lại Zalo bổ sung nội dung ảnh gốc để Inbox có thể trả lời trích dẫn ảnh đã gửi. */
+export async function setInboxMessageQuoteSource(
+  db: Db,
+  ctx: WorkspaceContext,
+  channelId: string,
+  msgId: string,
+  source: Record<string, unknown>,
+): Promise<InboxMessageRow | null> {
+  if (!msgId) return null;
+  const res = await withWorkspace(db, ctx, (tx) => tx.execute(sql`
+    UPDATE inbox_messages SET meta = COALESCE(meta, '{}'::jsonb) || jsonb_build_object('zaloQuoteSource', ${JSON.stringify(source)}::jsonb)
+    WHERE channel_id = ${channelId} AND msg_id = ${msgId} AND msg_id <> '' RETURNING *`));
+  const r = res.rows[0] as Raw | undefined;
+  return r ? mapMessage(r) : null;
+}
+
 /** N tin mới nhất KHÁCH gửi (direction in) còn thả cảm xúc được, mới nhất trước. */
 export async function latestIncomingInboxMessages(
   db: Db,

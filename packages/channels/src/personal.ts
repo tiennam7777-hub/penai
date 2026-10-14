@@ -56,6 +56,7 @@ export interface PersonalChannel extends Channel {
     source: ZaloSendSource;
     webUserId?: string;
     threadName?: string;
+    quote?: { msgId: string; cliMsgId: string; uidFrom: string; ts: number; msgType: string; content: string | Record<string, unknown>; propertyExt: string; ttl: number };
   }): Promise<string[]>;
   sendTestMessage(threadId: string, peerKind: "direct" | "group", text: string): Promise<void>;
   /** Zalo: thu hồi cho mọi người hoặc xóa chỉ khỏi tài khoản này. */

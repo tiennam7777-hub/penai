@@ -10,6 +10,7 @@ import {
   type Credentials,
   type LoginQRCallbackEvent,
   type Message,
+  type SendMessageQuote,
   type Undo,
 } from "zca-js";
 import { BoundedRunner } from "./bounded-runner.js";
@@ -734,6 +735,7 @@ export class ZaloPersonalChannel implements Channel {
     webUserId?: string;
     /** Tên người/nhóm nhận (nếu biết) — để hội thoại mới trong Inbox có tên. */
     threadName?: string;
+    quote?: { msgId: string; cliMsgId: string; uidFrom: string; ts: number; msgType: string; content: string | Record<string, unknown>; propertyExt: string; ttl: number };
   }): Promise<string[]> {
     if (!this.api) throw new ZaloNotConnectedError();
     const type = input.peerKind === "group" ? ThreadType.Group : ThreadType.User;
@@ -741,7 +743,7 @@ export class ZaloPersonalChannel implements Channel {
     this.pendingThreadName = input.threadName ?? "";
     try {
       if (input.text?.trim()) {
-        ids.push(...(await this.sendText(input.threadId, type, input.text, input.source, input.webUserId)));
+        ids.push(...(await this.sendText(input.threadId, type, input.text, input.source, input.webUserId, input.quote as SendMessageQuote | undefined)));
       }
       if (input.filePaths?.length) {
         ids.push(
@@ -1244,6 +1246,8 @@ export class ZaloPersonalChannel implements Channel {
         // Tin đã ghi lúc gửi nhưng thiếu cliMsgId (kết quả gửi không có) → bổ sung để thả cảm xúc được.
         const cli = (message.data as { cliMsgId?: unknown }).cliMsgId;
         if (cli != null && String(cli) !== "") this.deps.onMessageCliId?.(msgId, String(cli));
+        const quoteSource = this.quoteSourceOf(message);
+        if (quoteSource) this.deps.onMessageQuoteSource?.(msgId, quoteSource);
         return;
       }
     }
@@ -1268,6 +1272,8 @@ export class ZaloPersonalChannel implements Channel {
       // Cần cả msgId + cliMsgId để thả cảm xúc vào tin này về sau
       const cli = (message.data as { cliMsgId?: unknown }).cliMsgId;
       if (cli != null && String(cli) !== "") meta.cliMsgId = String(cli);
+      const quoteSource = this.quoteSourceOf(message);
+      if (quoteSource) meta.zaloQuoteSource = quoteSource;
       const ts = Number(message.data.ts);
       this.deps.onMessageLog({
         threadId,
@@ -1292,6 +1298,20 @@ export class ZaloPersonalChannel implements Channel {
     }
   }
 
+  /** Giữ metadata ảnh Zalo để tin trả lời từ Inbox trích dẫn đúng ảnh gốc. */
+  private quoteSourceOf(message: Message): Record<string, unknown> | null {
+    const data = message.data as { msgType?: unknown; content?: unknown; propertyExt?: unknown; ttl?: unknown };
+    if (data.msgType !== "chat.photo" || !data.content || typeof data.content !== "object") return null;
+    const serialized = JSON.stringify(data.content);
+    if (!serialized || serialized.length > 16_000) return null;
+    return {
+      msgType: "chat.photo",
+      content: JSON.parse(serialized) as Record<string, unknown>,
+      propertyExt: typeof data.propertyExt === "string" ? data.propertyExt : "",
+      ttl: Number.isFinite(Number(data.ttl)) ? Number(data.ttl) : 0,
+    };
+  }
+
   /** Ghi tin PenAI vừa gửi vào Inbox + nhớ msgId để bỏ qua bản dội lại. */
   private logSent(
     ids: string[],
@@ -1299,7 +1319,7 @@ export class ZaloPersonalChannel implements Channel {
     type: ThreadType,
     source: ZaloSendSource,
     webUserId: string | undefined,
-    content: Pick<ChannelMessageLog, "contentType" | "text" | "media">,
+    content: Pick<ChannelMessageLog, "contentType" | "text" | "media"> & { meta?: Record<string, unknown> },
   ): void {
     for (const id of ids) {
       this.sentMsgIds.add(id);
@@ -1551,12 +1571,16 @@ export class ZaloPersonalChannel implements Channel {
     text: string,
     source: ZaloSendSource = "agent",
     webUserId?: string,
+    quote?: SendMessageQuote,
   ): Promise<string[]> {
     if (!this.api) throw new ZaloNotConnectedError();
     const all: string[] = [];
     for (const chunk of chunkZaloText(text)) {
-      const ids = sentMessageIds(await this.api.sendMessage({ msg: chunk }, threadId, type));
-      this.logSent(ids, threadId, type, source, webUserId, { contentType: "text", text: chunk });
+      const currentQuote = all.length === 0 ? quote : undefined;
+      const ids = sentMessageIds(await this.api.sendMessage({ msg: chunk, ...(currentQuote ? { quote: currentQuote } : {}) }, threadId, type));
+      this.logSent(ids, threadId, type, source, webUserId, { contentType: "text", text: chunk,
+        ...(currentQuote ? { meta: { quote: { msgId: currentQuote.msgId, kind: currentQuote.msgType === "chat.photo" ? "photo" : "other",
+          text: typeof currentQuote.content === "string" ? currentQuote.content.slice(0, 300) : "" } } } : {}) });
       all.push(...ids);
     }
     return all;

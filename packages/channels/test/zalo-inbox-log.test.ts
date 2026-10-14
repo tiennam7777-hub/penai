@@ -74,6 +74,32 @@ describe("Inbox: ghi tin đi/đến + bỏ bản dội lại", () => {
     expect(logs[0]).toMatchObject({ direction: "out", source: "web", webUserId: "user-1", msgId: "101", text: "chào anh" });
   });
 
+  it("sends a quoted reply through Zalo and records its target for Inbox", async () => {
+    const { channel, logs, sent } = setup();
+    const quote = { msgId: "old-1", cliMsgId: "cli-old-1", uidFrom: "customer", ts: 1790000000000,
+      msgType: "chat.photo", content: { href: "https://f47-photo.talk.zdn.vn/photo.jpg" }, propertyExt: "", ttl: 0 };
+    await channel.sendManual({ threadId: "u-9", peerKind: "direct", text: "Mẫu này giá 1,6 triệu ạ", source: "web", quote });
+    expect(sent[0]?.msg).toMatchObject({ msg: "Mẫu này giá 1,6 triệu ạ", quote });
+    expect(logs[0]?.meta).toMatchObject({ quote: { msgId: "old-1", kind: "photo" } });
+  });
+
+  it("captures original Zalo photo metadata from the echo of a sent photo", async () => {
+    const saved: Array<{ id: string; source: Record<string, unknown> }> = [];
+    const channel = new ZaloPersonalChannel({ id: "zp-photo-quote", name: "Zalo", token: "{}", config: {}, requirePairing: true,
+      onInbound: async () => ({ kind: "ignore" }),
+      onMessageLog: () => {},
+      onMessageQuoteSource: (id, source) => saved.push({ id, source }),
+    });
+    (channel as unknown as { sentMsgIds: Set<string> }).sentMsgIds.add("sent-photo-1");
+    await (channel as unknown as { logListenerMessage: (m: unknown, kind: string, thread: string, sender: string, name: string) => Promise<void> }).logListenerMessage({
+      type: ThreadType.User, threadId: "customer", isSelf: true,
+      data: { msgId: "sent-photo-1", cliMsgId: "cli-photo-1", msgType: "chat.photo", uidFrom: "owner",
+        content: { href: "https://f47-photo.talk.zdn.vn/photo.jpg", thumb: "https://f47-photo.talk.zdn.vn/thumb.jpg" }, ts: String(Date.now()) },
+    }, "direct", "customer", "owner", "Shop");
+    expect(saved).toMatchObject([{ id: "sent-photo-1", source: { msgType: "chat.photo",
+      content: { href: "https://f47-photo.talk.zdn.vn/photo.jpg" } } }]);
+  });
+
   it("tin dội lại (isSelf) của tin PenAI vừa gửi không bị ghi lần 2; tin gửi từ điện thoại thì ghi nguồn app", async () => {
     const { channel, logs } = setup();
     await channel.sendManual({ threadId: "g-1", peerKind: "group", text: "thông báo", source: "mcp" });

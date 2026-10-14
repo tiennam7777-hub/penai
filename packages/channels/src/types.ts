@@ -154,6 +154,8 @@ export interface ChannelDeps {
   onReaction?: (r: ChannelReaction) => void;
   /** Zalo Personal — bản dội lại của tin PenAI vừa gửi mang cliMsgId → bổ sung vào tin đã lưu. */
   onMessageCliId?: (msgId: string, cliMsgId: string) => void;
+  /** Bổ sung dữ liệu trích dẫn Zalo cho ảnh PenAI vừa gửi khi bản dội lại đến. */
+  onMessageQuoteSource?: (msgId: string, source: Record<string, unknown>) => void;
   /**
    * Kênh cá nhân có Inbox — tin CŨ nền tảng gửi về ngay sau khi liên kết thiết bị (WhatsApp).
    * Đã xếp theo thời gian tăng dần; server lưu tuần tự, không tăng "chưa đọc", không tạm dừng AI.
