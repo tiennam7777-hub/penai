@@ -172,6 +172,42 @@ export function parseZaloAttachmentParams(raw: unknown): ZaloAttachmentParams {
   }
 }
 
+/** Số trên thẻ liên hệ Zalo nằm trong `params`, không nằm trong `title`. */
+export function zaloSharedContactPhone(content: unknown, msgType = ""): string {
+  if (!content || typeof content !== "object") return "";
+  const card = /contact|card|phone|recommend/i.test(msgType);
+  const normalize = (raw: unknown): string => {
+    if (typeof raw !== "string" && typeof raw !== "number") return "";
+    const digits = String(raw).replace(/\D/g, "");
+    const local = digits.startsWith("84") && digits.length === 11 ? `0${digits.slice(2)}` : digits;
+    return /^0\d{9}$/.test(local) ? local : "";
+  };
+  const visit = (raw: unknown, depth: number): string => {
+    if (depth > 3 || raw == null) return "";
+    if (typeof raw === "string") {
+      if (!raw.trim().startsWith("{")) return "";
+      try { return visit(JSON.parse(raw), depth + 1); } catch { return ""; }
+    }
+    if (typeof raw !== "object" || Array.isArray(raw)) return "";
+    const obj = raw as Record<string, unknown>;
+    for (const key of ["phone", "phoneNumber", "phone_number", "mobile", "tel"]) {
+      const phone = normalize(obj[key]);
+      if (phone) return phone;
+    }
+    for (const key of ["params", "msgInfo", "contact", "data"]) {
+      const phone = visit(obj[key], depth + 1);
+      if (phone) return phone;
+    }
+    return "";
+  };
+  const explicit = visit(content, 0);
+  if (explicit) return explicit;
+  if (!card) return "";
+  const value = content as Record<string, unknown>;
+  const description = typeof value.description === "string" ? value.description : "";
+  return normalize(description.match(/(?:\+?84|0)[\d .-]{8,15}\d/)?.[0] ?? "");
+}
+
 /**
  * Phân loại media theo `msgType` của tin Zalo (chat.file, chat.photo, chat.voice,
  * chat.video.msg, chat.sticker, chat.gif...). `contentType` là `content.type`
@@ -290,6 +326,10 @@ export function describeZaloContent(
   const title = typeof value.title === "string" ? value.title.trim() : "";
   const description = typeof value.description === "string" ? value.description.trim() : "";
   const params = parseZaloAttachmentParams(value.params);
+  const sharedPhone = zaloSharedContactPhone(value, msgType);
+  if (sharedPhone) {
+    return { contentType: "other", text: [title, sharedPhone].filter(Boolean).join(" · ") };
+  }
   const safe = (raw: string) => (raw && trustedZaloMediaUrl(raw) ? raw : "");
   const probe = msgType.toLowerCase();
   if (/link|recommend|webcontent/.test(probe) && href && !/zdn|zadn|zalo/.test(href)) {

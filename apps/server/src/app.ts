@@ -1753,7 +1753,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const contactRows = await listContactsOverview(db, ctx);
     const byChannelId = new Map<string, string>();
     for (const c of contactRows) {
-      const name = c.inboxName || c.profileName || c.displayName;
+      const name = c.profileName || c.inboxName || c.displayName;
       if (c.channelId && name) byChannelId.set(`${c.channelId}:${c.externalId}`, name);
     }
     const zaloByChannelSender = new Map<string, string>();
@@ -2158,7 +2158,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         rows: [
           ["Loại", "UID / ID", "Tên", "SĐT", "Bạn bè / đang trong nhóm", "Số thành viên", "Tin gần nhất", "Chưa đọc", "AI"],
           ...threads.map((t): XlsxCell[] => [
-            t.kind === "group" ? "Nhóm" : "Cá nhân", t.threadId, t.contactAlias || t.name, t.phone, t.isContact ? "Có" : "", t.memberCount ?? "",
+            t.kind === "group" ? "Nhóm" : "Cá nhân", t.threadId, t.profileName || t.contactAlias || t.name, t.phone, t.isContact ? "Có" : "", t.memberCount ?? "",
             t.lastMessageAt ? new Date(t.lastMessageAt) : "", t.unreadCount || "", t.aiMode === "off" ? "Tắt" : "",
           ]),
         ],

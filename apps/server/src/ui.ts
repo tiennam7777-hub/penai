@@ -3059,7 +3059,7 @@ export const INDEX_HTML = `<!doctype html>
   function chLabel(k) { return CH_LABELS[k] || k; }
   function fmtTime(s) { if (!s) return ""; var d = new Date(s); return isNaN(d.getTime()) ? "" : d.toLocaleString("vi-VN"); }
   function tagPill(t) { return '<span class="pill tagpill"><i style="background:' + esc(t.color || "#94a3b8") + '"></i>' + esc(t.name) + "</span>"; }
-  function contactName(c) { return c.inboxName || c.profileName || c.displayName || c.externalId; }
+  function contactName(c) { return c.profileName || c.inboxName || c.displayName || c.externalId; }
   function eachEl(root, sel, fn) { Array.prototype.forEach.call(root.querySelectorAll(sel), fn); }
   function charCounter(input, out, max) {
     var upd = function () { out.textContent = input.value.length + " / " + max + " ký tự"; };
@@ -3865,8 +3865,9 @@ export const INDEX_HTML = `<!doctype html>
     }
     function threadItem(t) {
       var a = el("div", { "class": "ibx-item" + (S.cur && S.cur.threadId === t.threadId ? " active" : "") });
-      a.innerHTML = '<div class="ibx-av' + (t.kind === "group" ? " grp" : "") + '">' + (t.avatar ? '<img src="' + esc(t.avatar) + '" referrerpolicy="no-referrer" alt="">' : ibxInitial(t.contactAlias || t.name)) + '</div>' +
-        '<div class="ibx-mid"><div class="ibx-nm">' + (t.kind === "group" ? "👥 " : "") + esc(t.contactAlias || t.name || t.threadId) + " " + aiBadge(t) + '</div>' + (t.contactAlias && t.name && t.contactAlias !== t.name ? '<div class="ibx-last">Zalo: ' + esc(t.name) + '</div>' : '') + '<div class="ibx-last">' + esc(t.lastMessage || (t.isContact ? "(chưa có tin nhắn)" : "")) + "</div></div>" +
+      var displayName = t.profileName || t.contactAlias || t.name || t.threadId;
+      a.innerHTML = '<div class="ibx-av' + (t.kind === "group" ? " grp" : "") + '">' + (t.avatar ? '<img src="' + esc(t.avatar) + '" referrerpolicy="no-referrer" alt="">' : ibxInitial(displayName)) + '</div>' +
+        '<div class="ibx-mid"><div class="ibx-nm">' + (t.kind === "group" ? "👥 " : "") + esc(displayName) + " " + aiBadge(t) + '</div>' + (t.name && displayName !== t.name ? '<div class="ibx-last">Zalo: ' + esc(t.name) + '</div>' : '') + '<div class="ibx-last">' + esc(t.lastMessage || (t.isContact ? "(chưa có tin nhắn)" : "")) + "</div></div>" +
         '<div class="ibx-meta"><div>' + esc(ibxTime(t.lastMessageAt)) + "</div>" + (t.unreadCount ? '<span class="ibx-badge">' + t.unreadCount + "</span>" : "") + "</div>";
       a.onclick = function () { openThread(t); };
       return a;
@@ -4021,7 +4022,8 @@ export const INDEX_HTML = `<!doctype html>
       var paused = t.pausedUntil && new Date(t.pausedUntil).getTime() > Date.now();
       var recalled = t.recallWaitingForCustomer;
       h.className = "ibx-head";
-      h.innerHTML = '<div><b>' + (t.kind === "group" ? "👥 " : "👤 ") + esc(t.contactAlias || t.name || t.threadId) + '</b>' + (t.contactAlias && t.name && t.contactAlias !== t.name ? '<div class="muted">Zalo: ' + esc(t.name) + '</div>' : '') + ' <span class="muted">' + (t.kind === "group" ? "nhóm" : "cá nhân") + " · uid <code>" + esc(t.threadId) + "</code>" + (t.phone ? " · " + esc(t.phone) : "") + "</span></div>" +
+      var displayName = t.profileName || t.contactAlias || t.name || t.threadId;
+      h.innerHTML = '<div><b>' + (t.kind === "group" ? "👥 " : "👤 ") + esc(displayName) + '</b>' + (t.name && displayName !== t.name ? '<div class="muted">Zalo: ' + esc(t.name) + '</div>' : '') + ' <span class="muted">' + (t.kind === "group" ? "nhóm" : "cá nhân") + " · uid <code>" + esc(t.threadId) + "</code>" + (t.phone ? " · " + esc(t.phone) : "") + "</span></div>" +
         '<div class="row" style="gap:6px"><span class="muted">AI trả lời:</span><select id="ibxAi" style="padding:3px 6px"><option value="auto">Theo cấu hình kênh</option><option value="off">Tắt cho hội thoại này</option></select>' +
         (paused ? '<span class="pill">⏸️ tạm dừng tới ' + esc(ibxTime(t.pausedUntil)) + '</span>' : "") +
         (recalled ? '<span class="pill">⏸️ chờ khách hỏi mới sau khi thu hồi tin AI</span>' : "") +

@@ -255,7 +255,7 @@ export async function exportContacts(
       peerKind: o.peerKind,
       externalId: o.externalId,
       userKey: o.userKey,
-      displayName: o.inboxName ?? o.displayName ?? "",
+      displayName: o.profileName ?? o.inboxName ?? o.displayName ?? "",
       profileName: o.profileName ?? "",
       addressAs: s((p as Record<string, unknown>).address_as),
       selfAddress: s((p as Record<string, unknown>).self_address),

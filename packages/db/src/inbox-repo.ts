@@ -31,6 +31,7 @@ export interface InboxThread {
   kind: "direct" | "group";
   name: string;
   contactAlias: string;
+  profileName: string;
   avatar: string;
   phone: string;
   isContact: boolean;
@@ -82,10 +83,13 @@ type Raw = Record<string, unknown>;
 export async function inboxPeerNames(db: Db, ctx: WorkspaceContext, channelId: string, ids: string[]): Promise<Map<string, string>> {
   if (!ids.length) return new Map();
   return withWorkspace(db, ctx, async (tx) => {
-    const result = await tx.execute(sql`SELECT thread_id,
-      COALESCE(NULLIF(contact_alias, ''), NULLIF(name, '')) AS display_name
-      FROM inbox_threads WHERE channel_id = ${channelId} AND kind = 'direct'
-      AND thread_id IN (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})`);
+    const result = await tx.execute(sql`SELECT t.thread_id,
+      COALESCE(NULLIF(pp.display_name, ''), NULLIF(t.contact_alias, ''), NULLIF(t.name, '')) AS display_name
+      FROM inbox_threads t
+      LEFT JOIN contacts c ON c.channel_id = t.channel_id AND c.external_id = t.thread_id
+      LEFT JOIN principal_profiles pp ON pp.principal_id = c.principal_id
+      WHERE t.channel_id = ${channelId} AND t.kind = 'direct'
+      AND t.thread_id IN (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})`);
     return new Map((result.rows as Raw[]).filter((r) => r.display_name).map((r) => [String(r.thread_id), String(r.display_name)]));
   });
 }
@@ -101,6 +105,7 @@ function mapThread(r: Raw): InboxThread {
     kind: r.kind === "group" ? "group" : "direct",
     name: String(r.name ?? ""),
     contactAlias: String(r.contact_alias ?? ""),
+    profileName: r.kind === "direct" ? String(r.profile_name ?? "") : "",
     avatar: String(r.avatar ?? ""),
     phone: String(r.phone ?? ""),
     isContact: r.is_contact === true,
@@ -331,25 +336,28 @@ export async function listInboxThreads(
 ): Promise<{ threads: InboxThread[]; total: number }> {
   const limit = Math.min(Math.max(query.limit ?? 50, 1), 500);
   const offset = Math.max(query.offset ?? 0, 0);
-  const conds = [sql`channel_id = ${channelId}`];
-  if (query.kind) conds.push(sql`kind = ${query.kind}`);
-  if (query.unreadOnly) conds.push(sql`unread_count > 0`);
-  if (query.withMessagesOnly) conds.push(sql`last_message_at IS NOT NULL`);
-  if (query.contactsOnly) conds.push(sql`is_contact = true`);
+  const conds = [sql`t.channel_id = ${channelId}`];
+  if (query.kind) conds.push(sql`t.kind = ${query.kind}`);
+  if (query.unreadOnly) conds.push(sql`t.unread_count > 0`);
+  if (query.withMessagesOnly) conds.push(sql`t.last_message_at IS NOT NULL`);
+  if (query.contactsOnly) conds.push(sql`t.is_contact = true`);
   const q = query.q?.trim();
   if (q) {
     const like = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
-    conds.push(sql`(name ILIKE ${like} OR contact_alias ILIKE ${like} OR thread_id LIKE ${like} OR phone LIKE ${like})`);
+    conds.push(sql`(t.name ILIKE ${like} OR t.contact_alias ILIKE ${like} OR pp.display_name ILIKE ${like} OR t.thread_id LIKE ${like} OR t.phone LIKE ${like})`);
   }
   const where = sql.join(conds, sql` AND `);
   const order = query.stableOrder
-    ? sql`thread_id ASC`
-    : sql`last_message_at DESC NULLS LAST, name ASC`;
+    ? sql`t.thread_id ASC`
+    : sql`t.last_message_at DESC NULLS LAST, t.name ASC`;
+  const from = sql`FROM inbox_threads t
+    LEFT JOIN contacts c ON c.channel_id = t.channel_id AND c.external_id = t.thread_id
+    LEFT JOIN principal_profiles pp ON pp.principal_id = c.principal_id`;
   return withWorkspace(db, ctx, async (tx) => {
     const rows = await tx.execute(
-      sql`SELECT * FROM inbox_threads WHERE ${where} ORDER BY ${order} LIMIT ${limit} OFFSET ${offset}`,
+      sql`SELECT t.*, pp.display_name AS profile_name ${from} WHERE ${where} ORDER BY ${order} LIMIT ${limit} OFFSET ${offset}`,
     );
-    const cnt = await tx.execute(sql`SELECT count(*)::int AS n FROM inbox_threads WHERE ${where}`);
+    const cnt = await tx.execute(sql`SELECT count(*)::int AS n ${from} WHERE ${where}`);
     return {
       threads: (rows.rows as Raw[]).map(mapThread),
       total: Number((cnt.rows[0] as Raw | undefined)?.n ?? 0),
@@ -364,8 +372,11 @@ export async function listAllInboxThreads(
   channelId: string,
 ): Promise<InboxThread[]> {
   const res = await withWorkspace(db, ctx, (tx) =>
-    tx.execute(sql`SELECT * FROM inbox_threads WHERE channel_id = ${channelId}
-      ORDER BY kind, last_message_at DESC NULLS LAST, name LIMIT 100000`),
+    tx.execute(sql`SELECT t.*, pp.display_name AS profile_name FROM inbox_threads t
+      LEFT JOIN contacts c ON c.channel_id = t.channel_id AND c.external_id = t.thread_id
+      LEFT JOIN principal_profiles pp ON pp.principal_id = c.principal_id
+      WHERE t.channel_id = ${channelId}
+      ORDER BY t.kind, t.last_message_at DESC NULLS LAST, t.name LIMIT 100000`),
   );
   return (res.rows as Raw[]).map(mapThread);
 }
@@ -377,7 +388,10 @@ export async function getInboxThread(
   threadId: string,
 ): Promise<InboxThread | null> {
   const res = await withWorkspace(db, ctx, (tx) =>
-    tx.execute(sql`SELECT * FROM inbox_threads WHERE channel_id = ${channelId} AND thread_id = ${threadId}`),
+    tx.execute(sql`SELECT t.*, pp.display_name AS profile_name FROM inbox_threads t
+      LEFT JOIN contacts c ON c.channel_id = t.channel_id AND c.external_id = t.thread_id
+      LEFT JOIN principal_profiles pp ON pp.principal_id = c.principal_id
+      WHERE t.channel_id = ${channelId} AND t.thread_id = ${threadId}`),
   );
   const r = res.rows[0] as Raw | undefined;
   return r ? mapThread(r) : null;

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ThreadType } from "zca-js";
 import type { ChannelContact, ChannelMessageLog, ChannelReaction } from "../src/types.js";
-import { describeZaloContent, parseAutoReaction, ZALO_REACTIONS, ZaloPersonalChannel } from "../src/zalo-personal.js";
+import { describeZaloContent, parseAutoReaction, ZALO_REACTIONS, ZaloPersonalChannel, zaloSharedContactPhone } from "../src/zalo-personal.js";
 
 describe("describeZaloContent — nội dung tin cho Inbox", () => {
   it("text thường", () => {
@@ -32,6 +32,14 @@ describe("describeZaloContent — nội dung tin cho Inbox", () => {
     );
     expect(zaloFile.media?.url).toBe("https://file-stal-15.dlfl.vn/download/123");
     expect(describeZaloContent({ href: "https://dlfl.vn.evil.example/file", title: "fake.xlsx" }, "share.file").media?.url).toBeUndefined();
+  });
+
+  it("thẻ liên hệ Zalo hiển thị cả số điện thoại trong Inbox", () => {
+    const card = { title: "Hoai Anh", params: JSON.stringify({ contactUid: "8224189516377002390", phone: "098 231 0386" }) };
+    expect(zaloSharedContactPhone(card, "share.contact")).toBe("0982310386");
+    expect(describeZaloContent(card, "share.contact")).toMatchObject({ contentType: "other", text: "Hoai Anh · 0982310386" });
+    expect(describeZaloContent({ title: "Hoai Anh", description: "+84 98 231 0386" }, "chat.card").text).toContain("0982310386");
+    expect(zaloSharedContactPhone({ title: "Hoai Anh", params: '{"phone":"123"}' }, "share.contact")).toBe("");
   });
 
   it("sticker / voice / nội dung lạ", () => {
