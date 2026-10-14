@@ -4203,7 +4203,7 @@ export const INDEX_HTML = `<!doctype html>
           if (!d.thread.profileName) d.thread.profileName = S.cur.profileName || "";
           S.cur = d.thread; renderHead();
         }
-        if (!S.filter) mergeThread(d.thread);
+        if (!S.filter) { if (S.tag) loadThreads(); else mergeThread(d.thread); }
       });
       es.addEventListener("thread", function (ev) {
         var d; try { d = JSON.parse(ev.data); } catch (e) { return; }
