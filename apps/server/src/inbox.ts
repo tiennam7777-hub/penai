@@ -32,6 +32,7 @@ import {
   createInboxTag,
   updateInboxTagColor,
   setInboxThreadTags,
+  setInboxThreadHidden,
   markInboxThreadRead,
   markAgentMessageRecalled,
   markInboxMessageRemoved,
@@ -775,19 +776,31 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
   app.get(`${base}/:channelId/threads`, async (req, reply) => {
     const { channelId } = req.params as { channelId: string };
     if (!(await guard(req, reply, channelId))) return;
-    const q = req.query as { q?: string; kind?: string; unread?: string; tagId?: string; limit?: string; offset?: string; all?: string };
+    const q = req.query as { q?: string; kind?: string; unread?: string; tagId?: string; hidden?: string; limit?: string; offset?: string; all?: string };
     if (q.tagId && !z.string().uuid().safeParse(q.tagId).success) return reply.code(400).send({ error: "Nhãn không hợp lệ" });
     const res = await listInboxThreads(db, req.authCtx, channelId, {
       ...(q.q ? { q: q.q.slice(0, 100) } : {}),
       ...(q.tagId ? { tagId: q.tagId } : {}),
       ...(q.kind === "direct" || q.kind === "group" ? { kind: q.kind } : {}),
       unreadOnly: q.unread === "1",
+      inboxHidden: q.hidden === "1",
       // Không tìm kiếm → chỉ hội thoại đã có tin; tìm kiếm → cả danh bạ chưa chat
       withMessagesOnly: !q.q && q.all !== "1",
       limit: Number(q.limit) || 100,
       offset: Number(q.offset) || 0,
     });
     return res;
+  });
+
+  app.put(`${base}/:channelId/threads/:threadId/visibility`, async (req, reply) => {
+    const { channelId, threadId } = req.params as { channelId: string; threadId: string };
+    if (!(await guard(req, reply, channelId))) return;
+    const parsed = z.object({ hidden: z.boolean() }).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "Trạng thái ẩn không hợp lệ" });
+    const thread = await setInboxThreadHidden(db, req.authCtx, channelId, threadId, parsed.data.hidden);
+    if (!thread) return reply.code(404).send({ error: "Không tìm thấy hội thoại" });
+    broadcast(req.authCtx.workspaceId, channelId, "thread_visibility", { channelId, thread });
+    return { thread };
   });
 
   app.get(`${base}/:channelId/tags`, async (req, reply) => {

@@ -36,6 +36,7 @@ export interface InboxThread {
   avatar: string;
   phone: string;
   isContact: boolean;
+  hiddenInInbox: boolean;
   memberCount: number | null;
   lastMessage: string;
   lastMessageAt: string | null;
@@ -157,6 +158,7 @@ function mapThread(r: Raw): InboxThread {
     avatar: String(r.avatar ?? ""),
     phone: String(r.phone ?? ""),
     isContact: r.is_contact === true,
+    hiddenInInbox: r.hidden_in_inbox === true,
     memberCount: r.member_count == null ? null : Number(r.member_count),
     lastMessage: String(r.last_message ?? ""),
     lastMessageAt: iso(r.last_message_at),
@@ -362,6 +364,15 @@ export async function setInboxThreadName(
   );
 }
 
+export async function setInboxThreadHidden(
+  db: Db, ctx: WorkspaceContext, channelId: string, threadId: string, hidden: boolean,
+): Promise<InboxThread | null> {
+  const res = await withWorkspace(db, ctx, (tx) => tx.execute(sql`
+    UPDATE inbox_threads SET hidden_in_inbox = ${hidden}
+    WHERE channel_id = ${channelId} AND thread_id = ${threadId} RETURNING 1`));
+  return res.rows.length ? getInboxThread(db, ctx, channelId, threadId) : null;
+}
+
 export interface InboxThreadQuery {
   q?: string;
   tagId?: string;
@@ -371,6 +382,8 @@ export interface InboxThreadQuery {
   withMessagesOnly?: boolean;
   /** true = chỉ danh bạ (bạn bè / nhóm đang tham gia) */
   contactsOnly?: boolean;
+  /** Chỉ dùng khi lọc danh sách Inbox; caller khác bỏ qua để vẫn thấy đủ hội thoại. */
+  inboxHidden?: boolean;
   limit?: number;
   offset?: number;
   /** Sắp theo thread_id cố định (phân trang ổn định cho MCP) thay vì tin mới nhất. */
@@ -390,6 +403,7 @@ export async function listInboxThreads(
   if (query.unreadOnly) conds.push(sql`t.unread_count > 0`);
   if (query.withMessagesOnly) conds.push(sql`t.last_message_at IS NOT NULL`);
   if (query.contactsOnly) conds.push(sql`t.is_contact = true`);
+  if (query.inboxHidden !== undefined) conds.push(sql`t.hidden_in_inbox = ${query.inboxHidden}`);
   if (query.tagId) conds.push(sql`EXISTS (SELECT 1 FROM inbox_thread_tags itt
     WHERE itt.channel_id = t.channel_id AND itt.thread_id = t.thread_id AND itt.tag_id = ${query.tagId}::uuid)`);
   const q = query.q?.trim();

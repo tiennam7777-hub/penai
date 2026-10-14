@@ -3836,13 +3836,13 @@ export const INDEX_HTML = `<!doctype html>
 
   PAGES.inbox = function () {
     var m = page("Inbox", "Nhiều người cùng xem và trả lời khách trên Zalo cá nhân, WhatsApp cá nhân. Nhân viên trả lời thì AI tự tạm im trong hội thoại đó.");
-    var S = { channels: [], canManage: false, ch: null, threads: [], total: 0, tags: [], tag: "", cur: null, msgs: [], filter: "", kind: "", img: null, file: null, reply: null, es: null, seq: 0 };
+    var S = { channels: [], canManage: false, ch: null, threads: [], total: 0, tags: [], tag: "", hidden: false, cur: null, msgs: [], filter: "", kind: "", img: null, file: null, reply: null, es: null, seq: 0 };
     var top = el("div", { "class": "row", style: "margin-bottom:10px" });
     top.innerHTML = '<select id="ibxCh" style="max-width:260px"></select><span id="ibxSt" class="muted"></span><span style="flex:1"></span>' +
       '<button class="ghost sm" id="ibxNew">＋ Nhắn tin mới</button><button class="ghost sm" id="ibxSync" style="display:none">🔄 Đồng bộ danh bạ</button><button class="ghost sm" id="ibxSet" style="display:none">⚙️ Cài đặt</button>';
     m.appendChild(top);
     var wrap = el("div", { "class": "ibx" });
-    wrap.innerHTML = '<div class="ibx-list"><div class="row" style="padding:8px"><input id="ibxQ" placeholder="Tìm tên, uid, SĐT…"><select id="ibxKind" style="flex:0 0 auto;min-width:0"><option value="">Tất cả</option><option value="direct">Cá nhân</option><option value="group">Nhóm</option><option value="unread">Chưa đọc</option></select></div><div style="padding:0 8px 8px"><select id="ibxTag" style="width:100%"><option value="">Mọi nhãn Inbox</option></select></div><div id="ibxThreads" class="ibx-threads"></div></div>' +
+    wrap.innerHTML = '<div class="ibx-list"><div class="row" style="padding:8px"><input id="ibxQ" placeholder="Tìm tên, uid, SĐT…"><select id="ibxKind" style="flex:0 0 auto;min-width:0"><option value="">Tất cả</option><option value="direct">Cá nhân</option><option value="group">Nhóm</option><option value="unread">Chưa đọc</option></select></div><div class="row" style="padding:0 8px 8px;gap:6px"><select id="ibxTag" style="flex:1;min-width:0"><option value="">Mọi nhãn Inbox</option></select><select id="ibxHidden" style="flex:0 0 auto;min-width:0" title="Xem hội thoại đang hiện hoặc đã ẩn"><option value="0">Đang hiện</option><option value="1">Đã ẩn</option></select></div><div id="ibxThreads" class="ibx-threads"></div></div>' +
       '<div class="ibx-chat"><div id="ibxHead" class="ibx-head muted">Chọn một hội thoại bên trái.</div><div id="ibxMsgs" class="ibx-msgs"></div>' +
       '<div class="ibx-compose" id="ibxCompose" style="display:none"><div id="ibxReply"></div><div id="ibxImg"></div><div class="row" style="align-items:flex-end"><textarea id="ibxText" rows="2" placeholder="Nhập tin nhắn… (Enter để gửi, Shift+Enter xuống dòng, dán ảnh trực tiếp)"></textarea><input type="file" id="ibxFile" accept="image/png,image/jpeg,image/gif,image/webp,.pdf,.doc,.docx,.xls,.xlsx" hidden><button class="ghost" id="ibxAttach" title="Gửi ảnh hoặc file Word, Excel, PDF">📎</button><button id="ibxSend">Gửi</button></div></div></div>';
     m.appendChild(wrap);
@@ -3885,7 +3885,7 @@ export const INDEX_HTML = `<!doctype html>
     }
     function renderThreads() {
       var box = $("#ibxThreads"); box.innerHTML = "";
-      if (!S.threads.length) { box.innerHTML = '<div class="muted" style="padding:12px">' + (S.filter || S.tag ? "Không tìm thấy hội thoại phù hợp." : "Chưa có hội thoại nào. Tin nhắn mới tới tài khoản sẽ tự hiện ở đây.") + "</div>"; return; }
+      if (!S.threads.length) { box.innerHTML = '<div class="muted" style="padding:12px">' + (S.hidden ? "Không có hội thoại đã ẩn phù hợp." : S.filter || S.tag ? "Không tìm thấy hội thoại phù hợp." : "Chưa có hội thoại nào. Tin nhắn mới tới tài khoản sẽ tự hiện ở đây.") + "</div>"; return; }
       S.threads.forEach(function (t) { box.appendChild(threadItem(t)); });
       if (S.threads.length < S.total) { var more = el("button", { "class": "ghost sm", style: "display:block;margin:8px auto" }, "Xem thêm hội thoại"); more.onclick = function () { loadThreads(true); }; box.appendChild(more); }
     }
@@ -3904,7 +3904,7 @@ export const INDEX_HTML = `<!doctype html>
     function loadThreads(append) {
       if (!S.ch) return;
       var seq = append ? S.seq : ++S.seq;
-      var k = S.kind, qs = "?limit=200&offset=" + (append ? S.threads.length : 0) + (S.filter ? "&q=" + encodeURIComponent(S.filter) : "") + (S.tag ? "&tagId=" + encodeURIComponent(S.tag) : "") + (k === "direct" || k === "group" ? "&kind=" + k : "") + (k === "unread" ? "&unread=1" : "");
+      var k = S.kind, qs = "?limit=200&offset=" + (append ? S.threads.length : 0) + (S.filter ? "&q=" + encodeURIComponent(S.filter) : "") + (S.tag ? "&tagId=" + encodeURIComponent(S.tag) : "") + "&hidden=" + (S.hidden ? "1" : "0") + (k === "direct" || k === "group" ? "&kind=" + k : "") + (k === "unread" ? "&unread=1" : "");
       api("/v1/inbox/" + S.ch + "/threads" + qs).then(function (j) { if (seq !== S.seq) return; S.threads = append ? S.threads.concat(j.threads || []) : (j.threads || []); S.total = j.total || 0; renderThreads(); })
         .catch(function (e) { $("#ibxThreads").innerHTML = '<div class="err" style="padding:12px">' + esc(e.message) + "</div>"; });
     }
@@ -4048,7 +4048,7 @@ export const INDEX_HTML = `<!doctype html>
       var recalled = t.recallWaitingForCustomer;
       h.className = "ibx-head";
       var displayName = t.profileName || t.contactAlias || t.name || t.threadId;
-      h.innerHTML = '<div class="ibx-head-person"><b>' + (t.kind === "group" ? "👥 " : "👤 ") + esc(displayName) + '</b> ' + (t.kind === "direct" ? ' <button type="button" class="ghost sm" id="ibxEditTags">🏷 Gắn/bỏ nhãn</button>' : '') + (t.name && displayName !== t.name ? '<div class="muted">Zalo: ' + esc(t.name) + '</div>' : '') + ' <span class="muted">' + (t.kind === "group" ? "nhóm" : "cá nhân") + " · uid <code>" + esc(t.threadId) + "</code>" + (t.phone ? " · " + esc(t.phone) : "") + "</span></div>" +
+      h.innerHTML = '<div class="ibx-head-person"><b>' + (t.kind === "group" ? "👥 " : "👤 ") + esc(displayName) + '</b> ' + (t.kind === "direct" ? ' <button type="button" class="ghost sm" id="ibxEditTags">🏷 Gắn/bỏ nhãn</button>' : '') + ' <button type="button" class="ghost sm" id="ibxHideThread">' + (t.hiddenInInbox ? "👁 Hiện lại" : "🙈 Ẩn trò chuyện") + '</button>' + (t.name && displayName !== t.name ? '<div class="muted">Zalo: ' + esc(t.name) + '</div>' : '') + ' <span class="muted">' + (t.kind === "group" ? "nhóm" : "cá nhân") + " · uid <code>" + esc(t.threadId) + "</code>" + (t.phone ? " · " + esc(t.phone) : "") + "</span></div>" +
         (t.tags && t.tags.length ? '<div class="ibx-head-tags">' + inboxTagPills(t) + '</div>' : '') +
         '<div class="row" style="gap:6px"><span class="muted">AI trả lời:</span><select id="ibxAi" style="padding:3px 6px"><option value="auto">Theo cấu hình kênh</option><option value="off">Tắt cho hội thoại này</option></select>' +
         (paused ? '<span class="pill">⏸️ tạm dừng tới ' + esc(ibxTime(t.pausedUntil)) + '</span>' : "") +
@@ -4057,6 +4057,13 @@ export const INDEX_HTML = `<!doctype html>
       $("#ibxAi").value = t.aiMode || "auto";
       $("#ibxAi").onchange = function () { setAi({ mode: this.value }); };
       var tagButton = $("#ibxEditTags"); if (tagButton) tagButton.onclick = editInboxTags;
+      $("#ibxHideThread").onclick = function () {
+        var btn = this, tid = S.cur.threadId, hidden = !S.cur.hiddenInInbox; btn.disabled = true;
+        api("/v1/inbox/" + S.ch + "/threads/" + encodeURIComponent(tid) + "/visibility", { method: "PUT", body: { hidden: hidden } }).then(function () {
+          S.cur = null; S.msgs = []; renderHead(); $("#ibxMsgs").innerHTML = ""; $("#ibxCompose").style.display = "none";
+          loadThreads(); toast(hidden ? "Đã ẩn trò chuyện. Chọn ‘Đã ẩn’ để hiện lại." : "Đã hiện lại trò chuyện.");
+        }).catch(function (e) { toast(e.message, true); btn.disabled = false; });
+      };
       var r = $("#ibxResume"); if (r) r.onclick = function () { setAi({ resume: true }); };
     }
     function editInboxTags() {
@@ -4147,6 +4154,7 @@ export const INDEX_HTML = `<!doctype html>
       var old = i < S.threads.length ? S.threads[i] : (S.cur && S.cur.threadId === t.threadId ? S.cur : null);
       if (old) { if (!t.tags || !t.tags.length) t.tags = old.tags || []; if (!t.profileName) t.profileName = old.profileName || ""; }
       if (i < S.threads.length) S.threads.splice(i, 1);
+      if (t.hiddenInInbox !== S.hidden) { renderThreads(); return; }
       if (S.kind === "unread" && !t.unreadCount) { renderThreads(); return; }
       if ((S.kind === "direct" || S.kind === "group") && t.kind !== S.kind) { renderThreads(); return; }
       if (S.tag && !(t.tags || []).some(function (tag) { return tag.id === S.tag; })) { renderThreads(); return; }
@@ -4241,6 +4249,14 @@ export const INDEX_HTML = `<!doctype html>
         if (S.cur && S.cur.threadId === d.threadId) { S.cur.tags = d.tags || []; renderHead(); }
         if (S.tag) loadThreads(); else renderThreads();
       });
+      es.addEventListener("thread_visibility", function (ev) {
+        var d; try { d = JSON.parse(ev.data); } catch (e) { return; }
+        if (d.channelId !== S.ch) return;
+        if (S.cur && S.cur.threadId === d.thread.threadId && d.thread.hiddenInInbox !== S.hidden) {
+          S.cur = null; S.msgs = []; renderHead(); $("#ibxMsgs").innerHTML = ""; $("#ibxCompose").style.display = "none";
+        }
+        loadThreads();
+      });
       es.addEventListener("message_update", function (ev) {
         var d; try { d = JSON.parse(ev.data); } catch (e) { return; }
         if (d.channelId !== S.ch || !S.cur || S.cur.threadId !== d.threadId) return;
@@ -4261,6 +4277,7 @@ export const INDEX_HTML = `<!doctype html>
     $("#ibxQ").oninput = function () { var v = this.value.trim(); clearTimeout(qTimer); qTimer = setTimeout(function () { S.filter = v; loadThreads(); }, 300); };
     $("#ibxKind").onchange = function () { S.kind = this.value; loadThreads(); };
     $("#ibxTag").onchange = function () { S.tag = this.value; loadThreads(); };
+    $("#ibxHidden").onchange = function () { S.hidden = this.value === "1"; S.cur = null; S.msgs = []; renderHead(); $("#ibxMsgs").innerHTML = ""; $("#ibxCompose").style.display = "none"; loadThreads(); };
     $("#ibxCh").onchange = function () { S.ch = this.value; S.tag = ""; S.tags = []; S.cur = null; S.msgs = []; S.img = null; S.file = null; S.reply = null; renderImg(); renderReply(); renderStatus(); renderHead(); $("#ibxMsgs").innerHTML = ""; $("#ibxCompose").style.display = "none"; loadTags(); loadThreads(); };
     $("#ibxSync").onclick = function () {
       var b = this; b.disabled = true;

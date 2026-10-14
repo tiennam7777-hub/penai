@@ -14,6 +14,7 @@ import {
   listUserInboxChannelIds,
   recordInboxMessage,
   setInboxThreadTags,
+  setInboxThreadHidden,
   updateInboxTagColor,
   setUserInboxChannels,
   type DbHandle,
@@ -55,6 +56,21 @@ const msg = (over: Record<string, unknown> = {}) => ({
 });
 
 describe("Inbox dùng chung (0034)", () => {
+  it("ẩn nhóm trong một kênh, nhóm cùng mã ở kênh khác vẫn hiện và có thể khôi phục", async () => {
+    const secondChannel = (await createChannel(dbh.db, ctxA(), {
+      kind: "whatsapp_personal", name: "WhatsApp A2", agentId: fx.agentA,
+    })).id;
+    const threadId = "120363042222222222@g.us";
+    await recordInboxMessage(dbh.db, ctxA(), wa, msg({ threadId, peerKind: "group", msgId: "hide-group-a" }));
+    await recordInboxMessage(dbh.db, ctxA(), secondChannel, msg({ threadId, peerKind: "group", msgId: "hide-group-b" }));
+    expect((await setInboxThreadHidden(dbh.db, ctxA(), wa, threadId, true))?.hiddenInInbox).toBe(true);
+    expect((await listInboxThreads(dbh.db, ctxA(), wa, { inboxHidden: false })).threads.some((t) => t.threadId === threadId)).toBe(false);
+    expect((await listInboxThreads(dbh.db, ctxA(), wa, { inboxHidden: true })).threads.some((t) => t.threadId === threadId)).toBe(true);
+    expect((await getInboxThread(dbh.db, ctxA(), secondChannel, threadId))?.hiddenInInbox).toBe(false);
+    expect((await getInboxThread(dbh.db, ctxA(), wa, threadId))?.lastMessage).toBe("Xin chào");
+    expect((await setInboxThreadHidden(dbh.db, ctxA(), wa, threadId, false))?.hiddenInInbox).toBe(false);
+    expect((await listInboxThreads(dbh.db, ctxA(), wa, { inboxHidden: false })).threads.some((t) => t.threadId === threadId)).toBe(true);
+  });
   it("gắn và lọc nhãn Inbox cho hội thoại chưa có Contact, tách khỏi workspace khác", async () => {
     const threadId = "untagged-contact-1";
     await recordInboxMessage(dbh.db, ctxA(), wa, msg({ threadId, senderId: threadId, msgId: "tag-msg-1" }));
