@@ -4278,7 +4278,7 @@ export const INDEX_HTML = `<!doctype html>
     $("#ibxKind").onchange = function () { S.kind = this.value; loadThreads(); };
     $("#ibxTag").onchange = function () { S.tag = this.value; loadThreads(); };
     $("#ibxHidden").onchange = function () { S.hidden = this.value === "1"; S.cur = null; S.msgs = []; renderHead(); $("#ibxMsgs").innerHTML = ""; $("#ibxCompose").style.display = "none"; loadThreads(); };
-    $("#ibxCh").onchange = function () { S.ch = this.value; S.tag = ""; S.tags = []; S.cur = null; S.msgs = []; S.img = null; S.file = null; S.reply = null; renderImg(); renderReply(); renderStatus(); renderHead(); $("#ibxMsgs").innerHTML = ""; $("#ibxCompose").style.display = "none"; loadTags(); loadThreads(); };
+    $("#ibxCh").onchange = function () { S.ch = this.value; S.tag = ""; S.tags = []; S.hidden = false; $("#ibxHidden").value = "0"; S.cur = null; S.msgs = []; S.img = null; S.file = null; S.reply = null; renderImg(); renderReply(); renderStatus(); renderHead(); $("#ibxMsgs").innerHTML = ""; $("#ibxCompose").style.display = "none"; loadTags(); loadThreads(); };
     $("#ibxSync").onclick = function () {
       var b = this; b.disabled = true;
       api("/v1/inbox/" + S.ch + "/sync-contacts", { method: "POST", body: {} })
