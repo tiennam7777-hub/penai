@@ -3,9 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PenaiConfigSchema, type WorkspaceContext } from "@penai/shared";
-import { createChannel, createDb, getInboxMessageById, getInboxThread, recordInboxMessage, setInboxMessageCliId, upsertInboxContacts, upsertInboxObservedPeer, inboxPeerNames, type DbHandle, type EnabledChannel } from "@penai/db";
+import { createAgent, createChannel, createDb, getInboxMessageById, getInboxThread, recordInboxMessage, setInboxMessageCliId, upsertInboxContacts, upsertInboxObservedPeer, inboxPeerNames, type DbHandle, type EnabledChannel } from "@penai/db";
 import { createTestFixtures, setupTestDatabase, TEST_APP_URL, type TestFixtures } from "@penai/db/testing";
-import { createProviderRegistry, type ChatRequest, type ChatResponse } from "@penai/providers";
+import { CodexProvider, createProviderRegistry, type ChatRequest, type ChatResponse } from "@penai/providers";
 import { createDefaultToolRegistry } from "@penai/tools";
 import { Scheduler } from "@penai/core";
 import { ZaloPersonalChannel, type InboundMessage } from "@penai/channels";
@@ -85,8 +85,20 @@ describe("Photo messages without text remain silent", () => {
 describe("Configured group photo editing", () => {
   it("returns edited photos with or without captions only in the configured group", async () => {
     const dataUrl = png;
+    const photoAgent = await createAgent(dbh.db, ctx(), {
+      key: "oc2-photo-test", name: "OC2", provider: "codex", model: "gpt-6-sol",
+      systemPrompt: "Giữ nguyên hoa và chữ",
+    });
+    const photoProvider = new CodexProvider("codex");
+    const editRequests: Array<Parameters<typeof photoProvider.generateImage>[0]> = [];
+    photoProvider.generateImage = async (req) => {
+      editRequests.push(req);
+      return { mime: "image/jpeg", data: Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(128)]) };
+    };
+    rt.providers.registerRuntime(fx.wsA, "codex", photoProvider);
     const handler = makeInboundHandler(rt, new Scheduler(), {
       ...channel,
+      agentId: photoAgent.id,
       config: { auto_edit_photo_group: "group:oc2" },
       requirePairing: true,
     });
@@ -102,6 +114,8 @@ describe("Configured group photo editing", () => {
     expect(result.text).toBe("");
     expect(result.media).toHaveLength(1);
     expect((await readFile(result.media![0]!)).subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]));
+    expect(editRequests[0]).toMatchObject({ action: "edit", imageModel: "gpt-image-2.5-sunburst", outputFormat: "jpeg" });
+    expect(editRequests[0]!.prompt).toContain("Giữ nguyên hoa và chữ");
     expect(requests).toHaveLength(0);
     const captioned = await handler({ ...incoming, text: "Chỉnh ảnh này giúp tôi" });
     expect(captioned.kind).toBe("reply");

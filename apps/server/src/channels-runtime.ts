@@ -26,6 +26,7 @@ import {
   recordTraceSafe,
 } from "@penai/db";
 import { Scheduler, gatedProvider, runAgent } from "@penai/core";
+import { CodexProvider } from "@penai/providers";
 import {
   ChannelManager,
   isChannelKindSupported,
@@ -48,7 +49,7 @@ import { classifyOrchidSalesScope } from "./orchid-sales-scope.js";
 import { hasPersonalAddressMismatch, requiresPersonalAddressGuard } from "./persona-reply-guard.js";
 import { isFreshCustomerRequest } from "./recall-policy.js";
 import { orchidHandoffContext } from "./orchid-handoff-context.js";
-import { enhanceOrchidPhoto } from "./orchid-photo-enhance.js";
+import { editOrchidPhotoWithOpenAI } from "./orchid-photo-openai.js";
 
 /** Handler + channel theo channelId — cho webhook route (WhatsApp, Teams) dùng. */
 export const channelHandlers = new Map<
@@ -665,13 +666,22 @@ export function makeInboundHandler(
       const userKey = `${channel.kind}-${msg.senderId}`;
       const userDir = resolve(join(rt.config.dataDir, ctx.workspaceId, "users", sanitizeUserKey(userKey)));
       try {
+        const agent = await getAgentById(db, ctx, channel.agentId);
+        if (!agent) throw new Error("OC2 chưa có Agent chỉnh ảnh");
+        const imageProvider = rt.providers.get(agent.provider, ctx.workspaceId);
+        if (!(imageProvider instanceof CodexProvider)) {
+          throw new Error("OC2 cần Agent dùng provider ChatGPT (codex)");
+        }
         const photos = (msg.media ?? []).filter((m) => m.kind === "photo" && m.dataUrl).slice(0, 6);
         const saved = await saveInboundImages(userDir, photos);
         if (!saved.length) return { kind: "reply", text: "Không đọc được ảnh này. Vui lòng gửi lại ảnh JPG, PNG hoặc WebP dưới 10 MB." };
         const edited: string[] = [];
         for (const original of saved) {
           const output = join(userDir, `anh-da-chinh-${randomBytes(8).toString("hex")}.jpg`);
-          await writeFile(output, await enhanceOrchidPhoto(await readFile(original.path)));
+          const image = await editOrchidPhotoWithOpenAI(
+            await readFile(original.path), agent.systemPrompt, imageProvider,
+          );
+          await writeFile(output, image.data);
           edited.push(output);
         }
         const list = [...(recentImages.get(sessionId) ?? []), ...saved,
@@ -684,7 +694,7 @@ export function makeInboundHandler(
         return { kind: "reply", text: "", media: edited };
       } catch (error) {
         logger.warn(`Không chỉnh được ảnh nhóm ${channel.id}/${msg.chatKey}: ${String(error)}`);
-        return { kind: "reply", text: "Không chỉnh được ảnh này. Vui lòng gửi lại ảnh JPG, PNG hoặc WebP dưới 10 MB." };
+        return { kind: "reply", text: "Chưa chỉnh được ảnh bằng OpenAI. Quản trị viên vui lòng kiểm tra kết nối và hạn mức ChatGPT." };
       }
     }
     if (silentPhoto) {

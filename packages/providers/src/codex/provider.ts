@@ -516,6 +516,11 @@ export class CodexProvider implements Provider {
     size?: string;
     model?: string;
     refImages?: string[];
+    action?: "generate" | "edit";
+    imageModel?: string;
+    outputFormat?: "png" | "jpeg" | "webp";
+    outputCompression?: number;
+    quality?: "low" | "medium" | "high" | "xhigh" | "max";
   }): Promise<{ data: Buffer; mime: string }> {
     const order = this.accounts.pickOrder();
     if (!order.length) {
@@ -546,8 +551,21 @@ export class CodexProvider implements Provider {
 
   private async generateImageOn(
     alias: string,
-    req: { prompt: string; size?: string; model?: string; refImages?: string[] },
+    req: {
+      prompt: string;
+      size?: string;
+      model?: string;
+      refImages?: string[];
+      action?: "generate" | "edit";
+      imageModel?: string;
+      outputFormat?: "png" | "jpeg" | "webp";
+      outputCompression?: number;
+      quality?: "low" | "medium" | "high" | "xhigh" | "max";
+    },
   ): Promise<{ data: Buffer; mime: string }> {
+    if (req.action === "edit" && !req.refImages?.length) {
+      throw new Error("Chỉnh ảnh cần ảnh gốc");
+    }
     let auth = await this.authFor(alias);
     const content: unknown[] = [];
     for (const img of req.refImages ?? []) {
@@ -559,14 +577,16 @@ export class CodexProvider implements Provider {
       stream: true,
       store: false,
       instructions:
-        "Use the image_generation tool to create the image the user asks for. Respond with the image only, without any text.",
+        "Use the image_generation tool to edit the provided image when requested. Respond with the image only, without any text.",
       input: [{ role: "user", content }],
       tools: [
         {
           type: "image_generation",
-          action: "generate",
-          model: "gpt-image-2",
-          output_format: "png",
+          action: req.action ?? "generate",
+          model: req.imageModel ?? "gpt-image-2",
+          output_format: req.outputFormat ?? "png",
+          ...(req.outputCompression !== undefined ? { output_compression: req.outputCompression } : {}),
+          ...(req.quality ? { quality: req.quality } : {}),
           size: req.size || "1024x1024",
         },
       ],

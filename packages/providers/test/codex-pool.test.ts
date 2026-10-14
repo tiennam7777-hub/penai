@@ -181,6 +181,36 @@ describe("CodexProvider — failover trong cùng request", () => {
     })();
   }
 
+  it("forces image editing of the supplied photo instead of generating a new scene", async () => {
+    await writeFile(legacyFile, JSON.stringify(fakeAuth("photo", "photo@x.com")));
+    const p = new CodexProvider("codex", { authFile: legacyFile, accountsDir });
+    let body: Record<string, unknown> | undefined;
+    vi.stubGlobal("fetch", async (_url: unknown, init: { body: string }) => {
+      body = JSON.parse(init.body) as Record<string, unknown>;
+      return {
+        ok: true, status: 200, headers: new Headers(),
+        body: sseBody([{ type: "response.completed", response: {
+          output: [{ type: "image_generation_call", result: Buffer.from("photo").toString("base64"), output_format: "jpeg" }],
+        } }]),
+      };
+    });
+    const result = await p.generateImage({
+      prompt: "Blur only the background", refImages: ["data:image/jpeg;base64,/9j/"],
+      action: "edit", imageModel: "gpt-image-2.5-sunburst", size: "1024x1536",
+      outputFormat: "jpeg", outputCompression: 88, quality: "high",
+    });
+    expect(result.mime).toBe("image/jpeg");
+    expect(result.data.toString()).toBe("photo");
+    expect(body?.tools).toEqual([expect.objectContaining({
+      type: "image_generation", action: "edit", model: "gpt-image-2.5-sunburst",
+      output_format: "jpeg", output_compression: 88, quality: "high", size: "1024x1536",
+    })]);
+    expect(body?.input).toEqual([{ role: "user", content: [
+      { type: "input_image", image_url: "data:image/jpeg;base64,/9j/" },
+      { type: "input_text", text: "Blur only the background" },
+    ] }]);
+  });
+
   it("tài khoản 1 dính 429 → cooldown + request chuyển ngay sang tài khoản 2", async () => {
     await mkdir(accountsDir, { recursive: true });
     await writeFile(join(accountsDir, "a1.json"), JSON.stringify(fakeAuth("a1", "a1@x.com")));
