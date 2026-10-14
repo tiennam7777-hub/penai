@@ -89,6 +89,8 @@ describe("Inbox: ghi tin đi/đến + bỏ bản dội lại", () => {
     });
     let n = 100;
     const sent: Array<{ msg: unknown; threadId: string; type: unknown }> = [];
+    const friendRequests: Array<{ message: string; uid: string }> = [];
+    const friendStatus = { is_friend: 0, is_requested: 0, is_requesting: 0 };
     const fakeApi = {
       sendMessage: async (msg: unknown, threadId: string, type: unknown) => {
         sent.push({ msg, threadId, type });
@@ -96,11 +98,14 @@ describe("Inbox: ghi tin đi/đến + bỏ bản dội lại", () => {
         return { message: { msgId: String(n) }, attachment: [] };
       },
       findUser: async (phone: string) => (phone === "0900000001" ? { uid: "u-1", display_name: "Chị A", avatar: "" } : null),
+      findUserByUsername: async (username: string) => (username === "orchids" ? { uid: "u-1", display_name: "Chị A", avatar: "" } : null),
+      getFriendRequestStatus: async () => friendStatus,
+      sendFriendRequest: async (message: string, uid: string) => { friendRequests.push({ message, uid }); return ""; },
     };
     const c = channel as unknown as Record<string, unknown>;
     c.api = fakeApi;
     c.account = { id: "me-1", name: "Shop" };
-    return { channel, logs, sent, contacts };
+    return { channel, logs, sent, contacts, friendRequests, friendStatus };
   }
 
   it("sendManual gửi text không qua cổng demo, ghi 1 log nguồn web", async () => {
@@ -166,6 +171,22 @@ describe("Inbox: ghi tin đi/đến + bỏ bản dội lại", () => {
     const { channel } = setup();
     expect(await channel.findUserByPhone("0900000001")).toMatchObject({ uid: "u-1", name: "Chị A" });
     expect(await channel.findUserByPhone("0900000002")).toBeNull();
+  });
+
+  it("tìm người và chỉ gửi lời mời khi chưa là bạn/chưa có lời mời", async () => {
+    const { channel, logs, friendRequests, friendStatus } = setup();
+    expect(await channel.findFriendCandidate("0900000001", "phone")).toMatchObject({ uid: "u-1", name: "Chị A", relationship: "none" });
+    expect(await channel.findFriendCandidate("orchids", "username")).toMatchObject({ uid: "u-1", relationship: "none" });
+    friendStatus.is_requesting = 1;
+    expect(await channel.findFriendCandidate("0900000001", "phone")).toMatchObject({ relationship: "pending" });
+    await expect(channel.sendFriendRequest("u-1", "Xin chào")).rejects.toThrow("đang chờ");
+    friendStatus.is_requesting = 0;
+    friendStatus.is_friend = 1;
+    await expect(channel.sendFriendRequest("u-1", "Xin chào")).rejects.toThrow("đã là bạn bè");
+    friendStatus.is_friend = 0;
+    await channel.sendFriendRequest("u-1", "Xin chào");
+    expect(friendRequests).toEqual([{ uid: "u-1", message: "Xin chào" }]);
+    expect(logs).toEqual([]);
   });
 
   it("chưa đăng nhập → sendManual báo NOT_CONNECTED", async () => {

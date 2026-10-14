@@ -76,6 +76,13 @@ export interface ZaloPersonalTarget {
   memberCount?: number;
 }
 
+export interface ZaloFriendCandidate {
+  uid: string;
+  name: string;
+  avatar: string;
+  relationship: "none" | "friend" | "pending";
+}
+
 /** Người/nhóm đã nhắn tới tài khoản — chỉ metadata, không lưu nội dung tin. */
 export interface ZaloObservedPeer {
   chatKey: string;
@@ -760,6 +767,40 @@ export class ZaloPersonalChannel implements Channel {
       if (/not found|không tìm|khong tim|216|-?1\b/.test(msg)) return null;
       throw error;
     }
+  }
+
+  /** Tìm người trước khi gửi lời mời; kiểm tra cả trạng thái để tránh gửi lại hoặc nhận lời mời ngoài ý muốn. */
+  async findFriendCandidate(value: string, by: "phone" | "username"): Promise<ZaloFriendCandidate | null> {
+    if (!this.api) throw new ZaloNotConnectedError();
+    let user;
+    try {
+      user = by === "phone" ? await this.api.findUser(value) : await this.api.findUserByUsername(value);
+    } catch (error) {
+      const msg = errorMessage(error).toLowerCase();
+      if (/not found|không tìm|khong tim|216|-?1\b/.test(msg)) return null;
+      throw error;
+    }
+    if (!user?.uid) return null;
+    const uid = String(user.uid);
+    const status = await this.api.getFriendRequestStatus(uid);
+    return {
+      uid,
+      name: user.display_name || user.zalo_name || uid,
+      avatar: user.avatar || "",
+      relationship: Number(status.is_friend) > 0 ? "friend"
+        : Number(status.is_requested) > 0 || Number(status.is_requesting) > 0 ? "pending" : "none",
+    };
+  }
+
+  /** Chỉ gọi từ thao tác người dùng trong Inbox; không gửi tin chat và không mở pairing/AI. */
+  async sendFriendRequest(uid: string, message: string): Promise<void> {
+    if (!this.api) throw new ZaloNotConnectedError();
+    const status = await this.api.getFriendRequestStatus(uid);
+    if (Number(status.is_friend) > 0) throw new Error("Tài khoản này đã là bạn bè");
+    if (Number(status.is_requested) > 0 || Number(status.is_requesting) > 0) {
+      throw new Error("Đã có lời mời kết bạn đang chờ giữa hai tài khoản");
+    }
+    await this.api.sendFriendRequest(message, uid);
   }
 
   /**

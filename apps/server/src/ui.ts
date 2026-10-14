@@ -3839,7 +3839,7 @@ export const INDEX_HTML = `<!doctype html>
     var S = { channels: [], canManage: false, ch: null, threads: [], total: 0, tags: [], tag: "", hidden: false, cur: null, msgs: [], filter: "", kind: "", img: null, file: null, reply: null, es: null, seq: 0 };
     var top = el("div", { "class": "row", style: "margin-bottom:10px" });
     top.innerHTML = '<select id="ibxCh" style="max-width:260px"></select><span id="ibxSt" class="muted"></span><span style="flex:1"></span>' +
-      '<button class="ghost sm" id="ibxNew">＋ Nhắn tin mới</button><button class="ghost sm" id="ibxSync" style="display:none">🔄 Đồng bộ danh bạ</button><button class="ghost sm" id="ibxSet" style="display:none">⚙️ Cài đặt</button>';
+      '<button class="ghost sm" id="ibxFriend" style="display:none">＋ Kết bạn</button><button class="ghost sm" id="ibxNew">＋ Nhắn tin mới</button><button class="ghost sm" id="ibxSync" style="display:none">🔄 Đồng bộ danh bạ</button><button class="ghost sm" id="ibxSet" style="display:none">⚙️ Cài đặt</button>';
     m.appendChild(top);
     var wrap = el("div", { "class": "ibx" });
     wrap.innerHTML = '<div class="ibx-list"><div class="row" style="padding:8px"><input id="ibxQ" placeholder="Tìm tên, uid, SĐT…"><select id="ibxKind" style="flex:0 0 auto;min-width:0"><option value="">Tất cả</option><option value="direct">Cá nhân</option><option value="group">Nhóm</option><option value="unread">Chưa đọc</option></select></div><div class="row" style="padding:0 8px 8px;gap:6px"><select id="ibxTag" style="flex:1;min-width:0"><option value="">Mọi nhãn Inbox</option></select><select id="ibxHidden" style="flex:0 0 auto;min-width:0" title="Xem hội thoại đang hiện hoặc đã ẩn"><option value="0">Đang hiện</option><option value="1">Đã ẩn</option></select></div><div id="ibxThreads" class="ibx-threads"></div></div>' +
@@ -3861,6 +3861,8 @@ export const INDEX_HTML = `<!doctype html>
         (c.autoReaction ? ' · <span class="pill" title="Tự thả cảm xúc khi khách nhắn">' + (c.autoReaction === "like" ? "👍" : "❤️") + " tự thả</span>" : "");
       $("#ibxSync").style.display = S.canManage ? "" : "none";
       $("#ibxSet").style.display = isAdmin() ? "" : "none";
+      $("#ibxFriend").style.display = c.kind === "zalo_personal" ? "" : "none";
+      $("#ibxFriend").disabled = !c.connected;
     }
     function aiBadge(t) {
       if (t.aiMode === "off") return '<span title="Đã tắt AI cho hội thoại này">🚫</span>';
@@ -4308,6 +4310,49 @@ export const INDEX_HTML = `<!doctype html>
           .catch(function (e) { toast(e.message, true); });
       };
       dlg.showModal();
+    };
+    $("#ibxFriend").onclick = function () {
+      var channelId = S.ch, dlg = el("dialog", { style: "width:440px;max-width:95vw;padding:20px" }), candidate = null, searchSeq = 0;
+      dlg.innerHTML = '<h3 style="margin:0 0 8px">Tìm và kết bạn Zalo</h3>' +
+        '<div class="muted" style="margin-bottom:12px">Tìm trên tài khoản Zalo của kênh đang chọn. Chỉ gửi lời mời khi bạn bấm “Gửi lời mời”.</div>' +
+        '<label>Cách tìm</label><select id="frBy" style="width:100%"><option value="phone">Số điện thoại</option><option value="username">Username Zalo (không phải tên hiển thị)</option></select>' +
+        '<div class="row" style="margin-top:8px"><input id="frValue" style="flex:1;min-width:0" placeholder="Nhập số điện thoại"><button type="button" class="ghost" id="frSearch">Tìm</button></div>' +
+        '<div id="frResult" style="min-height:38px;margin:12px 0"></div>' +
+        '<label>Lời nhắn kèm lời mời</label><input id="frMessage" maxlength="150" style="width:100%" value="Xin chào, mình muốn kết bạn để tiện trao đổi.">' +
+        '<div class="dialog-actions"><button type="button" class="ghost" id="frClose">Đóng</button><button type="button" id="frSend" disabled>Gửi lời mời</button></div>';
+      document.body.appendChild(dlg);
+      function clearCandidate() { searchSeq++; candidate = null; $("#frSend", dlg).disabled = true; $("#frResult", dlg).innerHTML = ""; }
+      $("#frBy", dlg).onchange = function () { $("#frValue", dlg).placeholder = this.value === "phone" ? "Nhập số điện thoại" : "Nhập username Zalo"; $("#frValue", dlg).value = ""; clearCandidate(); };
+      $("#frValue", dlg).oninput = clearCandidate;
+      $("#frValue", dlg).onkeydown = function (ev) { if (ev.key === "Enter") { ev.preventDefault(); $("#frSearch", dlg).click(); } };
+      $("#frClose", dlg).onclick = function () { dlg.close(); dlg.remove(); };
+      $("#frSearch", dlg).onclick = function () {
+        var by = $("#frBy", dlg).value, value = $("#frValue", dlg).value.trim(), btn = this;
+        if (by === "phone") value = value.replace(/[ .-]/g, "");
+        if (!value) { toast("Hãy nhập số điện thoại hoặc username Zalo", true); return; }
+        clearCandidate(); var seq = searchSeq; btn.disabled = true; $("#frResult", dlg).textContent = "Đang tìm…";
+        api("/v1/inbox/" + channelId + "/friend-search?by=" + encodeURIComponent(by) + "&value=" + encodeURIComponent(value)).then(function (j) {
+          if (seq !== searchSeq) return;
+          if (!j.found || !j.user) { $("#frResult", dlg).textContent = "Không tìm thấy tài khoản Zalo này."; return; }
+          candidate = j.user;
+          var relation = candidate.relationship === "friend" ? "Đã là bạn bè" : candidate.relationship === "pending" ? "Đã có lời mời đang chờ" : "Có thể gửi lời mời";
+          $("#frResult", dlg).innerHTML = '<div class="row" style="align-items:center;gap:9px">' +
+            (candidate.avatar ? '<img src="' + esc(candidate.avatar) + '" alt="" style="width:38px;height:38px;border-radius:50%;object-fit:cover">' : '') +
+            '<div><b>' + esc(candidate.name) + '</b><div class="muted">' + esc(relation) + '</div></div></div>';
+          $("#frSend", dlg).disabled = candidate.relationship !== "none";
+        }).catch(function (e) { if (seq === searchSeq) $("#frResult", dlg).innerHTML = '<span class="err">' + esc(e.message) + '</span>'; })
+          .then(function () { if (seq === searchSeq) btn.disabled = false; });
+      };
+      $("#frSend", dlg).onclick = function () {
+        if (!candidate || candidate.relationship !== "none") return;
+        var message = $("#frMessage", dlg).value.trim(), btn = this;
+        if (!message) { toast("Hãy nhập lời nhắn kết bạn", true); return; }
+        btn.disabled = true;
+        api("/v1/inbox/" + channelId + "/friend-request", { method: "POST", body: { uid: candidate.uid, message: message } }).then(function () {
+          candidate.relationship = "pending"; $("#frResult", dlg).innerHTML = '<span class="pill ok">Đã gửi lời mời kết bạn trên Zalo.</span>';
+        }).catch(function (e) { toast(e.message, true); btn.disabled = false; });
+      };
+      dlg.showModal(); $("#frValue", dlg).focus();
     };
     $("#ibxNew").onclick = function () {
       var dlg = el("dialog", { style: "width:480px;padding:20px" });

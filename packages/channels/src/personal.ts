@@ -5,6 +5,7 @@ import type {
   ZaloPersonalQrStatus,
   ZaloPersonalStatus,
   ZaloPersonalTarget,
+  ZaloFriendCandidate,
   ZaloReactionKey,
   ZaloSendSource,
 } from "./zalo-personal.js";
@@ -46,6 +47,9 @@ export interface PersonalChannel extends Channel {
   listTargets(): Promise<ZaloPersonalTarget[]>;
   syncContacts(): Promise<{ friends: number; groups: number }>;
   findUserByPhone(phone: string): Promise<{ uid: string; name: string; avatar: string } | null>;
+  /** Chỉ Zalo: tìm tài khoản và gửi lời mời kết bạn từ thao tác Inbox. */
+  findFriendCandidate?(value: string, by: "phone" | "username"): Promise<ZaloFriendCandidate | null>;
+  sendFriendRequest?(uid: string, message: string): Promise<void>;
   resolvePhone(phone: string): Promise<{ uid: string; name: string }>;
   lookupGroupName(threadId: string): Promise<string>;
   sendManual(input: {

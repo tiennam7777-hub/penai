@@ -954,6 +954,53 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
     return { found: !!user, user };
   });
 
+  app.get(`${base}/:channelId/friend-search`, async (req, reply) => {
+    const { channelId } = req.params as { channelId: string };
+    if (!(await guard(req, reply, channelId))) return;
+    if (kindOf(channelId) !== "zalo_personal") return reply.code(422).send({ error: "Kết bạn chỉ hỗ trợ kênh Zalo cá nhân" });
+    const parsed = z.object({
+      by: z.enum(["phone", "username"]),
+      value: z.string().trim().min(3).max(50),
+    }).safeParse(req.query);
+    if (!parsed.success || (parsed.data.by === "phone" ? !/^\+?\d{8,15}$/.test(parsed.data.value)
+      : !/^[A-Za-z0-9._-]{3,50}$/.test(parsed.data.value))) {
+      return reply.code(400).send({ error: "Nhập số điện thoại hoặc username Zalo hợp lệ" });
+    }
+    const rt = inboxRuntime(channelId);
+    if (!rt?.isConnected() || !rt.findFriendCandidate) return reply.code(409).send({ error: "Kênh Zalo chưa kết nối", code: "NOT_CONNECTED" });
+    try {
+      const user = await rt.findFriendCandidate(parsed.data.value, parsed.data.by);
+      return { found: !!user, user };
+    } catch (err) {
+      return reply.code(502).send({ error: `Không tìm được người trên Zalo: ${(err as Error).message}` });
+    }
+  });
+
+  app.post(`${base}/:channelId/friend-request`, async (req, reply) => {
+    const { channelId } = req.params as { channelId: string };
+    if (!(await guard(req, reply, channelId))) return;
+    if (kindOf(channelId) !== "zalo_personal") return reply.code(422).send({ error: "Kết bạn chỉ hỗ trợ kênh Zalo cá nhân" });
+    const parsed = z.object({
+      uid: z.string().regex(/^[0-9A-Za-z_-]{1,64}$/),
+      message: z.string().trim().min(1).max(150),
+    }).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "Người nhận hoặc lời nhắn kết bạn không hợp lệ" });
+    const rt = inboxRuntime(channelId);
+    if (!rt?.isConnected() || !rt.sendFriendRequest) return reply.code(409).send({ error: "Kênh Zalo chưa kết nối", code: "NOT_CONNECTED" });
+    if (rt.accountInfo()?.id === parsed.data.uid) return reply.code(400).send({ error: "Không thể kết bạn với chính tài khoản này" });
+    try {
+      await rt.sendFriendRequest(parsed.data.uid, parsed.data.message);
+      await recordAudit(db, req.authCtx, "zalo_inbox.friend_request", { channelId, uid: parsed.data.uid })
+        .catch((err: unknown) => logger.warn(`zalo.friend_request_audit_fail: ${(err as Error).message}`));
+      return { sent: true };
+    } catch (err) {
+      const message = (err as Error).message;
+      if (/đã là bạn bè|đã có lời mời/i.test(message)) return reply.code(409).send({ error: message });
+      if (isPlatformRejected(err)) return reply.code(422).send({ error: `Zalo từ chối lời mời: ${message}` });
+      return reply.code(502).send({ error: `Không gửi được lời mời kết bạn: ${message}` });
+    }
+  });
+
   app.put(`${base}/:channelId/threads/:threadId/ai`, async (req, reply) => {
     const { channelId, threadId } = req.params as { channelId: string; threadId: string };
     if (!(await guard(req, reply, channelId))) return;

@@ -175,7 +175,8 @@ const MEMBER_ALLOW: Array<{ methods: string[]; path: RegExp }> = [
   { methods: ["GET"], path: /^\/v1\/chat\/files$/ },
   // Inbox Zalo: quyền theo kênh được gán kiểm tra trong route (zalo-inbox.ts)
   { methods: ["GET"], path: /^\/v1\/(?:zalo-)?inbox\/(channels|events)$/ },
-  { methods: ["GET"], path: /^\/v1\/(?:zalo-)?inbox\/[0-9a-f-]{36}\/(threads|find-phone|file)$/ },
+  { methods: ["GET"], path: /^\/v1\/(?:zalo-)?inbox\/[0-9a-f-]{36}\/(threads|find-phone|friend-search|file)$/ },
+  { methods: ["POST"], path: /^\/v1\/(?:zalo-)?inbox\/[0-9a-f-]{36}\/friend-request$/ },
   { methods: ["GET"], path: /^\/v1\/(?:zalo-)?inbox\/[0-9a-f-]{36}\/threads\/[0-9A-Za-z@.%-]{1,80}\/messages$/ },
   { methods: ["POST"], path: /^\/v1\/(?:zalo-)?inbox\/[0-9a-f-]{36}\/threads\/[0-9A-Za-z@.%-]{1,80}\/(read|send)$/ },
   { methods: ["PUT"], path: /^\/v1\/(?:zalo-)?inbox\/[0-9a-f-]{36}\/threads\/[0-9A-Za-z@.%-]{1,80}\/ai$/ },
