@@ -217,6 +217,7 @@ export const INDEX_HTML = `<!doctype html>
   .ibx-quote { font-size: .78rem; opacity: .75; border-left: 3px solid rgba(128,128,128,.5); padding-left: 6px; margin-bottom: 4px; }
   .ibx-photo { max-width: 260px; max-height: 260px; border-radius: 8px; display: block; cursor: zoom-in; }
   .ibx-photo-link { padding: 0; border: 0; background: none; cursor: zoom-in; }
+  .ibx-file-download { display: inline-block; margin-left: 6px; padding: 2px 7px; border: 1px solid currentColor; border-radius: 6px; font-size: .78rem; text-decoration: none; white-space: nowrap; }
   .ibx-sticker { width: 90px; height: 90px; object-fit: contain; }
   .ibx-compose { border-top: 1px solid var(--border); padding: 8px 10px; }
   .ibx-reply-preview { display:flex; align-items:center; gap:8px; border-left:3px solid var(--accent); background:rgba(128,128,128,.1); padding:5px 8px; margin-bottom:7px; border-radius:5px; font-size:.8rem; }
@@ -3886,7 +3887,13 @@ export const INDEX_HTML = `<!doctype html>
       var src = md.file ? "/v1/inbox/" + S.ch + "/file?p=" + encodeURIComponent(md.file) : (md.url || "");
       if (x.contentType === "photo") h += src ? '<button type="button" class="ibx-photo-link" title="Xem ảnh"><img class="ibx-photo" src="' + esc(src) + '" referrerpolicy="no-referrer" alt="ảnh" loading="lazy"></button>' : "[Hình ảnh]";
       else if (x.contentType === "sticker") h += md.url ? '<img class="ibx-sticker" src="' + esc(md.url) + '" referrerpolicy="no-referrer" alt="sticker">' : "[Sticker]";
-      else if (x.contentType === "file") h += src ? '<a href="' + esc(src) + '" target="_blank" rel="noopener noreferrer">📎 ' + esc(md.name || "Tệp") + "</a>" : "📎 " + esc(md.name || "Tệp");
+      else if (x.contentType === "file") {
+        h += '📎 ' + esc(md.name || "Tệp");
+        if (src) {
+          var fileDownload = md.file ? src + '&download=1&name=' + encodeURIComponent(md.name || "file") : src;
+          h += ' <a href="' + esc(fileDownload) + '" download="' + esc(md.name || "file") + '" class="ibx-file-download" title="Tải file về">⬇ Tải về</a>';
+        } else h += ' <span class="muted" title="Tin cũ chỉ lưu tên file, không có dữ liệu để tải. Hãy tải từ Zalo.">Không có bản tải trong PenAI</span>';
+      }
       else if (x.contentType === "voice") h += md.url ? '<audio controls preload="none" src="' + esc(md.url) + '"></audio>' : md.file ? '<a href="' + esc(src) + '" target="_blank" rel="noopener noreferrer">🎤 Tin nhắn thoại (tải về)</a>' : "[Tin nhắn thoại]";
       else if (x.contentType === "video") h += (md.url || md.file) ? '<a href="' + esc(md.url || src) + '" target="_blank" rel="noopener noreferrer">🎬 Xem video</a>' : "[Video]";
       else if (x.contentType === "link" && md.url) h += '<a href="' + esc(md.url) + '" target="_blank" rel="noopener noreferrer">🔗 ' + esc(md.url) + "</a>";

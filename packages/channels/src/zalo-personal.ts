@@ -28,6 +28,7 @@ import type {
 
 const ZALO_MAX_TEXT = 2_000;
 const MEDIA_MAX_BYTES = 10 * 1024 * 1024;
+const INBOX_FILE_MAX_BYTES = 50 * 1024 * 1024;
 const QR_MAX_EXPIRED_RETRIES = 3;
 const QR_MAX_DECLINED_RETRIES = 2;
 
@@ -265,7 +266,8 @@ export function trustedZaloMediaUrl(raw: string): URL | null {
     const url = new URL(raw);
     if (url.protocol !== "https:") return null;
     const host = url.hostname.toLowerCase();
-    const allowed = ["zalo.me", "zaloapp.com", "zadn.vn", "zdn.vn", "zalo.cloud"];
+    // Zalo delivers shared documents from dlfl.vn, while photos use zdn.vn.
+    const allowed = ["zalo.me", "zaloapp.com", "zadn.vn", "zdn.vn", "zalo.cloud", "dlfl.vn"];
     if (!allowed.some((suffix) => host === suffix || host.endsWith(`.${suffix}`))) return null;
     return url;
   } catch {
@@ -274,8 +276,7 @@ export function trustedZaloMediaUrl(raw: string): URL | null {
 }
 
 /**
- * Chuẩn hóa nội dung 1 tin Zalo để lưu/hiển thị trong Inbox (không tải file:
- * chỉ giữ link CDN Zalo). Hàm thuần — test được.
+ * Chuẩn hóa nội dung 1 tin Zalo để lưu/hiển thị trong Inbox.
  */
 export function describeZaloContent(
   content: unknown,
@@ -1253,6 +1254,45 @@ export class ZaloPersonalChannel implements Channel {
     }
     try {
       const described = describeZaloContent(message.data.content, String(message.data.msgType ?? ""));
+      // CDN links expire. Preserve an incoming document in this workspace while
+      // the link is still valid, including conversations awaiting approval.
+      if (!message.isSelf && described.contentType === "file" && described.media?.url && this.deps.saveInboxFile) {
+        try {
+          const url = trustedZaloMediaUrl(described.media.url);
+          if (url && (!described.media.size || described.media.size <= INBOX_FILE_MAX_BYTES)) {
+            let current = url;
+            let response: Response | undefined;
+            for (let redirect = 0; redirect < 4; redirect++) {
+              response = await fetch(current, {
+                redirect: "manual",
+                signal: AbortSignal.timeout(30_000),
+                headers: { "user-agent": "Mozilla/5.0 (PenAI Zalo bridge)" },
+              });
+              if (![301, 302, 303, 307, 308].includes(response.status)) break;
+              const next = response.headers.get("location");
+              const safe = next ? trustedZaloMediaUrl(new URL(next, current).href) : null;
+              if (!safe) throw new Error("redirect ngoài CDN Zalo");
+              await response.body?.cancel();
+              current = safe;
+            }
+            if (!response?.ok) throw new Error(`HTTP ${response?.status ?? "?"}`);
+            const declared = Number(response.headers.get("content-length") || 0);
+            if (declared > INBOX_FILE_MAX_BYTES) throw new Error("file vượt 50 MB");
+            const chunks: Buffer[] = [];
+            let total = 0;
+            for await (const chunk of response.body ?? []) {
+              const part = Buffer.from(chunk);
+              total += part.length;
+              if (total > INBOX_FILE_MAX_BYTES) throw new Error("file vượt 50 MB");
+              chunks.push(part);
+            }
+            const ext = String(described.media.name || "").match(/\.([a-z0-9]{1,8})$/i)?.[1] || "bin";
+            described.media.localPath = await this.deps.saveInboxFile(Buffer.concat(chunks), ext);
+          }
+        } catch (error) {
+          logger.warn(`zalo.inbox_file_save_fail: ${errorMessage(error)}`);
+        }
+      }
       const meta: Record<string, unknown> = {};
       const data = message.data as unknown as {
         mentions?: Array<{ uid: unknown }>;

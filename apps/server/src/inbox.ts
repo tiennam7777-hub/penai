@@ -1032,7 +1032,8 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
   app.get(`${base}/:channelId/file`, async (req, reply) => {
     const { channelId } = req.params as { channelId: string };
     if (!(await guard(req, reply, channelId))) return;
-    const p = String((req.query as { p?: string }).p ?? "");
+    const query = req.query as { p?: string; download?: string; name?: string };
+    const p = String(query.p ?? "");
     const ws = resolve(join(dataDir, req.authCtx.workspaceId));
     const abs = resolve(ws, p);
     if (!p || !abs.startsWith(ws + sep)) return reply.code(400).send({ error: "Đường dẫn không hợp lệ" });
@@ -1040,11 +1041,11 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
     if (!st?.isFile() || st.size > 50 * 1024 * 1024) return reply.code(404).send({ error: "Không tìm thấy file" });
     const buf = await readFile(abs);
     const img = sniffImage(buf);
-    const name = abs.split(sep).pop() ?? "file";
+    const name = String(query.name || abs.split(sep).pop() || "file").split(/[\\/]/).pop()!.replace(/[\r\n\x00-\x1f]/g, "").slice(0, 180) || "file";
     return reply
       .header("cache-control", "private, max-age=3600")
       .header("x-content-type-options", "nosniff")
-      .header("content-disposition", `${img ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(name)}`)
+      .header("content-disposition", `${query.download === "1" || !img ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(name)}`)
       .type(img ? img.mime : "application/octet-stream")
       .send(buf);
   });

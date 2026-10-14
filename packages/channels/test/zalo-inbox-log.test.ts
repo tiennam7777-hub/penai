@@ -26,6 +26,12 @@ describe("describeZaloContent — nội dung tin cho Inbox", () => {
       "share.file",
     );
     expect(f).toMatchObject({ contentType: "file", media: { name: "bao-gia.xlsx", size: 1234 } });
+    const zaloFile = describeZaloContent(
+      { href: "https://file-stal-15.dlfl.vn/download/123", title: "20-10.xlsx" },
+      "share.file",
+    );
+    expect(zaloFile.media?.url).toBe("https://file-stal-15.dlfl.vn/download/123");
+    expect(describeZaloContent({ href: "https://dlfl.vn.evil.example/file", title: "fake.xlsx" }, "share.file").media?.url).toBeUndefined();
   });
 
   it("sticker / voice / nội dung lạ", () => {
@@ -36,6 +42,30 @@ describe("describeZaloContent — nội dung tin cho Inbox", () => {
 });
 
 describe("Inbox: ghi tin đi/đến + bỏ bản dội lại", () => {
+  it("lưu bản sao file khách gửi từ CDN Zalo trước khi ghi Inbox", async () => {
+    const logs: ChannelMessageLog[] = [];
+    const saved: Buffer[] = [];
+    const channel = new ZaloPersonalChannel({
+      id: "zp-file", name: "Zalo", token: "{}", config: {}, requirePairing: true,
+      onInbound: async () => ({ kind: "ignore" }),
+      onMessageLog: (entry) => logs.push(entry),
+      saveInboxFile: async (buf) => { saved.push(buf); return "/workspace/zalo-inbox/file.xlsx"; },
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("spreadsheet", { status: 200 }));
+    try {
+      await (channel as unknown as { logListenerMessage: (...args: unknown[]) => Promise<void> }).logListenerMessage(
+        { isSelf: false, data: { msgId: "file-1", msgType: "share.file", content: {
+          href: "https://file-stal-15.dlfl.vn/download/123", title: "20-10.xlsx",
+        }, ts: String(Date.now()) } }, "group", "g-1", "customer", "Khách",
+      );
+      expect(saved[0]?.toString()).toBe("spreadsheet");
+      expect(logs[0]?.media).toMatchObject({ name: "20-10.xlsx", localPath: "/workspace/zalo-inbox/file.xlsx" });
+      expect(fetchMock).toHaveBeenCalledOnce();
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
   function setup() {
     const logs: ChannelMessageLog[] = [];
     const contacts: ChannelContact[][] = [];
