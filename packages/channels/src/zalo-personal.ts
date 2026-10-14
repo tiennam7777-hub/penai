@@ -1076,6 +1076,7 @@ export class ZaloPersonalChannel implements Channel {
     const peerKind = message.type === ThreadType.Group ? "group" : "direct";
     const threadId = String(message.threadId);
     const chatKey = `${peerKind}:${threadId}`;
+    const photoEditOnlyGroup = peerKind === "group" && this.deps.config["auto_edit_photo_group"] === chatKey;
     await this.undoPending.get(chatKey);
     const senderId = String(message.data.uidFrom || message.threadId);
     const senderName =
@@ -1096,7 +1097,7 @@ export class ZaloPersonalChannel implements Channel {
     // tự gửi (agent/web/MCP) đã ghi lúc gửi → bỏ qua bản dội lại.
     await this.logListenerMessage(message, peerKind, threadId, senderId, senderName);
     if (!message.isSelf) {
-      if (photoMessage && !text.trim()) this.cancelAutoReaction(peerKind, threadId);
+      if (photoEditOnlyGroup || (photoMessage && !text.trim())) this.cancelAutoReaction(peerKind, threadId);
       else this.scheduleAutoReaction(message, peerKind, threadId);
     }
 
@@ -1135,7 +1136,7 @@ export class ZaloPersonalChannel implements Channel {
       if (typeof caption === "string" && !/\.(png|jpe?g|webp|gif)$/i.test(caption)) text = caption;
     }
     const silentPhoto = photoMessage && !text.trim();
-    if (silentPhoto) this.cancelAutoReaction(peerKind, threadId);
+    if (silentPhoto || photoEditOnlyGroup) this.cancelAutoReaction(peerKind, threadId);
     if (photoMessage && !media.some((m) => m.kind === "photo")) {
       media.push({ kind: "photo", note: "[Người dùng gửi ảnh nhưng không tải được]" });
     }
@@ -1151,13 +1152,13 @@ export class ZaloPersonalChannel implements Channel {
 
     const hooks = {
       onStatus: (status: string) => {
-        if (silentPhoto) return;
+        if (silentPhoto || photoEditOnlyGroup) return;
         if (status === "queued" || status === "thinking") {
           void this.api?.sendTypingEvent(threadId, threadType).catch(() => {});
         }
       },
       onBlockReply: (blockText: string) => {
-        if (silentPhoto) return;
+        if (silentPhoto || photoEditOnlyGroup) return;
         const key = replyKey(blockText);
         if (!key || blockReplies.has(key)) return;
         blockReplies.set(key, this.sendText(threadId, threadType, blockText)
@@ -1186,6 +1187,7 @@ export class ZaloPersonalChannel implements Channel {
         },
         hooks,
       );
+      if (photoEditOnlyGroup && (result.kind !== "reply" || !result.media?.length)) return;
       if (silentPhoto && result.kind !== "reply") return;
       if (result.kind === "pairing") {
         // Ngoại lệ Zalo cá nhân: người chưa duyệt pairing thì IM LẶNG — không
@@ -1195,7 +1197,7 @@ export class ZaloPersonalChannel implements Channel {
           `zalo.pairing_silent: ${chatKey} chưa duyệt — đã cấp mã chờ admin, không nhắn lại`,
         );
       } else if (result.kind === "reply") {
-        if (result.text.trim()) {
+        if (!photoEditOnlyGroup && result.text.trim()) {
           const prior = blockReplies.get(replyKey(result.text));
           if (!prior || !(await prior)) await this.sendText(threadId, threadType, result.text);
         }
@@ -1205,7 +1207,7 @@ export class ZaloPersonalChannel implements Channel {
       }
     } catch (error) {
       this.deps.onError?.(error as Error);
-      if (silentPhoto) return;
+      if (silentPhoto || photoEditOnlyGroup) return;
       await this.sendText(
         threadId,
         threadType,

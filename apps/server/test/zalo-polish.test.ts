@@ -121,6 +121,9 @@ describe("Configured group photo editing", () => {
     expect(captioned.kind).toBe("reply");
     if (captioned.kind === "reply") expect(captioned.media).toHaveLength(1);
     expect(requests).toHaveLength(0);
+    expect(await handler({ ...incoming, text: "@Trợ lý cho biết trạng thái", media: undefined })).toEqual({ kind: "ignore" });
+    expect(editRequests).toHaveLength(2);
+    expect(requests).toHaveLength(0);
     expect(await handler({ ...incoming, chatKey: "group:other" })).toEqual({ kind: "ignore" });
   });
 });

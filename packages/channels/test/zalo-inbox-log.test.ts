@@ -161,6 +161,46 @@ it("ảnh kèm câu hỏi được trả lời, còn ảnh không chữ thì im 
   expect(sent).toEqual([]);
 });
 
+it("nhóm OC2 chỉ gửi ảnh thành phẩm, không gửi chữ, typing, cảm xúc hoặc báo lỗi", async () => {
+  const sent: string[] = [];
+  let fail = false;
+  const channel = new ZaloPersonalChannel({
+    id: "zp-oc2-only-photo", name: "OC2", token: "{}",
+    config: { auto_edit_photo_group: "group:oc2", auto_reaction: "heart" },
+    requirePairing: false,
+    onInbound: async (message, hooks) => {
+      hooks?.onStatus?.("thinking");
+      hooks?.onBlockReply?.("Tin trả lời sớm");
+      if (fail) throw new Error("OpenAI unavailable");
+      return { kind: "reply", text: "Không được gửi chữ", media: message.media?.length ? ["/tmp/edited.jpg"] : undefined };
+    },
+  });
+  const internals = channel as unknown as Record<string, unknown>;
+  internals.api = {
+    sendMessage: async (message: { msg: string }) => { sent.push(message.msg); return { message: { msgId: "sent" } }; },
+    sendTypingEvent: async () => { sent.push("typing"); },
+  };
+  internals.account = { id: "me", name: "Shop" };
+  internals.isThreadEnabled = () => true;
+  internals.collectMedia = async (_content: unknown, msgType: string) =>
+    msgType === "chat.photo" ? [{ kind: "photo", dataUrl: "data:image/png;base64,iVBORw0KGgo=" }] : [];
+  internals.sendFiles = async () => { sent.push("photo"); };
+  const handle = (channel as unknown as { handleMessage: (m: unknown) => Promise<void> }).handleMessage.bind(channel);
+  const message = (msgId: string, msgType: string, content: unknown) => ({
+    type: ThreadType.Group, threadId: "oc2", isSelf: false,
+    data: { msgId, cliMsgId: `cli-${msgId}`, uidFrom: "member", dName: "Thành viên", content, msgType, ts: String(Date.now()) },
+  });
+  await handle(message("oc2-text", "chat.text", "@Trợ lý đang làm gì?"));
+  expect(sent).toEqual([]);
+  sent.length = 0;
+  await handle(message("oc2-photo", "chat.photo", { title: "Chỉnh ảnh này" }));
+  expect(sent).toEqual(["photo"]);
+  sent.length = 0;
+  fail = true;
+  await handle(message("oc2-failed", "chat.photo", { title: "Chỉnh tiếp" }));
+  expect(sent).toEqual([]);
+});
+
 it("câu hỏi giá trích dẫn ảnh đã gửi vẫn tới Agent và được trả lời", async () => {
   const sent: string[] = [];
   let inbound: { text: string; quoted?: { msgId: string; kind: string } } | undefined;

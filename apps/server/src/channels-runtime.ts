@@ -557,8 +557,10 @@ export function makeInboundHandler(
     const ctx = systemContext(channel.workspaceId);
     const hasPhoto = (msg.media ?? []).some((m) => m.kind === "photo");
     const silentPhoto = hasPhoto && !msg.text.trim();
-    const autoEditPhoto = hasPhoto && msg.channelKind === "zalo_personal" &&
+    const photoEditOnlyGroup = msg.channelKind === "zalo_personal" &&
       msg.peerKind === "group" && channel.config["auto_edit_photo_group"] === msg.chatKey;
+    if (photoEditOnlyGroup && !hasPhoto) return { kind: "ignore" };
+    const autoEditPhoto = photoEditOnlyGroup && hasPhoto;
 
     // Nhóm Zalo: đệm tin chưa tag làm ngữ cảnh (kể cả tin orchestrator sẽ
     // tiêu thụ) — người dùng hay nhắn vài tin liên tiếp rồi mới tag bot.
@@ -674,7 +676,10 @@ export function makeInboundHandler(
         }
         const photos = (msg.media ?? []).filter((m) => m.kind === "photo" && m.dataUrl).slice(0, 6);
         const saved = await saveInboundImages(userDir, photos);
-        if (!saved.length) return { kind: "reply", text: "Không đọc được ảnh này. Vui lòng gửi lại ảnh JPG, PNG hoặc WebP dưới 10 MB." };
+        if (!saved.length) {
+          logger.warn(`Không đọc được ảnh nhóm ${channel.id}/${msg.chatKey}; không gửi tin nhắn lỗi`);
+          return { kind: "ignore" };
+        }
         const edited: string[] = [];
         for (const original of saved) {
           const output = join(userDir, `anh-da-chinh-${randomBytes(8).toString("hex")}.jpg`);
@@ -694,7 +699,7 @@ export function makeInboundHandler(
         return { kind: "reply", text: "", media: edited };
       } catch (error) {
         logger.warn(`Không chỉnh được ảnh nhóm ${channel.id}/${msg.chatKey}: ${String(error)}`);
-        return { kind: "reply", text: "Chưa chỉnh được ảnh bằng OpenAI. Quản trị viên vui lòng kiểm tra kết nối và hạn mức ChatGPT." };
+        return { kind: "ignore" };
       }
     }
     if (silentPhoto) {
