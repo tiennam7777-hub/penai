@@ -5,6 +5,7 @@ const MAX_BYTES = 10 * 1024 * 1024;
 export interface OrchidPhotoEditor {
   generateImage(req: {
     prompt: string;
+    model: string;
     size: string;
     refImages: string[];
     action: "edit";
@@ -75,6 +76,7 @@ export function editOrchidPhotoWithOpenAI(
   input: Buffer,
   agentPrompt: string,
   editor: OrchidPhotoEditor,
+  carrierModel: string,
 ): Promise<{ data: Buffer; mime: "image/jpeg" }> {
   const source = inputInfo(input);
   if (!source.width || !source.height || source.width * source.height > 24_000_000) {
@@ -85,6 +87,7 @@ export function editOrchidPhotoWithOpenAI(
   const task = queue.then(async () => {
     const result = await editor.generateImage({
       prompt: `${agentPrompt.trim()}\n\n${REQUIRED_EDIT}`,
+      model: carrierModel,
       size,
       refImages: [`data:${source.mime};base64,${input.toString("base64")}`],
       action: "edit",

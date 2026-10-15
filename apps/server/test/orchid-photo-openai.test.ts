@@ -7,10 +7,10 @@ const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(128)])
 describe("OC2 OpenAI image editing", () => {
   it("sends the original image and agent instructions to the edit model", async () => {
     const generateImage = vi.fn(async (_req: Parameters<OrchidPhotoEditor["generateImage"]>[0]) => ({ data: jpeg, mime: "image/jpeg" }));
-    const result = await editOrchidPhotoWithOpenAI(png, "Giữ nguyên chữ trên bảng", { generateImage });
+    const result = await editOrchidPhotoWithOpenAI(png, "Giữ nguyên chữ trên bảng", { generateImage }, "gpt-6-sol");
     expect(result.data).toBe(jpeg);
     expect(generateImage).toHaveBeenCalledWith(expect.objectContaining({
-      action: "edit", imageModel: "gpt-image-2.5-sunburst", quality: "high",
+      action: "edit", model: "gpt-6-sol", imageModel: "gpt-image-2.5-sunburst", quality: "high",
       outputFormat: "jpeg", size: "1024x1024",
       refImages: [`data:image/png;base64,${png.toString("base64")}`],
     }));
@@ -23,9 +23,9 @@ describe("OC2 OpenAI image editing", () => {
   it("rejects wrong output instead of sending the original or a failed edit", async () => {
     await expect(editOrchidPhotoWithOpenAI(png, "", {
       generateImage: async () => ({ data: png, mime: "image/png" }),
-    })).rejects.toThrow("JPG hợp lệ");
+    }, "gpt-6-sol")).rejects.toThrow("JPG hợp lệ");
     const generateImage = vi.fn(async (_req: Parameters<OrchidPhotoEditor["generateImage"]>[0]) => ({ data: jpeg, mime: "image/jpeg" }));
-    expect(() => editOrchidPhotoWithOpenAI(Buffer.alloc(20), "", { generateImage })).toThrow();
+    expect(() => editOrchidPhotoWithOpenAI(Buffer.alloc(20), "", { generateImage }, "gpt-6-sol")).toThrow();
     expect(generateImage).not.toHaveBeenCalled();
   });
 });

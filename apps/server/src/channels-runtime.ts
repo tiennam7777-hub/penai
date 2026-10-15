@@ -689,7 +689,7 @@ export function makeInboundHandler(
         for (const original of saved) {
           const output = join(userDir, `anh-da-chinh-${randomBytes(8).toString("hex")}.jpg`);
           const image = await editOrchidPhotoWithOpenAI(
-            await readFile(original.path), agent.systemPrompt, imageProvider,
+            await readFile(original.path), agent.systemPrompt, imageProvider, agent.model,
           );
           await writeFile(output, image.data);
           edited.push(output);

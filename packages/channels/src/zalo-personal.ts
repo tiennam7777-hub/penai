@@ -1638,16 +1638,25 @@ export class ZaloPersonalChannel implements Channel {
     }
 
     try {
-      const response = await fetch(url, {
-        signal: AbortSignal.timeout(60_000),
-        headers: { "user-agent": "Mozilla/5.0 (PenAI Zalo bridge)" },
-      });
-      const declared = Number(response.headers.get("content-length") ?? 0);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      if (declared > MEDIA_MAX_BYTES) throw new Error("media vượt 10MB");
-      const data = Buffer.from(await response.arrayBuffer());
-      if (data.length > MEDIA_MAX_BYTES) throw new Error("media vượt 10MB");
-      const mime = response.headers.get("content-type")?.split(";")[0]?.trim() ?? "";
+      let data = Buffer.alloc(0);
+      let mime = "";
+      // CDN Zalo đôi khi trả HTTP 200 nhưng thân ảnh rỗng ngay sau khi gửi.
+      // Thử lại trước khi chuyển ảnh cho OC2; không lưu file 0 byte.
+      for (let attempt = 0; attempt < (kind === "photo" ? 3 : 1); attempt++) {
+        const response = await fetch(url, {
+          signal: AbortSignal.timeout(60_000),
+          headers: { "user-agent": "Mozilla/5.0 (PenAI Zalo bridge)" },
+        });
+        const declared = Number(response.headers.get("content-length") ?? 0);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (declared > MEDIA_MAX_BYTES) throw new Error("media vượt 10MB");
+        data = Buffer.from(await response.arrayBuffer());
+        if (data.length > MEDIA_MAX_BYTES) throw new Error("media vượt 10MB");
+        mime = response.headers.get("content-type")?.split(";")[0]?.trim() ?? "";
+        if (data.length) break;
+        if (attempt < 2 && kind === "photo") await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
+      }
+      if (!data.length) throw new Error("CDN Zalo trả file rỗng");
       logger.info(
         `zalo.media: msgType=${label} kind=${kind} name=${JSON.stringify(name)} bytes=${data.length} mime=${mime || "?"}`,
       );

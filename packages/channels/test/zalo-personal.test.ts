@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Message } from "zca-js";
 import {
   chunkZaloText,
@@ -13,6 +13,29 @@ import {
   ZaloPersonalChannel,
 } from "../src/zalo-personal.js";
 import { supportedChannelKinds } from "../src/manager.js";
+
+describe("Zalo photo download", () => {
+  it("retries an empty CDN response before handing the image to OC2", async () => {
+    const channel = new ZaloPersonalChannel({
+      id: "zp-photo", name: "Zalo", token: "{}", config: {}, requirePairing: true,
+      onInbound: async () => ({ kind: "ignore" }),
+    });
+    const photo = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(new Uint8Array(), { status: 200 }))
+      .mockResolvedValueOnce(new Response(photo, { status: 200, headers: { "content-type": "image/jpeg" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const media = await (channel as unknown as {
+        collectMedia: (content: unknown, msgType: string) => Promise<Array<{ kind: string; dataUrl?: string }>>;
+      }).collectMedia({ href: "https://photo-stal-1.zdn.vn/gr/jpg/example.jpg" }, "chat.photo");
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(media).toEqual([{ kind: "photo", name: "anh-zalo", dataUrl: `data:image/jpeg;base64,${photo.toString("base64")}` }]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
 
 describe("Zalo contact aliases", () => {
   it("syncs an alias for a non-friend without turning the person into a friend", async () => {
