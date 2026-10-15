@@ -164,6 +164,25 @@ describe("Đăng nhập web (cookie) + role member + agent grants", () => {
     expect(signed.res.statusCode).toBe(200);
     expect(signed.res.json()).toMatchObject({ role: "moderator", roleLabel: "Người kiểm duyệt" });
     const headers = withCookie(signed.cookie);
+    const [hot1] = await adminQuery<{ id: string }>(
+      "INSERT INTO channels (workspace_id, kind, name, agent_id) VALUES ($1, 'zalo_personal', 'Hot 1', $2) RETURNING id",
+      [fx.wsA, fx.agentA],
+    );
+    const [hot6] = await adminQuery<{ id: string }>(
+      "INSERT INTO channels (workspace_id, kind, name, agent_id) VALUES ($1, 'zalo_personal', 'Hot 6', $2) RETURNING id",
+      [fx.wsA, fx.agentA],
+    );
+    const inboxChannels = await app.inject({ method: "GET", url: "/v1/inbox/channels", headers });
+    expect(inboxChannels.statusCode).toBe(200);
+    expect((inboxChannels.json() as { channels: Array<{ id: string }> }).channels.map((c) => c.id)).toEqual(expect.arrayContaining([hot1!.id, hot6!.id]));
+    const madeTag = await app.inject({ method: "POST", url: `/v1/inbox/${hot1!.id}/tags`, headers, payload: { name: "Cần xử lý", color: "#FF0000" } });
+    expect(madeTag.statusCode).toBe(200);
+    const tagId = (madeTag.json() as { tag: { id: string } }).tag.id;
+    const tagsOnOtherChannel = await app.inject({ method: "GET", url: `/v1/inbox/${hot6!.id}/tags`, headers });
+    expect(tagsOnOtherChannel.statusCode).toBe(200);
+    expect(tagsOnOtherChannel.json()).toMatchObject({ tags: [{ id: tagId, name: "Cần xử lý" }] });
+    expect((await app.inject({ method: "PUT", url: `/v1/inbox/${hot6!.id}/settings`, headers, payload: { pauseMinutes: 15 } })).statusCode).toBe(200);
+    expect((await app.inject({ method: "DELETE", url: `/v1/inbox/${hot1!.id}/tags/${tagId}`, headers })).statusCode).toBe(200);
     for (const url of ["/v1/agents", "/v1/channel-pairings/pending", "/v1/channels/pending-sources", "/v1/library", "/v1/contacts", "/v1/contact-tags"]) {
       expect((await app.inject({ method: "GET", url, headers })).statusCode).toBe(200);
     }

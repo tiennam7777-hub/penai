@@ -196,6 +196,18 @@ export function memberAllowed(method: string, path: string): boolean {
 export function moderatorAllowed(method: string, path: string): boolean {
   const m = method.toUpperCase();
   if (memberAllowed(m, path)) return true;
+  // Toàn bộ thao tác của trang Inbox trên mọi kênh. Route vẫn kiểm tra
+  // canUseInboxChannel; không mở API cấu hình Channels cho moderator.
+  const inbox = /^\/v1\/(?:zalo-)?inbox\/[0-9a-f-]{36}\//;
+  if (inbox.test(path)) {
+    if (["GET", "POST"].includes(m) && /^\/v1\/(?:zalo-)?inbox\/[0-9a-f-]{36}\/tags$/.test(path)) return true;
+    if (m === "PUT" && /^\/v1\/(?:zalo-)?inbox\/[0-9a-f-]{36}\/tags\/[0-9a-f-]{36}\/color$/.test(path)) return true;
+    if (m === "DELETE" && /^\/v1\/(?:zalo-)?inbox\/[0-9a-f-]{36}\/tags\/[0-9a-f-]{36}$/.test(path)) return true;
+    if (m === "PUT" && /^\/v1\/(?:zalo-)?inbox\/[0-9a-f-]{36}\/threads\/[0-9A-Za-z@.%-]{1,80}\/(?:tags|visibility)$/.test(path)) return true;
+    if (m === "POST" && /^\/v1\/(?:zalo-)?inbox\/[0-9a-f-]{36}\/threads\/[0-9A-Za-z@.%-]{1,80}\/messages\/\d{1,19}\/state$/.test(path)) return true;
+    if (m === "POST" && /^\/v1\/(?:zalo-)?inbox\/[0-9a-f-]{36}\/sync-contacts$/.test(path)) return true;
+    if (m === "PUT" && /^\/v1\/(?:zalo-)?inbox\/[0-9a-f-]{36}\/settings$/.test(path)) return true;
+  }
   if (/^\/v1\/library(?:\/|$)/.test(path)) return ["GET", "POST", "PUT", "PATCH", "DELETE"].includes(m);
   if (/^\/v1\/contacts(?:\/|$)/.test(path) || /^\/v1\/contact-tags(?:\/|$)/.test(path)) {
     return ["GET", "POST", "PUT", "PATCH", "DELETE"].includes(m);

@@ -221,7 +221,7 @@ async function resolveChannel(
   channelId: string | undefined,
   pf: Platform,
 ): Promise<{ id: string; name: string } | ToolResult> {
-  const allowedAll = await allowedInboxChannelIds(deps.db, p.ctx);
+  const allowedAll = await allowedInboxChannelIds(deps.db, p.ctx, "mcp");
   const kindRows = allowedAll.length ? await listChannels(deps.db, p.ctx) : [];
   const allowed = allowedAll.filter((id) => kindRows.find((c) => c.id === id)?.kind === pf.kind);
   if (!allowed.length) {
@@ -247,7 +247,7 @@ async function messageReadableChannels(
   deps: ToolDeps,
   ctx: WorkspaceContext,
 ): Promise<{ readable: Array<{ id: string; kind: string }>; kinds: Set<string> }> {
-  const allowed = await allowedInboxChannelIds(deps.db, ctx);
+  const allowed = await allowedInboxChannelIds(deps.db, ctx, "mcp");
   if (!allowed.length) return { readable: [], kinds: new Set() };
   const rows = (await listChannels(deps.db, ctx)).filter((c) => allowed.includes(c.id));
   return {
@@ -393,7 +393,7 @@ function buildMcpServer(
   }
 
   reg("zalo_list_channels", "Danh sách kênh Zalo", "Các kênh Zalo cá nhân bạn được dùng và trạng thái kết nối.", "zalo:read", {}, true, async () => {
-    const allowed = await allowedInboxChannelIds(deps.db, p.ctx);
+    const allowed = await allowedInboxChannelIds(deps.db, p.ctx, "mcp");
     const channels = (await listChannels(deps.db, p.ctx)).filter((c) => allowed.includes(c.id) && c.kind === pf.kind);
     return ok({
       success: true,
@@ -1392,7 +1392,7 @@ export function registerMcpServerRoutes(app: FastifyInstance, deps: { db: Db; da
       ...(isAdmin ? {} : { userId: req.authCtx.userId }),
     });
     const activity = await listRecentMcpServerSends(db, req.authCtx, isAdmin ? { limit: 50 } : { userId: req.authCtx.userId, limit: 50 });
-    const allowedIds = await allowedInboxChannelIds(db, req.authCtx);
+    const allowedIds = await allowedInboxChannelIds(db, req.authCtx, "mcp");
     const zaloChannels = (await listChannels(db, req.authCtx))
       .filter((c) => allowedIds.includes(c.id))
       .map((c) => ({ id: c.id, name: c.name, mcpReadMessages: readInboxConfig((c.config as Record<string, unknown>) ?? {}).mcpReadMessages }));

@@ -3,7 +3,7 @@
  *
  * - Adapter của kênh báo MỌI tin đến/đi (onMessageLog) → lưu inbox_messages
  *   + inbox_threads → đẩy realtime (SSE) cho người đang trực.
- * - Người trực (operator trở lên: mọi kênh; member: kênh được gán) xem hội thoại,
+ * - Người trực (operator/người kiểm duyệt: mọi kênh; member: kênh được gán) xem hội thoại,
  *   gửi text/ảnh/tài liệu, bật/tắt AI theo hội thoại. Nhân viên trả lời (web hoặc điện
  *   thoại) → AI tạm im trong hội thoại đó `inbox_pause_minutes` phút (mặc định 30).
  * - Dùng chung cho MCP server (mcp-server.ts): gửi tin/ảnh, tra SĐT, danh bạ.
@@ -412,9 +412,9 @@ export function forgetInboxChannel(channelId: string): void {
 
 // ===== Quyền truy cập kênh =====
 
-/** Kênh zalo_personal người này được trực: operator trở lên = mọi kênh; member = kênh được gán; viewer = không. */
-export async function allowedInboxChannelIds(db: Db, ctx: WorkspaceContext): Promise<string[]> {
-  if (hasRole(ctx.role, "operator")) {
+/** Moderator thấy mọi kênh trong Inbox; quyền MCP vẫn theo kênh được quản trị gán. */
+export async function allowedInboxChannelIds(db: Db, ctx: WorkspaceContext, scope: "inbox" | "mcp" = "inbox"): Promise<string[]> {
+  if ((ctx.role === "moderator" && scope === "inbox") || hasRole(ctx.role, "operator")) {
     return (await listChannels(db, ctx)).filter((c) => isPersonalChannelKind(c.kind)).map((c) => c.id);
   }
   if (ctx.role === "member" || ctx.role === "moderator") return listUserInboxChannelIds(db, ctx, ctx.userId);
@@ -758,7 +758,7 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
           photoAck: cfg.photoAck,
         };
       }),
-      canManage: hasRole(req.authCtx.role, "operator"),
+      canManage: hasRole(req.authCtx.role, "operator") || req.authCtx.role === "moderator",
     };
   });
 
@@ -776,7 +776,7 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
     raw.write("event: ready\ndata: {}\n\n");
     const client: SseClient = {
       workspaceId: req.authCtx.workspaceId,
-      channelIds: hasRole(req.authCtx.role, "operator") ? null : new Set(ids),
+      channelIds: req.authCtx.role === "moderator" || hasRole(req.authCtx.role, "operator") ? null : new Set(ids),
       write: (chunk) => raw.write(chunk),
     };
     sseClients.add(client);
@@ -1036,10 +1036,10 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
     return { thread };
   });
 
-  // Đồng bộ danh bạ ngay (operator trở lên)
+  // Đồng bộ danh bạ ngay (operator trở lên hoặc moderator)
   app.post(`${base}/:channelId/sync-contacts`, async (req, reply) => {
     const { channelId } = req.params as { channelId: string };
-    if (!hasRole(req.authCtx.role, "operator")) return reply.code(403).send({ error: "Cần quyền operator trở lên" });
+    if (req.authCtx.role !== "moderator" && !hasRole(req.authCtx.role, "operator")) return reply.code(403).send({ error: "Cần quyền trực Inbox" });
     if (!(await guard(req, reply, channelId))) return;
     const rt = inboxRuntime(channelId);
     if (!rt?.isConnected()) return reply.code(409).send({ error: `Kênh ${platformOf(channelId)} chưa kết nối`, code: "NOT_CONNECTED" });
@@ -1125,10 +1125,11 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
     }
   });
 
-  // Bật/tắt lưu nội dung + số phút AI tạm im sau khi nhân viên trả lời (ws_admin)
+  // Cài đặt Inbox cho quản trị hoặc người kiểm duyệt.
   app.put(`${base}/:channelId/settings`, async (req, reply) => {
     const { channelId } = req.params as { channelId: string };
-    if (!hasRole(req.authCtx.role, "ws_admin")) return reply.code(403).send({ error: "Cần quyền quản trị" });
+    if (req.authCtx.role !== "moderator" && !hasRole(req.authCtx.role, "ws_admin")) return reply.code(403).send({ error: "Cần quyền quản trị Inbox" });
+    if (!(await guard(req, reply, channelId))) return;
     const parsed = InboxSettingsBody.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: "Dữ liệu không hợp lệ" });
     const row = await getChannelById(db, req.authCtx, channelId);
