@@ -604,6 +604,7 @@ export interface InboxSendRequest {
   peerKind: "direct" | "group";
   text?: string;
   image?: string;
+  images?: string[];
   file?: { name: string; contentB64: string };
   /** Ảnh đã nạp + lưu sẵn (prepareOutboundImage) — MCP kiểm tra ảnh trước khi chiếm lượt gửi. */
   filePaths?: string[];
@@ -651,6 +652,10 @@ export async function sendInbox(dataDir: string, req: InboxSendRequest): Promise
     throw err;
   }
   const filePaths: string[] = [...(req.filePaths ?? [])];
+  if (req.images?.length) {
+    if (req.images.length > 6 || req.image || req.file) throw new ImageInputError("Chỉ chọn tối đa 6 ảnh, không kèm file khác");
+    filePaths.push(...(await prepareOutboundImages(dataDir, req.workspaceId, req.channelId, req.images)));
+  }
   if (req.image) {
     filePaths.push(await prepareOutboundImage(dataDir, req.workspaceId, req.channelId, req.image));
   }
@@ -676,30 +681,32 @@ export function inboxRuntimeFor(channelId: string): PersonalChannel | null {
 
 // ===== Routes =====
 
-const SendBody = z
+export const SendBody = z
   .object({
     text: z.string().max(10_000).optional(),
     image: z.string().max(15_000_000).optional(),
+    images: z.array(z.string().max(15_000_000)).min(1).max(6).optional(),
     file: z.object({ name: z.string().max(120), contentB64: z.string().max(14_000_000) }).optional(),
     peerKind: z.enum(["direct", "group"]).optional(),
     threadName: z.string().trim().min(1).max(120).optional(),
     replyToId: z.string().regex(/^\d{1,19}$/).optional(),
   })
-  .refine((v) => (v.text && v.text.trim()) || v.image || v.file, { message: "Cần nội dung hoặc file" })
-  .refine((v) => !(v.image && v.file), { message: "Chỉ gửi một file mỗi lần" });
+  .refine((v) => (v.text && v.text.trim()) || v.image || v.images?.length || v.file, { message: "Cần nội dung hoặc file" })
+  .refine((v) => !(v.image && v.images?.length) && !((v.image || v.images?.length) && v.file), { message: "Chỉ chọn ảnh hoặc một file mỗi lần" });
 
-const NewMessageBody = z
+export const NewMessageBody = z
   .object({
     to: z.string().regex(/^[0-9A-Za-z@.-]{1,64}$/).optional(),
     phone: z.string().regex(/^\+?\d{8,15}$/).optional(),
     peerKind: z.enum(["direct", "group"]).default("direct"),
     text: z.string().max(10_000).optional(),
     image: z.string().max(15_000_000).optional(),
+    images: z.array(z.string().max(15_000_000)).min(1).max(6).optional(),
     file: z.object({ name: z.string().max(120), contentB64: z.string().max(14_000_000) }).optional(),
   })
   .refine((v) => v.to || v.phone, { message: "Cần uid (to) hoặc số điện thoại" })
-  .refine((v) => (v.text && v.text.trim()) || v.image || v.file, { message: "Cần nội dung hoặc file" })
-  .refine((v) => !(v.image && v.file), { message: "Chỉ gửi một file mỗi lần" });
+  .refine((v) => (v.text && v.text.trim()) || v.image || v.images?.length || v.file, { message: "Cần nội dung hoặc file" })
+  .refine((v) => !(v.image && v.images?.length) && !((v.image || v.images?.length) && v.file), { message: "Chỉ chọn ảnh hoặc một file mỗi lần" });
 
 const AiBody = z.object({ mode: z.enum(["auto", "off"]).optional(), resume: z.boolean().optional() });
 const InboxSettingsBody = z.object({
@@ -951,7 +958,7 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
     let quote: InboxZaloQuote | null = null;
     if (parsed.data.replyToId) {
       if (kindOf(channelId) !== "zalo_personal") return reply.code(422).send({ error: "Trích dẫn hiện chỉ hỗ trợ Zalo cá nhân" });
-      if (!parsed.data.text?.trim() || parsed.data.image || parsed.data.file) {
+      if (!parsed.data.text?.trim() || parsed.data.image || parsed.data.images?.length || parsed.data.file) {
         return reply.code(400).send({ error: "Khi trả lời trích dẫn, hãy nhập lời nhắn; gửi ảnh/file ở lượt riêng" });
       }
       const target = await getInboxMessageById(db, req.authCtx, channelId, threadId, parsed.data.replyToId);
@@ -966,6 +973,7 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
         peerKind,
         ...(parsed.data.text?.trim() ? { text: parsed.data.text } : {}),
         ...(parsed.data.image ? { image: parsed.data.image } : {}),
+        ...(parsed.data.images ? { images: parsed.data.images } : {}),
         ...(parsed.data.file ? { file: parsed.data.file } : {}),
         source: "web",
         webUserId: req.authCtx.userId,
@@ -1009,6 +1017,7 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
         peerKind,
         ...(parsed.data.text?.trim() ? { text: parsed.data.text } : {}),
         ...(parsed.data.image ? { image: parsed.data.image } : {}),
+        ...(parsed.data.images ? { images: parsed.data.images } : {}),
         ...(parsed.data.file ? { file: parsed.data.file } : {}),
         source: "web",
         webUserId: req.authCtx.userId,

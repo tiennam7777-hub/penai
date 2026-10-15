@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import AdmZip from "adm-zip";
 import { describe, expect, it } from "vitest";
 import { isMcpPublicPath, parseScopes, pkceMatches, validRedirectUri } from "../src/mcp-server.js";
-import { isPlatformRejected, loadImageInput, prepareOutboundDocument, readInboxConfig, sniffImage } from "../src/inbox.js";
+import { isPlatformRejected, loadImageInput, prepareOutboundDocument, prepareOutboundImages, readInboxConfig, sniffImage, SendBody, NewMessageBody } from "../src/inbox.js";
 
 const PNG_1x1 = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
@@ -50,6 +50,31 @@ describe("MCP server — OAuth helpers", () => {
 });
 
 describe("Inbox — cấu hình + ảnh gửi đi", () => {
+  it("nhận tối đa 6 ảnh cho hội thoại đang mở hoặc tin mới, chặn 7 ảnh và file kèm ảnh", () => {
+    const images = Array(6).fill("data:image/png;base64,AAAA");
+    expect(SendBody.safeParse({ images }).success).toBe(true);
+    expect(NewMessageBody.safeParse({ to: "123456", images }).success).toBe(true);
+    expect(SendBody.safeParse({ images: [...images, images[0]] }).success).toBe(false);
+    expect(NewMessageBody.safeParse({ to: "123456", images: [...images, images[0]] }).success).toBe(false);
+    expect(SendBody.safeParse({ image: images[0], images }).success).toBe(false);
+    expect(SendBody.safeParse({ images, file: { name: "a.pdf", contentB64: "AAAA" } }).success).toBe(false);
+  });
+  it("chuẩn bị đủ 6 ảnh theo thứ tự và dọn ảnh đã nạp khi một ảnh lỗi", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "penai-inbox-album-"));
+    const valid = `data:image/png;base64,${PNG_1x1.toString("base64")}`;
+    const folder = join(dir, "workspace-1", "zalo-inbox", "channel-1", new Date().toISOString().slice(0, 7));
+    try {
+      const paths = await prepareOutboundImages(dir, "workspace-1", "channel-1", Array(6).fill(valid));
+      expect(paths).toHaveLength(6);
+      for (const path of paths) expect(await readFile(path)).toEqual(PNG_1x1);
+      const before = await readdir(folder);
+      await expect(prepareOutboundImages(dir, "workspace-1", "channel-1", [valid, "data:image/png;base64,PGh0bWw+"]))
+        .rejects.toThrow(/Ảnh 2\/2/);
+      expect(await readdir(folder)).toEqual(before);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
   it("lưu file Word/Excel hợp lệ trong workspace và từ chối file giả hoặc tên không an toàn", async () => {
     const dir = await mkdtemp(join(tmpdir(), "penai-inbox-file-"));
     try {
