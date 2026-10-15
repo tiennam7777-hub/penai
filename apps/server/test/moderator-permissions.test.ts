@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { canChat, hasRole, usesAgentGrants } from "@penai/shared";
-import { moderatorAllowed } from "../src/web-auth.js";
+import { memberAllowed, moderatorAllowed } from "../src/web-auth.js";
 
 describe("moderator capability boundary", () => {
   it("chat theo agent được gán, không kế thừa quyền operator", () => {
@@ -45,6 +45,22 @@ describe("moderator capability boundary", () => {
         ["POST", "sync-contacts"], ["PUT", "settings"],
       ]) expect(moderatorAllowed(method!, `${base}/${channel}/${suffix}`)).toBe(true);
       expect(moderatorAllowed("DELETE", `${base}/${channel}/settings`)).toBe(false);
+      expect(moderatorAllowed("POST", `${base}/${channel}/not-an-inbox-action`)).toBe(false);
+    }
+  });
+
+  it("mọi vai trò trực Inbox đọc và quản lý cùng tin nhắn nhanh, không mở route khác", () => {
+    const channel = "cdf2a276-fa3d-4fe3-a46b-3ce1162a7678";
+    const id = "02e94d65-474b-4aa7-9e78-b0ed44729439";
+    for (const base of ["/v1/inbox", "/v1/zalo-inbox"]) {
+      for (const [method, suffix] of [
+        ["GET", "quick-replies"], ["POST", "quick-replies"],
+        ["PUT", `quick-replies/${id}`], ["DELETE", `quick-replies/${id}`],
+      ]) {
+        expect(memberAllowed(method!, `${base}/${channel}/${suffix}`)).toBe(true);
+        expect(moderatorAllowed(method!, `${base}/${channel}/${suffix}`)).toBe(true);
+      }
+      expect(memberAllowed("POST", `${base}/${channel}/settings`)).toBe(false);
       expect(moderatorAllowed("POST", `${base}/${channel}/not-an-inbox-action`)).toBe(false);
     }
   });
