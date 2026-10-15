@@ -46,6 +46,7 @@ import {
   setInboxMessageQuoteSource,
   upsertContact,
   getInboxMessageById,
+  getInboxMessageByMsgId,
   latestIncomingInboxMessages,
   upsertInboxContacts,
   recordAudit,
@@ -874,6 +875,15 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
       }),
     ]);
     return { thread, messages: messages.map((m) => publicMessage(m, req.authCtx.workspaceId)) };
+  });
+
+  app.get(`${base}/:channelId/threads/:threadId/messages/by-msg-id/:msgId`, async (req, reply) => {
+    const { channelId, threadId, msgId } = req.params as { channelId: string; threadId: string; msgId: string };
+    if (!(await guard(req, reply, channelId))) return;
+    if (!msgId || msgId.length > 100) return reply.code(400).send({ error: "Mã tin nhắn không hợp lệ" });
+    const message = await getInboxMessageByMsgId(db, req.authCtx, channelId, threadId, msgId);
+    if (!message) return reply.code(404).send({ error: "Tin được trích dẫn không có trong lịch sử Inbox của hội thoại này" });
+    return { message: publicMessage(message, req.authCtx.workspaceId) };
   });
 
   app.post(`${base}/:channelId/threads/:threadId/read`, async (req, reply) => {

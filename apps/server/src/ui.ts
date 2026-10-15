@@ -216,6 +216,9 @@ export const INDEX_HTML = `<!doctype html>
   .ibx-who { font-size: .7rem; opacity: .7; margin: 0 4px 1px; }
   .ibx-time { font-size: .66rem; opacity: .5; margin: 1px 4px 0; }
   .ibx-quote { font-size: .78rem; opacity: .75; border-left: 3px solid rgba(128,128,128,.5); padding-left: 6px; margin-bottom: 4px; }
+  button.ibx-quote { display:block; max-width:100%; text-align:left; color:inherit; background:rgba(128,128,128,.12); border-top:0; border-right:0; border-bottom:0; border-radius:4px; cursor:pointer; }
+  button.ibx-quote:hover, button.ibx-quote:focus-visible { opacity:1; background:rgba(128,128,128,.25); }
+  .ibx-msg.ibx-quote-target .ibx-bubble { outline:3px solid #f59e0b; outline-offset:2px; }
   .ibx-photo { max-width: 260px; max-height: 260px; border-radius: 8px; display: block; cursor: zoom-in; }
   .ibx-photo-link { padding: 0; border: 0; background: none; cursor: zoom-in; }
   .ibx-tag { display:inline-block; max-width:100%; overflow:hidden; text-overflow:ellipsis; padding:2px 7px; border-radius:999px; font-size:.7rem; font-weight:600; white-space:nowrap; }
@@ -4006,23 +4009,53 @@ export const INDEX_HTML = `<!doctype html>
       $("#ibxReplyCancel").onclick = function () { S.reply = null; renderReply(); };
       $("#ibxAttach").disabled = true;
     }
+    function revealQuotedMessage(x) {
+      var node = Array.prototype.find.call($("#ibxMsgs").querySelectorAll(".ibx-msg[data-id]"), function (n) { return n.getAttribute("data-id") === String(x.id); });
+      if (!node) return false;
+      node.scrollIntoView({ behavior: "smooth", block: "center" });
+      node.classList.add("ibx-quote-target");
+      setTimeout(function () { node.classList.remove("ibx-quote-target"); }, 2400);
+      return true;
+    }
+    function showQuotedMessage(x) {
+      var dlg = el("dialog", { style: "max-width:600px;width:90vw;max-height:85vh;overflow:auto;padding:16px" });
+      dlg.innerHTML = '<div class="row" style="justify-content:space-between;margin-bottom:10px"><b>Tin được trích dẫn · ' + esc(ibxTime(x.sentAt)) + '</b><button type="button" class="ghost sm ibx-quote-close">Đóng ×</button></div><div class="ibx-bubble">' + msgBody(x) + '</div>' + (x.removed ? '<div class="muted">Tin này đã bị thu hồi hoặc xóa ở Zalo.</div>' : '');
+      dlg.querySelector(".ibx-quote-close").onclick = function () { dlg.close(); };
+      var photo = dlg.querySelector("button.ibx-photo-link");
+      if (photo) photo.onclick = function () { showInboxPhoto(photo.querySelector("img").src); };
+      dlg.addEventListener("close", function () { dlg.remove(); });
+      document.body.appendChild(dlg); dlg.showModal();
+    }
+    function openQuotedMessage(ref) {
+      if (!ref || !ref.msgId || !S.cur) { toast("Tin trích dẫn này thiếu mã để tìm tin gốc", true); return; }
+      var channelId = S.ch, threadId = S.cur.threadId;
+      var cached = (S.msgs || []).find(function (m) { return m.msgId === ref.msgId; });
+      if (cached && revealQuotedMessage(cached)) return;
+      api("/v1/inbox/" + channelId + "/threads/" + encodeURIComponent(threadId) + "/messages/by-msg-id/" + encodeURIComponent(ref.msgId)).then(function (j) {
+        if (!S.cur || S.ch !== channelId || S.cur.threadId !== threadId) return;
+        if (!revealQuotedMessage(j.message)) showQuotedMessage(j.message);
+      }).catch(function (e) { toast(e.message, true); });
+    }
     function msgEl(x) {
       var out = x.direction === "out";
       var who = out ? (x.source === "web" ? "👤 " + (x.webUserName || "Nhân viên") : (IBX_SRC[x.source] || "")) : (S.cur && S.cur.kind === "group" ? x.senderName : "");
       if (out && x.source === "mcp" && x.webUserName) who = "🔌 Ứng dụng AI (" + x.webUserName + ")";
       var ref = x.meta && x.meta.quote;
-      var q = ref && ref.text ? '<div class="ibx-quote">↪ ' + esc(ref.text) + "</div>" : "";
+      var q = ref && ref.text ? '<span>↪ ' + esc(ref.text) + "</span>" : "";
       if (ref && ref.kind === "photo") {
         var chosen = (S.msgs || []).find(function (m) { return m.msgId === ref.msgId && m.contentType === "photo"; });
         var chosenMedia = chosen && chosen.media || {};
         var chosenSrc = chosenMedia.file ? "/v1/inbox/" + S.ch + "/file?p=" + encodeURIComponent(chosenMedia.file) : (chosenMedia.url || "");
-        q = '<div class="ibx-quote">↪ Ảnh được trích dẫn' + (chosenSrc ? '<br><button type="button" class="ibx-photo-link" title="Xem ảnh được trích dẫn"><img class="ibx-photo" src="' + esc(chosenSrc) + '" referrerpolicy="no-referrer" alt="Ảnh được trích dẫn" loading="lazy" style="max-width:90px;max-height:90px"></button>' : '') + '</div>';
+        q = '↪ Ảnh được trích dẫn' + (chosenSrc ? '<br><img class="ibx-photo" src="' + esc(chosenSrc) + '" referrerpolicy="no-referrer" alt="Ảnh được trích dẫn" loading="lazy" style="max-width:90px;max-height:90px">' : '');
       }
+      if (q) q = ref.msgId ? '<button type="button" class="ibx-quote ibx-quote-jump" title="Đến tin nhắn được trích dẫn">' + q + '</button>' : '<div class="ibx-quote">' + q + '</div>';
       var d = el("div", { "class": "ibx-msg " + (out ? "out" : "in") + (x.removed ? " removed" : ""), "data-id": x.id });
       d.innerHTML = (who ? '<div class="ibx-who">' + esc(who) + "</div>" : "") + '<div class="ibx-bubble">' + q + msgBody(x) + "</div>" + rxHtml(x) + '<div class="ibx-time">' + esc(ibxTime(x.sentAt)) + "</div>" +
         (x.removed ? '<div class="ibx-msg-state">' + (x.removed === "recalled" ? "Đã thu hồi" : "Đã xóa ở tài khoản này") + "</div>" : "");
       var photoLink = d.querySelector("button.ibx-photo-link");
       if (photoLink) photoLink.addEventListener("click", function () { showInboxPhoto(photoLink.querySelector("img").src); });
+      var quoteLink = d.querySelector("button.ibx-quote-jump");
+      if (quoteLink) quoteLink.addEventListener("click", function () { openQuotedMessage(ref); });
       if (x.canReact && !out) {
         var mine = myReaction(x);
         var bar = el("div", { "class": "ibx-react" });
