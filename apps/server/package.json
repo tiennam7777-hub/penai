@@ -17,6 +17,7 @@
     "@penai/tools": "workspace:*",
     "adm-zip": "^0.6.0",
     "fastify": "^5.2.0",
+    "sharp": "0.35.5",
     "zod": "^4.0.0"
   },
   "devDependencies": {

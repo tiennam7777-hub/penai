@@ -196,7 +196,7 @@ export interface ChannelMessageLog {
   webUserId?: string;
   contentType: "text" | "photo" | "file" | "sticker" | "voice" | "video" | "link" | "other";
   text: string;
-  media?: { url?: string; thumb?: string; name?: string; size?: number; localPath?: string; albumSize?: number; albumIndex?: number };
+  media?: { url?: string; thumb?: string; name?: string; size?: number; localPath?: string; albumSize?: number; albumIndex?: number; stemCount?: number };
   meta?: Record<string, unknown>;
   sentAt: Date;
   /** Tên hội thoại biết được lúc này (DM đến: tên người gửi; nhóm: tên nhóm nếu đã tra). */

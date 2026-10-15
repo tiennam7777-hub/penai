@@ -45,6 +45,7 @@ import {
   type InboundResult,
   type OutboundButton,
   type RunHooks,
+  trustedZaloMediaUrl,
 } from "@penai/channels";
 import { forgetInboxChannel, inboxHooks } from "./inbox.js";
 import { isPersonalChannel, isPersonalChannelKind } from "@penai/channels";
@@ -55,6 +56,7 @@ import { orchidHandoffContext } from "./orchid-handoff-context.js";
 import { editOrchidPhotoWithOpenAI } from "./orchid-photo-openai.js";
 import { prepareZaloPhotoPaths } from "./outbound-photo-path.js";
 import { classifyConfirmedOrchidOrder, formatOrchidOrderDispatch, mayConfirmOrchidOrder, orchidOrderFingerprint } from "./orchid-order-dispatch.js";
+import { stemCountForPhoto } from "./orchid-photo-count.js";
 
 /** Handler + channel theo channelId — cho webhook route (WhatsApp, Teams) dùng. */
 export const channelHandlers = new Map<
@@ -796,28 +798,47 @@ export function makeInboundHandler(
     const wsDirEarly = resolve(join(rt.config.dataDir, ctx.workspaceId));
     const userDirEarly = resolve(join(wsDirEarly, "users", sanitizeUserKey(userKey)));
     let quotedPhotoDataUrl: string | null = null;
+    let quotedPhotoStemCount: number | null = null;
+    const numberedPhotoDir = join(wsDirEarly, "shared");
     if (msg.quoted?.kind === "photo") {
       const threadId = msg.chatKey.slice(msg.chatKey.indexOf(":") + 1);
       const quotedRow = await getInboxMessageByMsgId(db, ctx, channel.id, threadId, msg.quoted.msgId)
         .catch(() => null);
-      const rawPath = quotedRow?.direction === "out" && quotedRow.contentType === "photo"
-        ? quotedRow.media?.localPath
-        : undefined;
+      const rawPath = quotedRow?.contentType === "photo" ? quotedRow.media?.localPath : undefined;
       const safePath = typeof rawPath === "string"
         ? await confineMediaPath(rawPath, [wsDirEarly])
         : null;
+      let quotedBytes: Buffer | null = null;
       if (safePath) {
         try {
           const fileStat = await stat(safePath);
-          if (fileStat.size <= 10 * 1024 * 1024) {
-            const ext = extname(safePath).toLowerCase();
-            const mime = ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp"
-              : ext === ".gif" ? "image/gif" : "image/jpeg";
-            quotedPhotoDataUrl = `data:${mime};base64,${(await readFile(safePath)).toString("base64")}`;
-          }
+          if (fileStat.size <= 10 * 1024 * 1024) quotedBytes = await readFile(safePath);
         } catch {
-          // Ảnh đã mất hoặc không đọc được: hỏi khách xác nhận, không đoán màu.
+          // Bản lưu đã mất: thử CDN Zalo của chính tin được trích dẫn.
         }
+      }
+      if (!quotedBytes && quotedRow?.contentType === "photo") {
+        const url = typeof quotedRow.media?.url === "string"
+          ? trustedZaloMediaUrl(quotedRow.media.url) : null;
+        if (url) {
+          try {
+            const response = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(15_000) });
+            if (response.ok && Number(response.headers.get("content-length") ?? 0) <= 10 * 1024 * 1024) {
+              const bytes = Buffer.from(await response.arrayBuffer());
+              if (bytes.length && bytes.length <= 10 * 1024 * 1024) quotedBytes = bytes;
+            }
+          } catch { /* CDN hết hạn hoặc không tải được */ }
+        }
+      }
+      if (quotedBytes?.length) {
+        const ext = extname(safePath ?? "").toLowerCase();
+        const mime = ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp"
+          : ext === ".gif" ? "image/gif" : "image/jpeg";
+        quotedPhotoDataUrl = `data:${mime};base64,${quotedBytes.toString("base64")}`;
+        const storedCount = quotedRow?.media?.stemCount;
+        quotedPhotoStemCount = typeof storedCount === "number" && storedCount >= 1 && storedCount <= 99
+          ? storedCount
+          : await stemCountForPhoto(numberedPhotoDir, safePath ?? quotedBytes);
       }
       if (!quotedPhotoDataUrl) {
         return { kind: "reply", text: "Em chưa xác định được chính xác ảnh anh/chị đã chọn trong album. Anh/chị gửi lại riêng ảnh đó hoặc cho em biết ảnh số mấy nhé ạ." };
@@ -828,6 +849,9 @@ export function makeInboundHandler(
     // sau). Caption/tin nhắn kèm theo → đặt tên file slug dễ hiểu.
     const photos = (msg.media ?? []).filter((m) => m.kind === "photo" && m.dataUrl);
     const savedImages = await saveInboundImages(userDirEarly, photos, msg.text);
+    const inboundStemCounts = agent.key === "nhan-vien-kinh-doanh-orchids-world"
+      ? await Promise.all(savedImages.map((image) => stemCountForPhoto(numberedPhotoDir, image.path)))
+      : [];
     if (savedImages.length) {
       const list = [...(recentImages.get(sessionId) ?? []), ...savedImages];
       recentImages.set(sessionId, list.slice(-RECENT_IMAGES_MAX));
@@ -842,7 +866,7 @@ export function makeInboundHandler(
       msg.text.trim().length > 0 ||
       (msg.media ?? []).some((m) => m.text !== undefined || m.note);
     const savedAll = [...savedImages, ...savedDocs];
-    if (!hasSubstance && savedAll.length) {
+    if (!hasSubstance && savedAll.length && !(agent.key === "nhan-vien-kinh-doanh-orchids-world" && savedImages.length)) {
       await appendMessage(db, ctx, sessionId, {
         role: "user",
         content: {
@@ -966,10 +990,16 @@ export function makeInboundHandler(
       isZaloGroup && msg.mentioned
         ? joinGroupChatter(chatterKey, msg.senderId, msg.senderName, msg.text)
         : msg.text;
+    const recognizedCounts = [...new Set(inboundStemCounts.filter((n): n is number => n !== null))];
+    const photoStemContext = quotedPhotoStemCount
+      ? `[DỮ KIỆN ẢNH: Ảnh khách trích dẫn khớp ảnh trong thư viện chậu ${quotedPhotoStemCount} cành. Dùng số cành này để trả lời; không đoán lại bằng mắt.]\n`
+      : savedImages.length === 1 && recognizedCounts.length === 1
+        ? `[DỮ KIỆN ẢNH: Ảnh khách gửi lại khớp ảnh trong thư viện chậu ${recognizedCounts[0]} cành. Dùng số cành này để trả lời; không đoán lại bằng mắt.]\n`
+        : "";
     const latestUserMessage = mergeMediaText(
       quotedPhotoDataUrl
-        ? `[Khách đang trả lời trực tiếp ảnh đã gửi. Ảnh đi kèm lượt này chính là ảnh khách chọn; không suy đoán theo vị trí trong album.]\n${inboundText}`
-        : inboundText,
+        ? `${photoStemContext}[Khách đang trả lời trực tiếp ảnh đã gửi. Ảnh đi kèm lượt này chính là ảnh khách chọn; không suy đoán theo vị trí trong album.]\n${inboundText}`
+        : `${photoStemContext}${inboundText}`,
       msg.media,
       savedImages.map((s) => s.name),
       savedDocs.map((s) => s.name),

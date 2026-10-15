@@ -76,6 +76,7 @@ import {
 import { channelHandlers } from "./channels-runtime.js";
 import { readPhotoAcknowledgement } from "./photo-burst.js";
 import { inboxZaloQuote, type InboxZaloQuote } from "./inbox-quote.js";
+import { stemCountForPhoto } from "./orchid-photo-count.js";
 
 // ===== Cấu hình sống theo kênh =====
 
@@ -260,6 +261,11 @@ export function inboxHooks(
       const st = inboxState.get(ch.id);
       if (!st?.enabled) return;
       void (async () => {
+        if (entry.direction === "out" && entry.source === "agent" && entry.contentType === "photo"
+          && typeof entry.media?.localPath === "string") {
+          const count = await stemCountForPhoto(join(dataDir, ch.workspaceId, "shared"), entry.media.localPath);
+          if (count) entry.media.stemCount = count;
+        }
         const saved = await recordInboxMessage(db, ctx, ch.id, toInput(entry), { pauseMinutes: st.pauseMinutes });
         if (!saved) return;
         broadcast(ch.workspaceId, ch.id, "message", {
