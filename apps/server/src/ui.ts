@@ -228,6 +228,10 @@ export const INDEX_HTML = `<!doctype html>
   .ibx-file-download { display: inline-block; margin-left: 6px; padding: 2px 7px; border: 1px solid currentColor; border-radius: 6px; font-size: .78rem; text-decoration: none; white-space: nowrap; }
   .ibx-sticker { width: 90px; height: 90px; object-fit: contain; }
   .ibx-compose { border-top: 1px solid var(--border); padding: 8px 10px; }
+  .ibx-quick-suggestions { position:relative; display:none; max-height:220px; overflow-y:auto; margin-bottom:6px; border:1px solid var(--border); border-radius:8px; background:var(--card); box-shadow:0 4px 14px rgba(0,0,0,.12); }
+  .ibx-quick-suggestions button { display:block; width:100%; text-align:left; padding:7px 10px; color:inherit; background:transparent; border:0; border-radius:0; }
+  .ibx-quick-suggestions button:hover, .ibx-quick-suggestions button.active { background:rgba(128,128,128,.18); }
+  .ibx-quick-suggestions small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; opacity:.7; }
   .ibx-reply-preview { display:flex; align-items:center; gap:8px; border-left:3px solid var(--accent); background:rgba(128,128,128,.1); padding:5px 8px; margin-bottom:7px; border-radius:5px; font-size:.8rem; }
   .ibx-reply-preview img { max-width:42px; max-height:42px; border-radius:4px; }
   .ibx-msg { position: relative; }
@@ -3877,15 +3881,15 @@ export const INDEX_HTML = `<!doctype html>
 
   PAGES.inbox = function () {
     var m = page("Inbox", "Nhiều người cùng xem và trả lời khách trên Zalo cá nhân, WhatsApp cá nhân. Nhân viên trả lời thì AI tự tạm im trong hội thoại đó.");
-    var S = { channels: [], canManage: false, ch: null, threads: [], total: 0, tags: [], tag: "", hidden: false, cur: null, msgs: [], filter: "", kind: "", img: null, file: null, reply: null, es: null, seq: 0 };
+    var S = { channels: [], canManage: false, ch: null, threads: [], total: 0, tags: [], tag: "", quick: [], quickMatches: [], quickToken: null, quickIndex: 0, hidden: false, cur: null, msgs: [], filter: "", kind: "", img: null, file: null, reply: null, es: null, seq: 0 };
     var top = el("div", { "class": "row", style: "margin-bottom:10px" });
     top.innerHTML = '<select id="ibxCh" style="max-width:260px"></select><span id="ibxSt" class="muted"></span><span style="flex:1"></span>' +
-      '<button class="ghost sm" id="ibxFriend" style="display:none">＋ Kết bạn</button><button class="ghost sm" id="ibxNew">＋ Nhắn tin mới</button><button class="ghost sm" id="ibxSync" style="display:none">🔄 Đồng bộ danh bạ</button><button class="ghost sm" id="ibxSet" style="display:none">⚙️ Cài đặt</button>';
+      '<button class="ghost sm" id="ibxQuick">⚡ Tin nhắn nhanh</button><button class="ghost sm" id="ibxFriend" style="display:none">＋ Kết bạn</button><button class="ghost sm" id="ibxNew">＋ Nhắn tin mới</button><button class="ghost sm" id="ibxSync" style="display:none">🔄 Đồng bộ danh bạ</button><button class="ghost sm" id="ibxSet" style="display:none">⚙️ Cài đặt</button>';
     m.appendChild(top);
     var wrap = el("div", { "class": "ibx" });
     wrap.innerHTML = '<div class="ibx-list"><div class="row" style="padding:8px"><input id="ibxQ" placeholder="Tìm tên, uid, SĐT…"><select id="ibxKind" style="flex:0 0 auto;min-width:0"><option value="">Tất cả</option><option value="direct">Cá nhân</option><option value="group">Nhóm</option><option value="unread">Chưa đọc</option></select></div><div class="row" style="padding:0 8px 8px;gap:6px"><select id="ibxTag" style="flex:1;min-width:0"><option value="">Mọi nhãn Inbox</option></select><select id="ibxHidden" style="flex:0 0 auto;min-width:0" title="Xem hội thoại đang hiện hoặc đã ẩn"><option value="0">Đang hiện</option><option value="1">Đã ẩn</option></select></div><div id="ibxThreads" class="ibx-threads"></div></div>' +
       '<div class="ibx-chat"><div id="ibxHead" class="ibx-head muted">Chọn một hội thoại bên trái.</div><div id="ibxMsgs" class="ibx-msgs"></div>' +
-      '<div class="ibx-compose" id="ibxCompose" style="display:none"><div id="ibxReply"></div><div id="ibxImg"></div><div class="row" style="align-items:flex-end"><textarea id="ibxText" rows="2" placeholder="Nhập tin nhắn… (Enter để gửi, Shift+Enter xuống dòng, dán ảnh trực tiếp)"></textarea><input type="file" id="ibxFile" accept="image/png,image/jpeg,image/gif,image/webp,.pdf,.doc,.docx,.xls,.xlsx" hidden><button class="ghost" id="ibxAttach" title="Gửi ảnh hoặc file Word, Excel, PDF">📎</button><button id="ibxSend">Gửi</button></div></div></div>';
+      '<div class="ibx-compose" id="ibxCompose" style="display:none"><div id="ibxReply"></div><div id="ibxImg"></div><div id="ibxQuickSuggestions" class="ibx-quick-suggestions"></div><div class="row" style="align-items:flex-end"><textarea id="ibxText" rows="2" placeholder="Nhập tin nhắn… (gõ -mã để chọn tin nhắn nhanh; Enter để gửi)"></textarea><input type="file" id="ibxFile" accept="image/png,image/jpeg,image/gif,image/webp,.pdf,.doc,.docx,.xls,.xlsx" hidden><button class="ghost" id="ibxAttach" title="Gửi ảnh hoặc file Word, Excel, PDF">📎</button><button id="ibxSend">Gửi</button></div></div></div>';
     m.appendChild(wrap);
 
     function stopEs() { if (S.es) { try { S.es.close(); } catch (e) {} S.es = null; } }
@@ -3905,6 +3909,94 @@ export const INDEX_HTML = `<!doctype html>
       $("#ibxFriend").style.display = c.kind === "zalo_personal" ? "" : "none";
       $("#ibxFriend").disabled = !c.connected;
     }
+    function hideQuickSuggestions() {
+      S.quickMatches = []; S.quickToken = null; S.quickIndex = 0;
+      var box = $("#ibxQuickSuggestions"); if (box) { box.style.display = "none"; box.innerHTML = ""; }
+    }
+    function chooseQuickReply(item) {
+      var input = $("#ibxText"), token = S.quickToken;
+      if (!item || !token) return;
+      input.value = input.value.slice(0, token.start) + item.content + input.value.slice(token.end);
+      var caret = token.start + item.content.length;
+      input.focus(); input.setSelectionRange(caret, caret);
+      hideQuickSuggestions();
+    }
+    function updateQuickSuggestions() {
+      var input = $("#ibxText"), pos = input.selectionStart, before = input.value.slice(0, pos);
+      var match = /(^|\\s)-([a-z0-9_-]{0,32})$/i.exec(before);
+      if (!match || input.selectionStart !== input.selectionEnd) { hideQuickSuggestions(); return; }
+      var prefix = match[2].toLowerCase();
+      S.quickToken = { start: pos - prefix.length - 1, end: pos };
+      S.quickMatches = S.quick.filter(function (item) { return item.shortcut.indexOf(prefix) === 0; }).slice(0, 8);
+      S.quickIndex = 0;
+      var box = $("#ibxQuickSuggestions");
+      if (!S.quickMatches.length) { box.style.display = "none"; box.innerHTML = ""; return; }
+      box.innerHTML = S.quickMatches.map(function (item, i) {
+        return '<button type="button" class="' + (i === S.quickIndex ? 'active' : '') + '" data-index="' + i + '"><b>-' + esc(item.shortcut) + '</b> · ' + esc(item.title) + '<small>' + esc(item.content.replace(/\\s+/g, " ").slice(0, 130)) + '</small></button>';
+      }).join("");
+      box.style.display = "block";
+      Array.prototype.forEach.call(box.querySelectorAll("button"), function (button) {
+        button.onmousedown = function (e) { e.preventDefault(); };
+        button.onclick = function () { chooseQuickReply(S.quickMatches[Number(this.getAttribute("data-index"))]); };
+      });
+    }
+    function loadQuickReplies() {
+      if (!S.ch) return Promise.resolve();
+      return api("/v1/inbox/" + S.ch + "/quick-replies").then(function (j) {
+        S.quick = j.replies || []; updateQuickSuggestions();
+      }).catch(function (e) { toast(e.message, true); });
+    }
+    function manageQuickReplies() {
+      if (!S.ch) return;
+      var editing = null;
+      var dlg = el("dialog", { style: "width:620px;max-width:95vw;max-height:90vh;overflow:auto;padding:20px" });
+      dlg.innerHTML = '<h3 style="margin:0 0 6px">Tin nhắn nhanh</h3><div class="muted">Dùng chung trong Inbox. Gõ - rồi nhập mã trong ô soạn, chọn mẫu để chèn; nội dung sẽ không tự gửi.</div>' +
+        '<div id="qrList" style="max-height:250px;overflow:auto;margin:12px 0"></div>' +
+        '<h4 id="qrFormTitle" style="margin:12px 0 6px">Tạo mẫu mới</h4>' +
+        '<label>Mã gõ nhanh (không nhập dấu -)</label><input id="qrCode" maxlength="33" placeholder="vd: gia">' +
+        '<label>Tiêu đề</label><input id="qrTitle" maxlength="80" placeholder="Báo giá">' +
+        '<label>Nội dung tin nhắn</label><textarea id="qrContent" rows="5" maxlength="2000" placeholder="Nội dung sẽ chèn vào ô soạn"></textarea>' +
+        '<div class="dialog-actions"><button type="button" class="ghost" id="qrCancelEdit" style="display:none">Hủy sửa</button><button type="button" class="ghost" id="qrClose">Đóng</button><button type="button" id="qrSave">Lưu mẫu</button></div>';
+      document.body.appendChild(dlg);
+      function resetForm() {
+        editing = null; $("#qrCode", dlg).value = ""; $("#qrTitle", dlg).value = ""; $("#qrContent", dlg).value = "";
+        $("#qrFormTitle", dlg).textContent = "Tạo mẫu mới"; $("#qrCancelEdit", dlg).style.display = "none";
+      }
+      function renderList() {
+        var box = $("#qrList", dlg);
+        box.innerHTML = S.quick.length ? S.quick.map(function (item) {
+          return '<div style="padding:8px 0;border-bottom:1px solid var(--border)"><div class="row" style="justify-content:space-between;gap:8px"><div style="min-width:0"><b>-' + esc(item.shortcut) + '</b> · ' + esc(item.title) + '</div><div class="row" style="gap:4px"><button type="button" class="ghost sm qrEdit" data-id="' + esc(item.id) + '">Sửa</button><button type="button" class="ghost sm qrDelete" data-id="' + esc(item.id) + '">Xóa</button></div></div><div class="muted" style="white-space:pre-wrap;max-height:55px;overflow:hidden">' + esc(item.content) + '</div></div>';
+        }).join("") : '<div class="muted">Chưa có mẫu nào. Hãy tạo mẫu đầu tiên bên dưới.</div>';
+        Array.prototype.forEach.call(box.querySelectorAll(".qrEdit"), function (button) { button.onclick = function () {
+          var item = S.quick.find(function (r) { return r.id === button.getAttribute("data-id"); }); if (!item) return;
+          editing = item.id; $("#qrCode", dlg).value = item.shortcut; $("#qrTitle", dlg).value = item.title; $("#qrContent", dlg).value = item.content;
+          $("#qrFormTitle", dlg).textContent = "Sửa mẫu -" + item.shortcut; $("#qrCancelEdit", dlg).style.display = ""; $("#qrCode", dlg).focus();
+        }; });
+        Array.prototype.forEach.call(box.querySelectorAll(".qrDelete"), function (button) { button.onclick = function () {
+          var item = S.quick.find(function (r) { return r.id === button.getAttribute("data-id"); });
+          if (!item || !confirm('Xóa tin nhắn nhanh -' + item.shortcut + '?')) return;
+          button.disabled = true;
+          api("/v1/inbox/" + S.ch + "/quick-replies/" + encodeURIComponent(item.id), { method: "DELETE" }).then(function () {
+            if (editing === item.id) resetForm(); return loadQuickReplies();
+          }).then(renderList).catch(function (e) { toast(e.message, true); button.disabled = false; });
+        }; });
+      }
+      $("#qrCancelEdit", dlg).onclick = resetForm;
+      $("#qrClose", dlg).onclick = function () { dlg.close(); };
+      $("#qrSave", dlg).onclick = function () {
+        var code = $("#qrCode", dlg).value.trim().toLowerCase().replace(/^-/, "");
+        var title = $("#qrTitle", dlg).value.trim(), content = $("#qrContent", dlg).value.trim();
+        if (!/^[a-z0-9][a-z0-9_-]{0,31}$/.test(code)) { toast("Mã gồm chữ không dấu, số, _ hoặc -; tối đa 32 ký tự", true); return; }
+        if (!title || !content) { toast("Hãy nhập tiêu đề và nội dung", true); return; }
+        var button = this; button.disabled = true;
+        api("/v1/inbox/" + S.ch + "/quick-replies" + (editing ? "/" + encodeURIComponent(editing) : ""), { method: editing ? "PUT" : "POST", body: { shortcut: code, title: title, content: content } }).then(function () {
+          resetForm(); return loadQuickReplies();
+        }).then(function () { renderList(); toast("Đã lưu tin nhắn nhanh"); }).catch(function (e) { toast(e.message, true); }).then(function () { button.disabled = false; });
+      };
+      dlg.addEventListener("close", function () { dlg.remove(); });
+      renderList(); dlg.showModal(); loadQuickReplies().then(renderList);
+    }
+    $("#ibxQuick").onclick = manageQuickReplies;
     function aiBadge(t) {
       if (t.aiMode === "off") return '<span title="Đã tắt AI cho hội thoại này">🚫</span>';
       if (t.pausedUntil && new Date(t.pausedUntil).getTime() > Date.now()) return '<span title="AI đang tạm dừng vì nhân viên vừa trả lời">⏸️</span>';
@@ -4216,7 +4308,7 @@ export const INDEX_HTML = `<!doctype html>
       }).catch(function (e) { toast(e.message, true); });
     }
     function openThread(t) {
-      S.cur = t; S.img = null; S.file = null; S.reply = null; renderImg(); renderReply();
+      S.cur = t; S.img = null; S.file = null; S.reply = null; hideQuickSuggestions(); renderImg(); renderReply();
       Array.prototype.forEach.call(document.querySelectorAll(".ibx-item"), function (n) { n.classList.remove("active"); });
       renderThreads(); renderHead();
       $("#ibxCompose").style.display = "";
@@ -4275,7 +4367,23 @@ export const INDEX_HTML = `<!doctype html>
       var items = (e.clipboardData && e.clipboardData.items) || [];
       for (var i = 0; i < items.length; i++) if (items[i].kind === "file" && items[i].type.indexOf("image/") === 0) { takeFile(items[i].getAsFile()); e.preventDefault(); return; }
     });
-    $("#ibxText").addEventListener("keydown", function (e) { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });
+    $("#ibxText").addEventListener("input", updateQuickSuggestions);
+    $("#ibxText").addEventListener("click", updateQuickSuggestions);
+    $("#ibxText").addEventListener("keydown", function (e) {
+      if (e.isComposing) return;
+      if (e.key === "Escape" && S.quickToken) { e.preventDefault(); hideQuickSuggestions(); return; }
+      if (S.quickMatches.length && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+        e.preventDefault(); S.quickIndex = (S.quickIndex + (e.key === "ArrowDown" ? 1 : -1) + S.quickMatches.length) % S.quickMatches.length;
+        Array.prototype.forEach.call($("#ibxQuickSuggestions").querySelectorAll("button"), function (button, i) { button.classList.toggle("active", i === S.quickIndex); });
+        return;
+      }
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        if (S.quickMatches.length) { chooseQuickReply(S.quickMatches[S.quickIndex]); return; }
+        if (S.quickToken) { toast("Không tìm thấy mã tin nhắn nhanh này", true); return; }
+        send();
+      }
+    });
     $("#ibxSend").onclick = send;
     function send() {
       if (!S.cur) return;
@@ -4292,7 +4400,7 @@ export const INDEX_HTML = `<!doctype html>
       var btn = $("#ibxSend"); btn.disabled = true;
       var tid = S.cur.threadId;
       api("/v1/inbox/" + S.ch + "/threads/" + encodeURIComponent(tid) + "/send", { method: "POST", body: body }).then(function () {
-        $("#ibxText").value = ""; S.img = null; S.file = null; S.reply = null; renderImg(); renderReply();
+        $("#ibxText").value = ""; hideQuickSuggestions(); S.img = null; S.file = null; S.reply = null; renderImg(); renderReply();
         // Tin mới tự về qua realtime; phòng khi mất kết nối realtime thì tải lại sau 2 giây
         setTimeout(function () { if (S.cur && S.cur.threadId === tid) api("/v1/inbox/" + S.ch + "/threads/" + encodeURIComponent(tid) + "/messages?limit=50").then(function (j) { if (S.cur && S.cur.threadId === tid && (j.messages || []).length !== S.msgs.length) { S.msgs = j.messages; renderMsgs(false); } }).catch(function () {}); }, 2000);
       }).catch(function (e) { toast(e.message, true); }).then(function () { btn.disabled = false; $("#ibxText").focus(); });
@@ -4326,6 +4434,7 @@ export const INDEX_HTML = `<!doctype html>
         if (S.cur && S.cur.threadId === d.thread.threadId) { if (!d.thread.tags || !d.thread.tags.length) d.thread.tags = S.cur.tags || []; S.cur = d.thread; renderHead(); }
       });
       es.addEventListener("inbox_tags", function (ev) { var d; try { d = JSON.parse(ev.data); } catch (e) { return; } if (d.channelId === S.ch || d.allChannels) loadTags(); });
+      es.addEventListener("inbox_quick_replies", function () { loadQuickReplies(); });
       es.addEventListener("inbox_thread_tags", function (ev) {
         var d; try { d = JSON.parse(ev.data); } catch (e) { return; }
         if (d.channelId !== S.ch) return;
@@ -4362,7 +4471,7 @@ export const INDEX_HTML = `<!doctype html>
     $("#ibxKind").onchange = function () { S.kind = this.value; loadThreads(); };
     $("#ibxTag").onchange = function () { S.tag = this.value; loadThreads(); };
     $("#ibxHidden").onchange = function () { S.hidden = this.value === "1"; S.cur = null; S.msgs = []; renderHead(); $("#ibxMsgs").innerHTML = ""; $("#ibxCompose").style.display = "none"; loadThreads(); };
-    $("#ibxCh").onchange = function () { S.ch = this.value; S.tag = ""; S.tags = []; S.hidden = false; $("#ibxHidden").value = "0"; S.cur = null; S.msgs = []; S.img = null; S.file = null; S.reply = null; renderImg(); renderReply(); renderStatus(); renderHead(); $("#ibxMsgs").innerHTML = ""; $("#ibxCompose").style.display = "none"; loadTags(); loadThreads(); };
+    $("#ibxCh").onchange = function () { S.ch = this.value; S.tag = ""; S.tags = []; S.hidden = false; $("#ibxHidden").value = "0"; S.cur = null; S.msgs = []; S.img = null; S.file = null; S.reply = null; hideQuickSuggestions(); renderImg(); renderReply(); renderStatus(); renderHead(); $("#ibxMsgs").innerHTML = ""; $("#ibxCompose").style.display = "none"; loadTags(); loadQuickReplies(); loadThreads(); };
     $("#ibxSync").onclick = function () {
       var b = this; b.disabled = true;
       api("/v1/inbox/" + S.ch + "/sync-contacts", { method: "POST", body: {} })
@@ -4493,7 +4602,7 @@ export const INDEX_HTML = `<!doctype html>
       S.ch = S.channels.some(function (c) { return c.id === saved; }) ? saved : S.channels[0].id;
       sel.value = S.ch;
       sel.addEventListener("change", function () { try { localStorage.setItem("penai_ibx_ch", S.ch); } catch (e) {} });
-      renderStatus(); loadTags(); loadThreads(); connectEs();
+      renderStatus(); loadTags(); loadQuickReplies(); loadThreads(); connectEs();
     }).catch(function (e) { wrap.innerHTML = '<div class="card err">' + esc(e.message) + "</div>"; });
   };
 

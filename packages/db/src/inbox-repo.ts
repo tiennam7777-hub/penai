@@ -49,6 +49,50 @@ export interface InboxThread {
 
 export interface InboxTag { id: string; name: string; color: string }
 
+export interface InboxQuickReply { id: string; shortcut: string; title: string; content: string }
+
+function mapQuickReply(row: Raw): InboxQuickReply {
+  return { id: String(row.id), shortcut: String(row.shortcut), title: String(row.title), content: String(row.content) };
+}
+
+export async function listInboxQuickReplies(db: Db, ctx: WorkspaceContext): Promise<InboxQuickReply[]> {
+  const res = await withWorkspace(db, ctx, (tx) => tx.execute(sql`
+    SELECT id, shortcut, title, content FROM inbox_quick_replies ORDER BY shortcut`));
+  return (res.rows as Raw[]).map(mapQuickReply);
+}
+
+export async function createInboxQuickReply(
+  db: Db, ctx: WorkspaceContext, shortcut: string, title: string, content: string,
+): Promise<InboxQuickReply | null> {
+  const res = await withWorkspace(db, ctx, (tx) => tx.execute(sql`
+    INSERT INTO inbox_quick_replies (workspace_id, shortcut, title, content)
+    SELECT ${ctx.workspaceId}, ${shortcut}, ${title}, ${content}
+    WHERE (SELECT count(*) FROM inbox_quick_replies WHERE workspace_id = ${ctx.workspaceId}) < 200
+    ON CONFLICT (workspace_id, shortcut) DO NOTHING
+    RETURNING id, shortcut, title, content`));
+  const row = res.rows[0] as Raw | undefined;
+  return row ? mapQuickReply(row) : null;
+}
+
+export async function updateInboxQuickReply(
+  db: Db, ctx: WorkspaceContext, id: string, shortcut: string, title: string, content: string,
+): Promise<InboxQuickReply | null> {
+  const res = await withWorkspace(db, ctx, (tx) => tx.execute(sql`
+    UPDATE inbox_quick_replies SET shortcut = ${shortcut}, title = ${title}, content = ${content}, updated_at = now()
+    WHERE id = ${id} AND workspace_id = ${ctx.workspaceId}
+      AND NOT EXISTS (SELECT 1 FROM inbox_quick_replies other
+        WHERE other.workspace_id = ${ctx.workspaceId} AND other.shortcut = ${shortcut} AND other.id <> ${id})
+    RETURNING id, shortcut, title, content`));
+  const row = res.rows[0] as Raw | undefined;
+  return row ? mapQuickReply(row) : null;
+}
+
+export async function deleteInboxQuickReply(db: Db, ctx: WorkspaceContext, id: string): Promise<boolean> {
+  const res = await withWorkspace(db, ctx, (tx) => tx.execute(sql`
+    DELETE FROM inbox_quick_replies WHERE id = ${id} AND workspace_id = ${ctx.workspaceId} RETURNING id`));
+  return res.rows.length > 0;
+}
+
 export async function listInboxTags(db: Db, ctx: WorkspaceContext): Promise<InboxTag[]> {
   const res = await withWorkspace(db, ctx, (tx) => tx.execute(sql`
     SELECT id, name, color FROM inbox_tags ORDER BY lower(name)`));

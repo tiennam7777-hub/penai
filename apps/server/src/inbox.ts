@@ -29,6 +29,10 @@ import {
   listInboxMessages,
   listInboxThreads,
   listInboxTags,
+  listInboxQuickReplies,
+  createInboxQuickReply,
+  updateInboxQuickReply,
+  deleteInboxQuickReply,
   createInboxTag,
   updateInboxTagColor,
   deleteInboxTag,
@@ -708,6 +712,11 @@ const InboxSettingsBody = z.object({
 
 const ReactBody = z.object({ reaction: z.enum(["heart", "like", "haha", "wow", "cry", "angry", "none"]) });
 const MessageStateBody = z.object({ action: z.enum(["recalled", "deleted"]) });
+const QuickReplyBody = z.object({
+  shortcut: z.string().trim().toLowerCase().regex(/^[a-z0-9][a-z0-9_-]{0,31}$/, "Mã chỉ gồm chữ thường, số, _ hoặc - (tối đa 32 ký tự)"),
+  title: z.string().trim().min(1).max(80),
+  content: z.string().trim().min(1).max(2000),
+});
 
 function sendError(reply: FastifyReply, err: unknown, channelId: string) {
   const e = err as Error & { code?: string };
@@ -818,6 +827,44 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
     const { channelId } = req.params as { channelId: string };
     if (!(await guard(req, reply, channelId))) return;
     return { tags: await listInboxTags(db, req.authCtx) };
+  });
+
+  app.get(`${base}/:channelId/quick-replies`, async (req, reply) => {
+    const { channelId } = req.params as { channelId: string };
+    if (!(await guard(req, reply, channelId))) return;
+    return { replies: await listInboxQuickReplies(db, req.authCtx) };
+  });
+
+  app.post(`${base}/:channelId/quick-replies`, async (req, reply) => {
+    const { channelId } = req.params as { channelId: string };
+    if (!(await guard(req, reply, channelId))) return;
+    const parsed = QuickReplyBody.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? "Tin nhắn nhanh không hợp lệ" });
+    const quickReply = await createInboxQuickReply(db, req.authCtx, parsed.data.shortcut, parsed.data.title, parsed.data.content);
+    if (!quickReply) return reply.code(409).send({ error: "Mã đã tồn tại hoặc đã đạt giới hạn 200 tin nhắn nhanh" });
+    broadcastWorkspace(req.authCtx.workspaceId, "inbox_quick_replies", {});
+    return { reply: quickReply };
+  });
+
+  app.put(`${base}/:channelId/quick-replies/:id`, async (req, reply) => {
+    const { channelId, id } = req.params as { channelId: string; id: string };
+    if (!(await guard(req, reply, channelId))) return;
+    if (!z.string().uuid().safeParse(id).success) return reply.code(400).send({ error: "Mã tin nhắn nhanh không hợp lệ" });
+    const parsed = QuickReplyBody.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? "Tin nhắn nhanh không hợp lệ" });
+    const quickReply = await updateInboxQuickReply(db, req.authCtx, id, parsed.data.shortcut, parsed.data.title, parsed.data.content);
+    if (!quickReply) return reply.code(409).send({ error: "Không tìm thấy tin nhắn nhanh hoặc mã đã tồn tại" });
+    broadcastWorkspace(req.authCtx.workspaceId, "inbox_quick_replies", {});
+    return { reply: quickReply };
+  });
+
+  app.delete(`${base}/:channelId/quick-replies/:id`, async (req, reply) => {
+    const { channelId, id } = req.params as { channelId: string; id: string };
+    if (!(await guard(req, reply, channelId))) return;
+    if (!z.string().uuid().safeParse(id).success) return reply.code(400).send({ error: "Mã tin nhắn nhanh không hợp lệ" });
+    if (!(await deleteInboxQuickReply(db, req.authCtx, id))) return reply.code(404).send({ error: "Không tìm thấy tin nhắn nhanh" });
+    broadcastWorkspace(req.authCtx.workspaceId, "inbox_quick_replies", {});
+    return { deleted: true };
   });
 
   app.post(`${base}/:channelId/tags`, async (req, reply) => {
