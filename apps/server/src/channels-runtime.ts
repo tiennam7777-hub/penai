@@ -835,10 +835,12 @@ export function makeInboundHandler(
         const mime = ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp"
           : ext === ".gif" ? "image/gif" : "image/jpeg";
         quotedPhotoDataUrl = `data:${mime};base64,${quotedBytes.toString("base64")}`;
-        const storedCount = quotedRow?.media?.stemCount;
-        quotedPhotoStemCount = typeof storedCount === "number" && storedCount >= 1 && storedCount <= 99
-          ? storedCount
-          : await stemCountForPhoto(numberedPhotoDir, safePath ?? quotedBytes);
+        if (agent.key === "nhan-vien-kinh-doanh-orchids-world") {
+          const storedCount = quotedRow?.media?.stemCount;
+          quotedPhotoStemCount = typeof storedCount === "number" && storedCount >= 1 && storedCount <= 99
+            ? storedCount
+            : await stemCountForPhoto(numberedPhotoDir, safePath ?? quotedBytes);
+        }
       }
       if (!quotedPhotoDataUrl) {
         return { kind: "reply", text: "Em chưa xác định được chính xác ảnh anh/chị đã chọn trong album. Anh/chị gửi lại riêng ảnh đó hoặc cho em biết ảnh số mấy nhé ạ." };

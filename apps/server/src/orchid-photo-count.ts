@@ -1,6 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { basename, extname, join, resolve, sep } from "node:path";
-import sharp from "sharp";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
 const CACHE_MS = 5 * 60_000;
@@ -9,6 +10,26 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 type KnownPhoto = { count: number; hash: bigint };
 const indexes = new Map<string, { builtAt: number; photos: KnownPhoto[] }>();
 const building = new Map<string, Promise<KnownPhoto[]>>();
+const hashScript = fileURLToPath(new URL("./orchid-photo-hash.py", import.meta.url));
+
+function runPython(mode: "hash" | "index", arg: string, input?: Buffer): Promise<string> {
+  return new Promise((resolveOutput, reject) => {
+    const child = spawn("python3", [hashScript, mode, arg], { stdio: ["pipe", "pipe", "pipe"] });
+    const output: Buffer[] = [];
+    const errors: Buffer[] = [];
+    const timer = setTimeout(() => child.kill(), mode === "index" ? 90_000 : 15_000);
+    child.stdout.on("data", (chunk: Buffer) => output.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => errors.push(chunk));
+    child.on("error", reject);
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolveOutput(Buffer.concat(output).toString("utf8").trim());
+      else reject(new Error(Buffer.concat(errors).toString("utf8").slice(0, 200) || `python exited ${code}`));
+    });
+    child.stdin.on("error", () => {});
+    child.stdin.end(input);
+  });
+}
 
 /** Chỉ nhận số cành ghi rõ trong tên file/thư mục, không lấy số giá hay mã hàng. */
 export function stemCountInName(value: string): number | null {
@@ -29,6 +50,14 @@ export function stemCountInPath(path: string): number | null {
 
 /** dHash chịu được nén JPEG và thay đổi kích thước nhẹ của Zalo. */
 export async function photoDifferenceHash(input: Buffer | string): Promise<bigint> {
+  try {
+    return BigInt(`0x${await runPython("hash", typeof input === "string" ? input : "-",
+      typeof input === "string" ? undefined : input)}`);
+  } catch {
+    // Local development on Windows may lack Pillow. Never import sharp at startup:
+    // its Linux binary requires a newer CPU than the production VPS has.
+  }
+  const { default: sharp } = await import("sharp");
   const pixels = await sharp(input).rotate().resize(9, 8, { fit: "fill" })
     .grayscale().removeAlpha().raw().toBuffer();
   let hash = 0n;
@@ -73,7 +102,14 @@ async function knownPhotos(sharedDir: string): Promise<KnownPhoto[]> {
   if (cached && Date.now() - cached.builtAt < CACHE_MS) return cached.photos;
   let pending = building.get(dir);
   if (!pending) {
-    pending = scanNumberedPhotos(dir).then((photos) => {
+    pending = (async () => {
+      try {
+        const rows = JSON.parse(await runPython("index", dir)) as Array<[number, string]>;
+        return rows.map(([count, hash]) => ({ count, hash: BigInt(`0x${hash}`) }));
+      } catch {
+        return scanNumberedPhotos(dir);
+      }
+    })().then((photos) => {
       indexes.set(dir, { builtAt: Date.now(), photos });
       return photos;
     }).finally(() => building.delete(dir));
