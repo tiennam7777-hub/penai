@@ -54,6 +54,7 @@ import { hasPersonalAddressMismatch, requiresPersonalAddressGuard } from "./pers
 import { isFreshCustomerRequest } from "./recall-policy.js";
 import { orchidHandoffContext } from "./orchid-handoff-context.js";
 import { editOrchidPhotoWithOpenAI } from "./orchid-photo-openai.js";
+import { canQueuePhotos, directPhotoPendingDir, isAuthorizedDirectPhotoSender, pendingPhotoCount, publishDirectPhotoBatch, withDirectPhotoLock } from "./orchid-photo-direct-batch.js";
 import { prepareZaloPhotoPaths } from "./outbound-photo-path.js";
 import { classifyConfirmedOrchidOrder, formatOrchidOrderDispatch, mayConfirmOrchidOrder, orchidOrderFingerprint } from "./orchid-order-dispatch.js";
 import { stemCountForPhoto } from "./orchid-photo-count.js";
@@ -566,6 +567,10 @@ export function makeInboundHandler(
     const silentPhoto = hasPhoto && !msg.text.trim();
     const photoEditOnlyGroup = msg.channelKind === "zalo_personal" &&
       msg.peerKind === "group" && channel.config["auto_edit_photo_group"] === msg.chatKey;
+    const photoEditDirect = isAuthorizedDirectPhotoSender({
+      channelKind: msg.channelKind, peerKind: msg.peerKind, senderId: msg.senderId,
+      chatKey: msg.chatKey, configuredSender: channel.config["auto_edit_photo_sender"],
+    });
     if (photoEditOnlyGroup && !hasPhoto) return { kind: "ignore" };
     const autoEditPhoto = photoEditOnlyGroup && hasPhoto;
 
@@ -667,6 +672,47 @@ export function makeInboundHandler(
       });
       await mapChannelSession(db, ctx, channel.id, msg.chatKey, s.id);
       sessionId = s.id;
+    }
+
+    // Hot 4 gửi ảnh riêng, rồi nhắn -sa để thay trọn bộ ảnh đang có.
+    // Chỉ UID đã cấu hình mới vào nhánh này; ảnh cũ được giữ nếu bất kỳ ảnh nào sửa lỗi.
+    if (photoEditDirect && (hasPhoto || msg.text.trim().toLowerCase() === "-sa")) {
+      const userKey = `${channel.kind}-${msg.senderId}`;
+      const userDir = resolve(join(rt.config.dataDir, ctx.workspaceId, "users", sanitizeUserKey(userKey)));
+      const pendingDir = directPhotoPendingDir(userDir);
+      return withDirectPhotoLock(`${channel.id}:${msg.senderId}`, async () => {
+        try {
+          const photos = (msg.media ?? []).filter((m) => m.kind === "photo" && m.dataUrl);
+          if (photos.length) {
+            const count = await pendingPhotoCount(pendingDir);
+            if (!canQueuePhotos(count, photos.length)) {
+              return { kind: "reply", text: "Mỗi lượt -sa nhận tối đa 20 ảnh. Hãy gửi lệnh -sa cho các ảnh đã có trước." };
+            }
+            const saved = await saveInboundImages(pendingDir, photos, msg.text);
+            if (saved.length !== photos.length) throw new Error("Chưa lưu đủ ảnh gốc; chưa cập nhật thư mục");
+            if (msg.text.trim().toLowerCase() !== "-sa") return { kind: "ignore" };
+          }
+          if (msg.text.trim().toLowerCase() !== "-sa") return { kind: "ignore" };
+          const agent = await getAgentById(db, ctx, channel.agentId);
+          if (!agent) throw new Error("Chưa tìm thấy Agent sửa ảnh");
+          const editor = rt.providers.get(agent.provider, ctx.workspaceId);
+          if (!(editor instanceof CodexProvider)) throw new Error("Agent sửa ảnh cần provider ChatGPT (codex)");
+          const published = await publishDirectPhotoBatch({
+            pendingDir,
+            workspaceDir: join(rt.config.dataDir, ctx.workspaceId),
+            agentPrompt: agent.systemPrompt,
+            editor,
+            carrierModel: agent.model,
+          });
+          await appendMessage(db, ctx, sessionId!, {
+            role: "user", content: { kind: "text", text: `[-sa: cập nhật ${published.count} ảnh trong shared/hinh-hoa-dang-co-42dbp]` },
+          }).catch(() => {});
+          return { kind: "reply", text: `Đã cập nhật ${published.count} ảnh trong shared/hinh-hoa-dang-co-42dbp.`, media: published.files };
+        } catch (error) {
+          logger.warn(`Không cập nhật được ảnh -sa ${channel.id}/${msg.senderId}: ${String(error)}`);
+          return { kind: "reply", text: `Chưa cập nhật thư mục ảnh: ${error instanceof Error ? error.message : "lỗi không xác định"}. Ảnh cũ vẫn được giữ; có thể gửi lại -sa.` };
+        }
+      });
     }
 
     // Ảnh không kèm lời nhắn chỉ được lưu làm ngữ cảnh cho lượt sau.

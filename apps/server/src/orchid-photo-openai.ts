@@ -77,6 +77,7 @@ export function editOrchidPhotoWithOpenAI(
   agentPrompt: string,
   editor: OrchidPhotoEditor,
   carrierModel: string,
+  backgroundBlur: "strong" | "moderate" = "strong",
 ): Promise<{ data: Buffer; mime: "image/jpeg" }> {
   const source = inputInfo(input);
   if (!source.width || !source.height || source.width * source.height > 24_000_000) {
@@ -86,7 +87,9 @@ export function editOrchidPhotoWithOpenAI(
   const size = ratio < 0.84 ? "1024x1536" : ratio > 1.2 ? "1536x1024" : "1024x1024";
   const task = queue.then(async () => {
     const result = await editor.generateImage({
-      prompt: `${agentPrompt.trim()}\n\n${REQUIRED_EDIT}`,
+      prompt: `${agentPrompt.trim()}\n\n${backgroundBlur === "moderate"
+        ? REQUIRED_EDIT.replace("smooth, strong, even background defocus", "smooth, moderate, natural background defocus")
+        : REQUIRED_EDIT}`,
       model: carrierModel,
       size,
       refImages: [`data:${source.mime};base64,${input.toString("base64")}`],
