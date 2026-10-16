@@ -20,6 +20,7 @@ export {
 export { httpFetchTool } from "./builtin/http-fetch.js";
 export { execTool, commandHeads } from "./builtin/exec.js";
 export { webSearchTool } from "./builtin/web-search.js";
+export { orchidShippingTool, calculateOrchidShipping } from "./builtin/orchid-shipping.js";
 export { memoryAddTool, memorySearchTool, memoryGetTool } from "./builtin/memory.js";
 export { skillSearchTool, useSkillTool, publishSkillTool, updateSkillTool } from "./builtin/skills.js";
 export {
@@ -65,6 +66,7 @@ import {
 import { httpFetchTool } from "./builtin/http-fetch.js";
 import { execTool } from "./builtin/exec.js";
 import { webSearchTool } from "./builtin/web-search.js";
+import { orchidShippingTool } from "./builtin/orchid-shipping.js";
 import { memoryAddTool, memorySearchTool, memoryGetTool } from "./builtin/memory.js";
 import { skillSearchTool, useSkillTool, publishSkillTool, updateSkillTool } from "./builtin/skills.js";
 import {
@@ -109,6 +111,7 @@ export function createDefaultToolRegistry(): ToolRegistry {
     .register(httpFetchTool)
     .register(execTool)
     .register(webSearchTool)
+    .register(orchidShippingTool)
     .register(memoryAddTool)
     .register(memorySearchTool)
     .register(memoryGetTool)
