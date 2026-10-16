@@ -25,8 +25,9 @@ describe("Orchids World shipping", () => {
   it("charges wholesale delivery inside 8 km and applies each minimum", () => {
     expect(quote("wholesale", 5, 1)).toMatchObject({ kind: "quote", feeVnd: 20_000 });
     expect(quote("wholesale", 5, 8)).toMatchObject({ kind: "quote", rawVnd: 64_000, feeVnd: 60_000 });
+    expect(quote("wholesale", 15, 24.3)).toMatchObject({ kind: "quote", rawVnd: 194_400, feeVnd: 190_000 });
     expect(quote("wholesale", 16, 2)).toMatchObject({ kind: "quote", feeVnd: 100_000 });
-    expect(quote("wholesale", 16, 14)).toMatchObject({ kind: "quote", rawVnd: 152_000, feeVnd: 150_000 });
+    expect(quote("wholesale", 16, 14)).toMatchObject({ kind: "quote", rawVnd: 132_000, feeVnd: 130_000 });
     expect(quote("wholesale", 36, 2)).toMatchObject({ kind: "quote", feeVnd: 250_000, vehicle: "xe bán tải" });
     expect(quote("wholesale", 36, 14)).toMatchObject({ kind: "quote", feeVnd: 350_000 });
   });

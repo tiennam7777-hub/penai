@@ -36,7 +36,7 @@ export function calculateOrchidShipping(input: OrchidShippingInput): OrchidShipp
     rawVnd = Math.max(distanceKm * 25_000, 250_000);
   } else if (stemCount >= 16) {
     vehicle = "xe máy";
-    rawVnd = Math.max(distanceKm * 8_000 + 40_000, 100_000);
+    rawVnd = Math.max(distanceKm * 8_000 + 20_000, 100_000);
   } else {
     vehicle = "xe máy";
     rawVnd = Math.max(distanceKm * 8_000, 20_000);
