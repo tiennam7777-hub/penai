@@ -1282,6 +1282,7 @@ export class ZaloPersonalChannel implements Channel {
           senderId,
           senderName: message.data.dName || senderId,
           text,
+          ...(msgId ? { messageId: msgId } : {}),
           sentAt: Number(message.data.ts) > 0 ? new Date(Number(message.data.ts)) : new Date(),
           peerKind,
           mentioned,

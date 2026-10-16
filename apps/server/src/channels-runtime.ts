@@ -56,7 +56,11 @@ import { orchidHandoffContext } from "./orchid-handoff-context.js";
 import { editOrchidPhotoWithOpenAI } from "./orchid-photo-openai.js";
 import { directPhotoPendingDir, isAuthorizedDirectPhotoSender, pendingPhotoCount, publishDirectPhotoBatch, withDirectPhotoLock } from "./orchid-photo-direct-batch.js";
 import { prepareZaloPhotoPaths } from "./outbound-photo-path.js";
-import { classifyConfirmedOrchidOrder, formatOrchidOrderDispatch, mayConfirmOrchidOrder, orchidOrderFingerprint } from "./orchid-order-dispatch.js";
+import {
+  classifyConfirmedOrchidOrder, classifyOrchidOrderCancellation, formatOrchidOrderCancellation,
+  formatOrchidOrderDispatch, mayCancelOrchidOrder, mayConfirmOrchidOrder,
+  orchidCancellationFingerprint, orchidOrderFingerprint,
+} from "./orchid-order-dispatch.js";
 import { stemCountForPhoto } from "./orchid-photo-count.js";
 
 /** Handler + channel theo channelId — cho webhook route (WhatsApp, Teams) dùng. */
@@ -1066,7 +1070,7 @@ export function makeInboundHandler(
     let dispatchContext = "";
     const orderGroupId = channel.config["orchid_order_dispatch_group"];
     if (agent.key === "nhan-vien-kinh-doanh-orchids-world" && channel.kind === "zalo_personal" &&
-        msg.peerKind === "direct" && mayConfirmOrchidOrder(msg.text) &&
+        msg.peerKind === "direct" && (mayConfirmOrchidOrder(msg.text) || mayCancelOrchidOrder(msg.text)) &&
         typeof orderGroupId === "string" && /^\d{1,30}$/.test(orderGroupId)) {
       const sourceThreadId = msg.chatKey.slice(msg.chatKey.indexOf(":") + 1);
       try {
@@ -1074,15 +1078,23 @@ export function makeInboundHandler(
         const limited = rt.gate
           ? gatedProvider(rt.gate, provider, { providerKey: agent.provider, priority: 0 })
           : provider;
-        const order = await classifyConfirmedOrchidOrder(limited, agent.model, handoffMessages,
-          { text: msg.text, senderName: msg.senderName ?? msg.senderId }, msg.sentAt ?? new Date());
-        if (order) {
+        const current = { text: msg.text, senderName: msg.senderName ?? msg.senderId };
+        const now = msg.sentAt ?? new Date();
+        const cancellation = await classifyOrchidOrderCancellation(limited, agent.model, handoffMessages, current, now);
+        const order = !cancellation && mayConfirmOrchidOrder(msg.text)
+          ? await classifyConfirmedOrchidOrder(limited, agent.model, handoffMessages, current, now) : null;
+        if (cancellation || order) {
           const thread = await getInboxThread(db, ctx, channel.id, sourceThreadId);
           const customer = thread?.profileName || thread?.contactAlias || thread?.name || msg.senderName || msg.senderId;
-          const dispatchText = formatOrchidOrderDispatch(order, customer);
+          const dispatchText = cancellation
+            ? formatOrchidOrderCancellation(cancellation, customer)
+            : formatOrchidOrderDispatch(order!, customer);
+          const fingerprint = cancellation
+            ? orchidCancellationFingerprint(msg.messageId ?? "", msg.text, now)
+            : orchidOrderFingerprint(order!);
           const claimId = await claimOrchidOrderDispatch(db, ctx, {
             channelId: channel.id, threadId: sourceThreadId,
-            fingerprint: orchidOrderFingerprint(order), targetThreadId: orderGroupId, message: dispatchText,
+            fingerprint, targetThreadId: orderGroupId, message: dispatchText,
           });
           if (claimId) {
             const runtime = channelHandlers.get(channel.id)?.channel;
@@ -1094,21 +1106,27 @@ export function makeInboundHandler(
               });
               if (!ids.length) throw new Error("Zalo không trả mã tin đã gửi");
               await finishOrchidOrderDispatch(db, ctx, claimId, ids[0] ?? null);
-              dispatchContext = "[HỆ THỐNG: Đã gửi thông báo đơn vào nhóm phân đơn cắm hoa thành công. Chỉ lúc này mới được nói với khách rằng đã báo các bạn làm hoa.]";
+              dispatchContext = cancellation
+                ? "[HỆ THỐNG: Đã báo nhóm phân đơn về yêu cầu hủy. Chưa xác nhận đơn đã được dừng; vẫn chỉ trả lời khách thật ngắn theo quy tắc hủy đơn.]"
+                : "[HỆ THỐNG: Đã gửi thông báo đơn vào nhóm phân đơn cắm hoa thành công. Chỉ lúc này mới được nói với khách rằng đã báo các bạn làm hoa.]";
             } catch (error) {
               await finishOrchidOrderDispatch(db, ctx, claimId, null, String(error)).catch(() => {});
-              logger.warn(`Không gửi được đơn sang nhóm phân đơn: ${String(error)}`);
-              dispatchContext = "[HỆ THỐNG: Chưa gửi được thông báo đơn vào nhóm phân đơn cắm hoa. Không được nói với khách rằng đã báo các bạn làm hoa; cần báo nhân viên xử lý.]";
+              logger.warn(`Không gửi được ${cancellation ? "yêu cầu hủy" : "đơn"} sang nhóm phân đơn: ${String(error)}`);
+              dispatchContext = cancellation
+                ? "[HỆ THỐNG: Chưa báo được nhóm phân đơn về yêu cầu hủy. Không nói với khách rằng đơn đã được dừng; cần nhân viên xử lý.]"
+                : "[HỆ THỐNG: Chưa gửi được thông báo đơn vào nhóm phân đơn cắm hoa. Không được nói với khách rằng đã báo các bạn làm hoa; cần báo nhân viên xử lý.]";
             }
           } else {
-            dispatchContext = "[HỆ THỐNG: Đơn này đã được ghi nhận để tránh gửi trùng. Không tự khẳng định đã báo nhóm lần nữa.]";
+            dispatchContext = cancellation
+              ? "[HỆ THỐNG: Yêu cầu hủy này đã được ghi nhận để tránh gửi nhóm trùng. Không nói đã dừng đơn.]"
+              : "[HỆ THỐNG: Đơn này đã được ghi nhận để tránh gửi trùng. Không tự khẳng định đã báo nhóm lần nữa.]";
           }
         }
       } catch (error) {
-        logger.warn(`Không kiểm tra được đơn chốt trên ${channel.name}: ${String(error)}`);
+        logger.warn(`Không kiểm tra được thay đổi đơn trên ${channel.name}: ${String(error)}`);
       }
     }
-    const userMessage = handoffContext
+    const userMessage = handoffContext || dispatchContext
       ? `${handoffContext}\n\n${dispatchContext ? `${dispatchContext}\n\n` : ""}[YÊU CẦU MỚI NHẤT CẦN TRẢ LỜI]\n${latestUserMessage}`
       : latestUserMessage;
     // Vision = ảnh lượt này + các ảnh gần đây của session (đọc lại từ đĩa) —

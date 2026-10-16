@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  classifyConfirmedOrchidOrder, formatOrchidOrderDispatch, mayConfirmOrchidOrder,
-  orchidOrderFingerprint, parseConfirmedOrchidOrder,
+  classifyConfirmedOrchidOrder, classifyOrchidOrderCancellation,
+  formatOrchidOrderCancellation, formatOrchidOrderDispatch,
+  mayCancelOrchidOrder, mayConfirmOrchidOrder, orchidCancellationFingerprint,
+  orchidOrderFingerprint, parseConfirmedOrchidOrder, parseOrchidOrderCancellation,
 } from "../src/orchid-order-dispatch.js";
 import type { Provider } from "@penai/providers";
 
@@ -41,5 +43,47 @@ describe("orchid order dispatch", () => {
     expect(result).toBeNull();
     expect(prompt).toContain("Khách (Tiến Nam): Ok e");
     expect(prompt).toContain("Tin khách mới nhất cần xét: Ok e");
+  });
+});
+
+describe("orchid cancellation dispatch", () => {
+  it("recognizes explicit and partial cancellation candidates", () => {
+    expect(mayCancelOrchidOrder("Chị hủy đơn này")).toBe(true);
+    expect(mayCancelOrchidOrder("Còn 1 chậu giao VOV thôi")).toBe(true);
+    expect(mayCancelOrchidOrder("Giá chậu này bao nhiêu?")).toBe(false);
+  });
+
+  it("forms one short group notice without claiming staff already stopped the order", () => {
+    const full = parseOrchidOrderCancellation('{"cancelled":true,"scope":"all","part":"","remaining":""}');
+    const partial = parseOrchidOrderCancellation('{"cancelled":true,"scope":"partial","part":"1 chậu","remaining":"1 chậu giao VOV"}');
+    expect(formatOrchidOrderCancellation(full!, "Chị Trang")).toBe(
+      "Đơn hàng Chị Trang: khách yêu cầu hủy toàn bộ đơn. Nhờ nhân viên kiểm tra và dừng đơn.",
+    );
+    expect(formatOrchidOrderCancellation(partial!, "Chị Trang")).toBe(
+      "Đơn hàng Chị Trang: khách yêu cầu hủy 1 chậu, giữ 1 chậu giao VOV. Nhờ nhân viên kiểm tra và dừng phần hủy.",
+    );
+    expect(parseOrchidOrderCancellation('{"cancelled":true,"scope":"partial","part":""}')).toBeNull();
+    expect(parseOrchidOrderCancellation('{"cancelled":false}')).toBeNull();
+  });
+
+  it("deduplicates the same Zalo message and excludes a second message", () => {
+    const now = new Date("2026-10-17T00:00:00Z");
+    const first = orchidCancellationFingerprint("zalo-1", "Hủy 1 chậu", now);
+    expect(first).toBe(orchidCancellationFingerprint("zalo-1", "Hủy 1 chậu", now));
+    expect(first).not.toBe(orchidCancellationFingerprint("zalo-2", "Hủy 1 chậu", now));
+    expect(first).not.toBe(orchidOrderFingerprint({ customer: "Trang", stems: 5, color: "vàng", pot: "chậu", price: null, delivery: "08:00 17/10/2026" }));
+  });
+
+  it("uses the latest customer request and its conversation context", async () => {
+    let prompt = "";
+    const provider = { chat: async (input: { messages: Array<{ content: string }> }) => {
+      prompt = input.messages[0]!.content;
+      return { stopReason: "end", toolCalls: [], content: '{"cancelled":true,"scope":"partial","part":"1 chậu","remaining":"1 chậu giao VOV"}' };
+    } } as unknown as Provider;
+    const result = await classifyOrchidOrderCancellation(provider, "test", [],
+      { text: "Còn 1 chậu giao VOV thôi", senderName: "Chị Trang" }, new Date("2026-10-17T00:00:00Z"));
+    expect(result?.scope).toBe("partial");
+    expect(prompt).toContain("Khách (Chị Trang): Còn 1 chậu giao VOV thôi");
+    expect(prompt).toContain("Tin khách mới nhất cần xét: Còn 1 chậu giao VOV thôi");
   });
 });

@@ -22,6 +22,8 @@ export interface InboundMessage {
   senderId: string;
   senderName?: string;
   text: string;
+  /** Mã tin gốc trên nền tảng, dùng để tránh thông báo đơn trùng khi tin dội lại. */
+  messageId?: string;
   /** Thời điểm tin gốc trên nền tảng, dùng để không mở lại AI bằng tin cũ trước lúc thu hồi. */
   sentAt?: Date;
   /** direct | group */
