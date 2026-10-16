@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { canQueuePhotos, isAuthorizedDirectPhotoSender, publishDirectPhotoBatch, withDirectPhotoLock } from "../src/orchid-photo-direct-batch.js";
+import { isAuthorizedDirectPhotoSender, publishDirectPhotoBatch, withDirectPhotoLock } from "../src/orchid-photo-direct-batch.js";
 
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a3WQAAAAASUVORK5CYII=", "base64");
 const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(128)]);
@@ -17,7 +17,7 @@ async function fixture(images = 1) {
   await mkdir(target, { recursive: true });
   await mkdir(pendingDir, { recursive: true });
   await writeFile(join(target, "old.jpg"), "old");
-  for (let i = 0; i < images; i++) await writeFile(join(pendingDir, `${i}.png`), png);
+  for (let i = 0; i < images; i++) await writeFile(join(pendingDir, `${i}.png`), Buffer.concat([png, Buffer.from([i])]));
   return { workspaceDir, target, pendingDir };
 }
 
@@ -54,9 +54,30 @@ describe("Hot 4 -sa photo batch", () => {
     expect(await readdir(f.pendingDir)).toHaveLength(2);
   });
 
-  it("limits each batch and serializes same-sender requests", async () => {
-    expect(canQueuePhotos(19, 1)).toBe(true);
-    expect(canQueuePhotos(19, 2)).toBe(false);
+  it("processes every queued photo when more than 20 arrive", async () => {
+    const f = await fixture(21);
+    let edits = 0;
+    const result = await publishDirectPhotoBatch({ ...f, agentPrompt: "sáng tự nhiên", carrierModel: "gpt-6-sol",
+      editor: { async generateImage() { edits++; return { data: jpeg, mime: "image/jpeg" }; } },
+    });
+    expect(edits).toBe(21);
+    expect(result.count).toBe(21);
+    expect(await readdir(f.target)).toHaveLength(21);
+  });
+
+  it("edits repeated copies of the same photo once", async () => {
+    const f = await fixture(2);
+    await writeFile(join(f.pendingDir, "1.png"), await readFile(join(f.pendingDir, "0.png")));
+    let edits = 0;
+    const result = await publishDirectPhotoBatch({ ...f, agentPrompt: "sáng tự nhiên", carrierModel: "gpt-6-sol",
+      editor: { async generateImage() { edits++; return { data: jpeg, mime: "image/jpeg" }; } },
+    });
+    expect(edits).toBe(1);
+    expect(result.count).toBe(1);
+    expect(await readdir(f.target)).toEqual(["anh-01.jpg"]);
+  });
+
+  it("serializes same-sender requests", async () => {
     const order: number[] = [];
     await Promise.all([
       withDirectPhotoLock("hot4", async () => { order.push(1); await new Promise((resolve) => setTimeout(resolve, 10)); order.push(2); }),

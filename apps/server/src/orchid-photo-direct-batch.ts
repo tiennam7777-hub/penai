@@ -1,10 +1,9 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { editOrchidPhotoWithOpenAI, type OrchidPhotoEditor } from "./orchid-photo-openai.js";
 
 const TARGET_NAME = "hinh-hoa-dang-co-42dbp";
-const MAX_PENDING = 20;
 const pendingLocks = new Map<string, Promise<void>>();
 
 export function isAuthorizedDirectPhotoSender(input: {
@@ -46,10 +45,6 @@ export async function pendingPhotoCount(pendingDir: string): Promise<number> {
   })).filter((entry) => entry.isFile()).length;
 }
 
-export function canQueuePhotos(current: number, incoming: number): boolean {
-  return incoming > 0 && current + incoming <= MAX_PENDING;
-}
-
 /** Edit every queued image before touching the live shared folder. Keep the prior folder as a backup. */
 export async function publishDirectPhotoBatch(input: {
   pendingDir: string;
@@ -63,7 +58,6 @@ export async function publishDirectPhotoBatch(input: {
     throw error;
   })).filter((entry) => entry.isFile()).map((entry) => entry.name);
   if (!names.length) throw new Error("Chưa có ảnh nào được gửi trước lệnh -sa");
-  if (names.length > MAX_PENDING) throw new Error(`Chỉ xử lý tối đa ${MAX_PENDING} ảnh mỗi lượt`);
   const ordered = await Promise.all(names.map(async (name) => ({
     name,
     mtime: (await stat(join(input.pendingDir, name))).mtimeMs,
@@ -78,12 +72,19 @@ export async function publishDirectPhotoBatch(input: {
   await mkdir(stageDir, { recursive: false });
   let oldMoved = false;
   try {
-    for (let i = 0; i < ordered.length; i++) {
-      const source = join(input.pendingDir, ordered[i]!.name);
+    const seen = new Set<string>();
+    let editedCount = 0;
+    for (const item of ordered) {
+      const source = join(input.pendingDir, item.name);
+      const original = await readFile(source);
+      const digest = createHash("sha256").update(original).digest("hex");
+      if (seen.has(digest)) continue;
+      seen.add(digest);
       const edited = await editOrchidPhotoWithOpenAI(
-        await readFile(source), input.agentPrompt, input.editor, input.carrierModel, "moderate",
+        original, input.agentPrompt, input.editor, input.carrierModel, "moderate",
       );
-      await writeFile(join(stageDir, `anh-${String(i + 1).padStart(2, "0")}.jpg`), edited.data);
+      editedCount++;
+      await writeFile(join(stageDir, `anh-${String(editedCount).padStart(2, "0")}.jpg`), edited.data);
     }
     await mkdir(join(input.workspaceDir, "photo-edit-backups"), { recursive: true });
     await rename(targetDir, backupDir);
@@ -97,8 +98,8 @@ export async function publishDirectPhotoBatch(input: {
     }
     await rm(input.pendingDir, { recursive: true, force: true }).catch(() => {});
     return {
-      count: ordered.length,
-      files: ordered.map((_, i) => join(targetDir, `anh-${String(i + 1).padStart(2, "0")}.jpg`)),
+      count: editedCount,
+      files: Array.from({ length: editedCount }, (_, i) => join(targetDir, `anh-${String(i + 1).padStart(2, "0")}.jpg`)),
       backupDir,
     };
   } catch (error) {
