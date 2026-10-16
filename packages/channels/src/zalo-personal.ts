@@ -31,6 +31,13 @@ const MEDIA_MAX_BYTES = 10 * 1024 * 1024;
 const INBOX_FILE_MAX_BYTES = 50 * 1024 * 1024;
 const QR_MAX_EXPIRED_RETRIES = 3;
 const QR_MAX_DECLINED_RETRIES = 2;
+const AI_REPLY_DELAY_SECONDS = new Set([0, 15, 20, 25, 30, 35, 40]);
+
+/** Legacy channels have no delay; reject malformed stored values safely. */
+export function parseAiReplyDelaySeconds(config: Record<string, unknown>): number {
+  const value = config["ai_reply_delay_seconds"];
+  return typeof value === "number" && AI_REPLY_DELAY_SECONDS.has(value) ? value : 0;
+}
 
 type QrState = "waiting" | "scanned" | "success" | "failed";
 
@@ -468,6 +475,7 @@ export class ZaloPersonalChannel implements Channel {
   private contactSync: Promise<{ friends: number; groups: number }> | null = null;
   /** Tự thả cảm xúc khi khách nhắn (null = tắt). Cập nhật nóng qua setAutoReaction. */
   private autoReaction: "heart" | "like" | null;
+  private aiReplyDelayMs: number;
   /** Hẹn giờ tự thả theo hội thoại — khách nhắn dồn thì chỉ thả tin cuối. */
   private autoReactTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private undoPending = new Map<string, Promise<void>>();
@@ -491,6 +499,7 @@ export class ZaloPersonalChannel implements Channel {
     this.demoThreadSet = new Set(parseZaloDemoThreads(deps.config));
     this.openDirect = deps.requirePairing === false;
     this.autoReaction = parseAutoReaction(deps.config);
+    this.aiReplyDelayMs = parseAiReplyDelaySeconds(deps.config) * 1_000;
     this.runner = new BoundedRunner(20, (error) => deps.onError?.(error));
   }
 
@@ -1149,6 +1158,13 @@ export class ZaloPersonalChannel implements Channel {
 
   private async handleMessage(message: Message): Promise<void> {
     if (!this.api) return;
+    const replyApi = this.api;
+    const replyDueAt = Date.now() + this.aiReplyDelayMs;
+    const waitForAiReply = async (): Promise<boolean> => {
+      const remaining = replyDueAt - Date.now();
+      if (remaining > 0) await new Promise<void>((resolve) => setTimeout(resolve, remaining));
+      return this.api === replyApi;
+    };
     if (isZaloCallSignal(message.data.content, String(message.data.msgType ?? ""))) return;
     const msgId = String(message.data.msgId ?? "");
     if (msgId && this.seenMessageIds.has(msgId)) return;
@@ -1246,8 +1262,8 @@ export class ZaloPersonalChannel implements Channel {
         const key = replyKey(blockText);
         if (!key) return;
         if (blockReplies.has(key)) return blockReplies.get(key);
-        const sent = this.sendText(threadId, threadType, blockText)
-          .then(() => true)
+        const sent = waitForAiReply()
+          .then((ready) => ready ? this.sendText(threadId, threadType, blockText).then(() => true) : false)
           .catch((error) => {
             this.deps.onError?.(error as Error);
             return false;
@@ -1284,6 +1300,7 @@ export class ZaloPersonalChannel implements Channel {
           `zalo.pairing_silent: ${chatKey} chưa duyệt — đã cấp mã chờ admin, không nhắn lại`,
         );
       } else if (result.kind === "reply") {
+        if (!(await waitForAiReply())) return;
         if (!photoEditOnlyGroup && result.text.trim()) {
           const prior = blockReplies.get(replyKey(result.text));
           if (!prior || !(await prior)) await this.sendText(threadId, threadType, result.text);
