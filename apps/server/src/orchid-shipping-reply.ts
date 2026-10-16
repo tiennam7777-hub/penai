@@ -15,6 +15,20 @@ function knownRoute(text: string): { destination: string; distanceKm: number } |
   return null;
 }
 
+function latestDeliveryText(messages: InboxMessageRow[]): string {
+  const reset = messages.findLastIndex((message) => message.direction === "in" && /^\s*\/(?:new|reset)\s*$/i.test(message.text));
+  const recent = messages.slice(reset + 1).filter((message) => message.direction === "in").slice(-8);
+  return recent.map((message) => message.text).reverse().find((text) => {
+    const normalized = text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    return /(?:\bgiao\b|\bden\b|\btoi\b|\btai\b|dia\s*chi)/.test(normalized);
+  }) ?? "";
+}
+
+export function orchidDeliveryPriorityContext(messages: InboxMessageRow[]): string {
+  const latest = latestDeliveryText(messages);
+  return latest ? `[ĐIỂM GIAO KHÁCH VỪA NÓI: ${latest.slice(0, 300)}. Nếu khác địa chỉ trong tin cũ, bỏ địa chỉ và phí ship cũ; chỉ tính theo điểm giao mới.]` : "";
+}
+
 /** Lấy điểm giao và số cành trong yêu cầu hiện tại, kể cả khi vừa /new. */
 export function knownOrchidShippingHint(
   messages: InboxMessageRow[],
@@ -27,7 +41,8 @@ export function knownOrchidShippingHint(
   if (!recent.length || !/(?:\bgia\b|bao\s*nhieu|\bphi\b|canh)/i.test(
     last.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase(),
   )) return null;
-  const route = knownRoute(recent.map((message) => message.text).join("\n"));
+  // Không ghép mọi địa chỉ trong lịch sử: khách có thể vừa đổi điểm giao.
+  const route = knownRoute(latestDeliveryText(messages));
   if (!route) return null;
   const stemText = recent.map((message) => message.text).reverse().find((text) => /\d+\s*(?:cành|canh|cây|cay)/i.test(text)) ?? "";
   const stems = Number(stemText.match(/(\d+)\s*(?:cành|canh|cây|cay)/i)?.[1]);

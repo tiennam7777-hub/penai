@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { InboxMessageRow } from "@penai/db";
-import { completeOrchidShippingReply, knownOrchidShippingHint, orchidShippingHintContext } from "../src/orchid-shipping-reply.js";
+import { completeOrchidShippingReply, knownOrchidShippingHint, orchidShippingHintContext, orchidDeliveryPriorityContext } from "../src/orchid-shipping-reply.js";
 
 const inbound = (text: string) => ({ direction: "in", text }) as InboxMessageRow;
 
@@ -27,5 +27,14 @@ describe("orchid quote with shipping", () => {
     expect(hint?.feeVnd).toBe(100_000);
     expect(completeOrchidShippingReply("Chậu 10 cành giá 2.000.000đ. Phí ship 100.000đ.", hint))
       .toBe("Chậu 10 cành giá 2.000.000đ. Phí ship 100.000đ.");
+  });
+
+  it("drops the old hospital route when the customer gives a new delivery address", () => {
+    const messages = [
+      inbound("10 cành giao Bệnh viện Xuyên Á trên QL22"),
+      inbound("Cho em 1 chậu 10 cành tím mai giao 1002 Kha Vạn Cân. Giá bao nhiêu"),
+    ];
+    expect(knownOrchidShippingHint(messages, "retail")).toBeNull();
+    expect(orchidDeliveryPriorityContext(messages)).toContain("1002 Kha Vạn Cân");
   });
 });

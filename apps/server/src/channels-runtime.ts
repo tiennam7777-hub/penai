@@ -62,7 +62,8 @@ import {
   orchidCancellationFingerprint, orchidOrderFingerprint,
 } from "./orchid-order-dispatch.js";
 import { stemCountForPhoto } from "./orchid-photo-count.js";
-import { knownOrchidShippingHint, orchidShippingHintContext, completeOrchidShippingReply } from "./orchid-shipping-reply.js";
+import { knownOrchidShippingHint, orchidShippingHintContext, completeOrchidShippingReply, orchidDeliveryPriorityContext } from "./orchid-shipping-reply.js";
+import { orchidCompanyPaymentContext } from "./orchid-payment-context.js";
 
 /** Handler + channel theo channelId — cho webhook route (WhatsApp, Teams) dùng. */
 export const channelHandlers = new Map<
@@ -1068,6 +1069,10 @@ export function makeInboundHandler(
         })
       : [];
     const handoffContext = orchidHandoffContext(handoffMessages);
+    const paymentContext = agent.key === "nhan-vien-kinh-doanh-orchids-world" && msg.peerKind === "direct"
+      ? orchidCompanyPaymentContext(handoffMessages) : "";
+    const deliveryContext = agent.key === "nhan-vien-kinh-doanh-orchids-world" && msg.peerKind === "direct"
+      ? orchidDeliveryPriorityContext(handoffMessages) : "";
     const shippingHint = agent.key === "nhan-vien-kinh-doanh-orchids-world" && msg.peerKind === "direct"
       ? knownOrchidShippingHint(handoffMessages,
           personData?.tags.some((tag) => /(?:khách\s*)?sỉ/i.test(tag.name)) ? "wholesale" : "retail")
@@ -1132,8 +1137,8 @@ export function makeInboundHandler(
         logger.warn(`Không kiểm tra được thay đổi đơn trên ${channel.name}: ${String(error)}`);
       }
     }
-    const userMessage = handoffContext || dispatchContext || shippingContext
-      ? `${handoffContext}\n\n${dispatchContext ? `${dispatchContext}\n\n` : ""}${shippingContext ? `${shippingContext}\n\n` : ""}[YÊU CẦU MỚI NHẤT CẦN TRẢ LỜI]\n${latestUserMessage}`
+    const userMessage = handoffContext || dispatchContext || shippingContext || deliveryContext || paymentContext
+      ? `${handoffContext}\n\n${dispatchContext ? `${dispatchContext}\n\n` : ""}${deliveryContext ? `${deliveryContext}\n\n` : ""}${shippingContext ? `${shippingContext}\n\n` : ""}${paymentContext ? `${paymentContext}\n\n` : ""}[YÊU CẦU MỚI NHẤT CẦN TRẢ LỜI]\n${latestUserMessage}`
       : latestUserMessage;
     // Vision = ảnh lượt này + các ảnh gần đây của session (đọc lại từ đĩa) —
     // người dùng gửi ảnh trước, nhắn yêu cầu sau thì model vẫn "nhìn thấy" ảnh.
