@@ -88,7 +88,7 @@ export interface RunHooks {
   onStatus?: (status: AgentStatus) => void;
   onTextDelta?: (delta: string) => void;
   /** Câu dẫn trước khi chạy tool ("Để em kiểm tra...") — bubble riêng. */
-  onBlockReply?: (text: string) => void;
+  onBlockReply?: (text: string) => void | Promise<unknown>;
 }
 
 /** Kết quả xử lý 1 tin nhắn inbound, do runtime (server) trả về. */

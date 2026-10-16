@@ -693,6 +693,9 @@ export function makeInboundHandler(
             if (msg.text.trim().toLowerCase() !== "-sa") return { kind: "ignore" };
           }
           if (msg.text.trim().toLowerCase() !== "-sa") return { kind: "ignore" };
+          if (await pendingPhotoCount(pendingDir) > 0) {
+            await hooks?.onBlockReply?.("dạ e đã rõ, e sẽ sửa ảnh sáng đẹp và cập nhập ngay");
+          }
           const agent = await getAgentById(db, ctx, channel.agentId);
           if (!agent) throw new Error("Chưa tìm thấy Agent sửa ảnh");
           const editor = rt.providers.get(agent.provider, ctx.workspaceId);

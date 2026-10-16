@@ -1244,13 +1244,16 @@ export class ZaloPersonalChannel implements Channel {
       onBlockReply: (blockText: string) => {
         if (silentPhoto || photoEditOnlyGroup) return;
         const key = replyKey(blockText);
-        if (!key || blockReplies.has(key)) return;
-        blockReplies.set(key, this.sendText(threadId, threadType, blockText)
+        if (!key) return;
+        if (blockReplies.has(key)) return blockReplies.get(key);
+        const sent = this.sendText(threadId, threadType, blockText)
           .then(() => true)
           .catch((error) => {
             this.deps.onError?.(error as Error);
             return false;
-          }));
+          });
+        blockReplies.set(key, sent);
+        return sent;
       },
     };
 
