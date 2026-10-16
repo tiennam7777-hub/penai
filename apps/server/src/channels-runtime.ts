@@ -62,6 +62,7 @@ import {
   orchidCancellationFingerprint, orchidOrderFingerprint,
 } from "./orchid-order-dispatch.js";
 import { stemCountForPhoto } from "./orchid-photo-count.js";
+import { knownOrchidShippingHint, orchidShippingHintContext, completeOrchidShippingReply } from "./orchid-shipping-reply.js";
 
 /** Handler + channel theo channelId — cho webhook route (WhatsApp, Teams) dùng. */
 export const channelHandlers = new Map<
@@ -1067,6 +1068,11 @@ export function makeInboundHandler(
         })
       : [];
     const handoffContext = orchidHandoffContext(handoffMessages);
+    const shippingHint = agent.key === "nhan-vien-kinh-doanh-orchids-world" && msg.peerKind === "direct"
+      ? knownOrchidShippingHint(handoffMessages,
+          personData?.tags.some((tag) => /(?:khách\s*)?sỉ/i.test(tag.name)) ? "wholesale" : "retail")
+      : null;
+    const shippingContext = orchidShippingHintContext(shippingHint);
     let dispatchContext = "";
     const orderGroupId = channel.config["orchid_order_dispatch_group"];
     if (agent.key === "nhan-vien-kinh-doanh-orchids-world" && channel.kind === "zalo_personal" &&
@@ -1126,8 +1132,8 @@ export function makeInboundHandler(
         logger.warn(`Không kiểm tra được thay đổi đơn trên ${channel.name}: ${String(error)}`);
       }
     }
-    const userMessage = handoffContext || dispatchContext
-      ? `${handoffContext}\n\n${dispatchContext ? `${dispatchContext}\n\n` : ""}[YÊU CẦU MỚI NHẤT CẦN TRẢ LỜI]\n${latestUserMessage}`
+    const userMessage = handoffContext || dispatchContext || shippingContext
+      ? `${handoffContext}\n\n${dispatchContext ? `${dispatchContext}\n\n` : ""}${shippingContext ? `${shippingContext}\n\n` : ""}[YÊU CẦU MỚI NHẤT CẦN TRẢ LỜI]\n${latestUserMessage}`
       : latestUserMessage;
     // Vision = ảnh lượt này + các ảnh gần đây của session (đọc lại từ đĩa) —
     // người dùng gửi ảnh trước, nhắn yêu cầu sau thì model vẫn "nhìn thấy" ảnh.
@@ -1266,7 +1272,7 @@ export function makeInboundHandler(
     }
 
     // model có thể lặp lại marker trong câu trả lời — gỡ đi
-    const cleanText = finalText.replace(MEDIA_MARKER_RE, "").trim();
+    const cleanText = completeOrchidShippingReply(finalText.replace(MEDIA_MARKER_RE, "").trim(), shippingHint);
     const outgoingMedia = channel.kind === "zalo_personal"
       ? await prepareZaloPhotoPaths(mediaOut, userDir)
       : mediaOut;
