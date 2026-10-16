@@ -3127,6 +3127,7 @@ export const INDEX_HTML = `<!doctype html>
       '<div class="row">' +
       '<input id="ctQ" placeholder="🔍 Tìm theo tên, UID/ID hoặc SĐT">' +
       '<select id="ctCh"><option value="">Mọi kênh</option></select>' +
+      '<select id="ctPair" aria-label="Lọc theo trạng thái duyệt"><option value="">Mọi trạng thái duyệt</option><option value="da_duyet">Đã duyệt</option><option value="chua_duyet">Chưa duyệt (gồm Chờ duyệt)</option></select>' +
       '<select id="ctTag"><option value="">Mọi nhãn</option></select>' +
       (canManageContacts() ? '<button id="ctTags" class="ghost">🏷️ Quản lý nhãn</button>' : "") +
       (state.me && (state.me.role === "ws_admin" || state.me.role === "operator" || state.me.role === "moderator") ? '<button id="ctExport" class="ghost" title="Tải file Excel toàn bộ thông tin contact của kênh đang chọn (kênh Zalo cá nhân kèm danh bạ Zalo đầy đủ)">⬇ Xuất Excel</button>' : "") +
@@ -3135,9 +3136,11 @@ export const INDEX_HTML = `<!doctype html>
     var all = [];
     function render() {
       var box = $("#ctList"); if (!box) return;
-      var q = $("#ctQ").value.trim().toLowerCase(), ch = $("#ctCh").value, tg = $("#ctTag").value;
+      var q = $("#ctQ").value.trim().toLowerCase(), ch = $("#ctCh").value, pair = $("#ctPair").value, tg = $("#ctTag").value;
       var rows = all.filter(function (r) {
         if (ch && r.channelId !== ch) return false;
+        if (pair === "da_duyet" && r.pairing !== "da_duyet") return false;
+        if (pair === "chua_duyet" && r.pairing !== "chua_duyet" && r.pairing !== "cho_duyet") return false;
         if (tg && !r.tags.some(function (t) { return t.id === tg; })) return false;
         if (!q) return true;
         return [r.inboxName, r.profileName, r.displayName, r.externalId, r.zaloPhone].some(function (v) { return !!v && String(v).toLowerCase().indexOf(q) >= 0; });
@@ -3190,6 +3193,7 @@ export const INDEX_HTML = `<!doctype html>
     }
     $("#ctQ").addEventListener("input", render);
     $("#ctCh").onchange = render;
+    $("#ctPair").onchange = render;
     $("#ctTag").onchange = render;
     if ($("#ctTags")) $("#ctTags").onclick = function () { openTagManager(load); };
     if ($("#ctExport")) $("#ctExport").onclick = function () {
