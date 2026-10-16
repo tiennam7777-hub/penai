@@ -64,6 +64,7 @@ import {
 import { stemCountForPhoto } from "./orchid-photo-count.js";
 import { knownOrchidShippingHint, orchidShippingHintContext, completeOrchidShippingReply, orchidDeliveryPriorityContext } from "./orchid-shipping-reply.js";
 import { orchidCompanyPaymentContext } from "./orchid-payment-context.js";
+import { requestedOrchidYellowSamples, orchidYellowSamplePath } from "./orchid-yellow-samples.js";
 
 /** Handler + channel theo channelId — cho webhook route (WhatsApp, Teams) dùng. */
 export const channelHandlers = new Map<
@@ -829,7 +830,11 @@ export function makeInboundHandler(
             ? gatedProvider(rt.gate, provider, { providerKey: agent.provider, priority: 0 })
             : provider;
           const history = await loadMessages(db, ctx, sessionId!);
-          const decision = await classifyOrchidSalesScope(limited, agent.model, {
+          const recentCustomerTexts = history.filter((m) => m.role === "user" && m.content.kind === "text")
+            .map((m) => m.content.kind === "text" ? m.content.text : "");
+          const yellowSamples = agent.key === "nhan-vien-kinh-doanh-orchids-world"
+            ? requestedOrchidYellowSamples(scopeText, recentCustomerTexts) : [];
+          const decision = yellowSamples.length ? "allow" : await classifyOrchidSalesScope(limited, agent.model, {
             text: scopeText,
             images: scopeImages,
             recentMessages: history,
@@ -1069,6 +1074,9 @@ export function makeInboundHandler(
         })
       : [];
     const handoffContext = orchidHandoffContext(handoffMessages);
+    const requestedYellowSamples = agent.key === "nhan-vien-kinh-doanh-orchids-world" && msg.peerKind === "direct"
+      ? requestedOrchidYellowSamples(msg.text, handoffMessages.filter((m) => m.direction === "in").map((m) => m.text))
+      : [];
     const paymentContext = agent.key === "nhan-vien-kinh-doanh-orchids-world" && msg.peerKind === "direct"
       ? orchidCompanyPaymentContext(handoffMessages) : "";
     const deliveryContext = agent.key === "nhan-vien-kinh-doanh-orchids-world" && msg.peerKind === "direct"
@@ -1274,6 +1282,14 @@ export function makeInboundHandler(
       for (const p of await newDeliverables(userDir, filesBefore)) {
         if (!mediaOut.includes(p)) mediaOut.push(p);
       }
+    }
+
+    // Yêu cầu so sánh lan vàng phải có ảnh thật, kể cả khi model chỉ trả chữ.
+    for (const kind of requestedYellowSamples) {
+      const path = orchidYellowSamplePath(join(wsDir, "shared"), kind);
+      const info = await stat(path).catch(() => null);
+      if (info?.isFile() && info.size <= 45 * 1024 * 1024 && !mediaOut.includes(path)) mediaOut.push(path);
+      else if (!info?.isFile()) logger.warn(`Thiếu ảnh mẫu lan vàng: ${path}`);
     }
 
     // model có thể lặp lại marker trong câu trả lời — gỡ đi
