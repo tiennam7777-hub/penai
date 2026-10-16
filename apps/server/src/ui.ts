@@ -1424,7 +1424,7 @@ export const INDEX_HTML = `<!doctype html>
       '<div class="row" style="margin-top:10px"><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="cAgentReply"' + (isEdit && (existing.config || {}).agent_reply === false ? "" : " checked") + "> Agent tự trả lời</label>" +
       '<span class="muted" style="font-size:.78rem">Bỏ tick: kênh vẫn kết nối và lưu tin (Inbox), AI không trả lời; lịch hẹn vẫn gửi</span></div>' +
       '<div id="cReplyDelayWrap" style="margin-top:10px"><label>AI chờ trước khi trả lời khách</label><select id="cReplyDelay" style="width:220px">' +
-      [0, 15, 20, 25, 30, 35, 40].map(function (s) { return '<option value="' + s + '"' + (isEdit && Number((existing.config || {}).ai_reply_delay_seconds || 0) === s ? ' selected' : '') + '>' + (s ? s + ' giây' : 'Gửi ngay') + '</option>'; }).join('') +
+      [0, 5, 10, 15, 20, 25, 30, 35, 40].map(function (s) { return '<option value="' + s + '"' + (isEdit && Number((existing.config || {}).ai_reply_delay_seconds || 0) === s ? ' selected' : '') + '>' + (s ? s + ' giây' : 'Gửi ngay') + '</option>'; }).join('') +
       '</select><div class="muted" style="font-size:.78rem;margin-top:4px">Tính từ lúc khách nhắn; chỉ trì hoãn tin AI trên kênh này. Tin nhân viên gửi thủ công không bị trì hoãn.</div></div>' +
       '<div class="row" style="margin-top:6px"><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="cPair"' + (isEdit ? (existing.requirePairing ? " checked" : "") : " checked") + "> Yêu cầu pairing</label>" +
       '<span class="muted" style="font-size:.78rem">Người lạ nhắn lần đầu phải được admin duyệt mã (an toàn, nên bật)</span></div>' +

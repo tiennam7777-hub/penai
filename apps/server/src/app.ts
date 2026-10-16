@@ -482,7 +482,7 @@ const UpdateChannelBody = z.object({
   config: z.record(z.string(), z.unknown()).optional(),
 });
 
-const allowedAiReplyDelays = new Set([0, 15, 20, 25, 30, 35, 40]);
+const allowedAiReplyDelays = new Set([0, 5, 10, 15, 20, 25, 30, 35, 40]);
 function validAiReplyDelay(config: Record<string, unknown> | undefined): boolean {
   return config?.["ai_reply_delay_seconds"] === undefined ||
     allowedAiReplyDelays.has(config["ai_reply_delay_seconds"] as number);
@@ -1694,7 +1694,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const body = parsed.data;
     if (!validAiReplyDelay(body.config) ||
       (body.config?.["ai_reply_delay_seconds"] !== undefined && body.kind !== "zalo_personal")) {
-      return reply.code(400).send({ error: "Thời gian chờ trả lời AI chỉ dành cho Zalo cá nhân: 0, 15, 20, 25, 30, 35 hoặc 40 giây" });
+      return reply.code(400).send({ error: "Thời gian chờ trả lời AI chỉ dành cho Zalo cá nhân: 0, 5, 10, 15, 20, 25, 30, 35 hoặc 40 giây" });
     }
     if (!isChannelKindSupported(body.kind)) {
       return reply
@@ -1738,7 +1738,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (!existing) return reply.code(404).send({ error: "Channel không tồn tại" });
     if (!validAiReplyDelay(b.config) ||
       (b.config?.["ai_reply_delay_seconds"] !== undefined && existing.kind !== "zalo_personal")) {
-      return reply.code(400).send({ error: "Thời gian chờ trả lời AI chỉ dành cho Zalo cá nhân: 0, 15, 20, 25, 30, 35 hoặc 40 giây" });
+      return reply.code(400).send({ error: "Thời gian chờ trả lời AI chỉ dành cho Zalo cá nhân: 0, 5, 10, 15, 20, 25, 30, 35 hoặc 40 giây" });
     }
     let agentId: string | undefined;
     if (b.agentKey) {

@@ -31,7 +31,7 @@ const MEDIA_MAX_BYTES = 10 * 1024 * 1024;
 const INBOX_FILE_MAX_BYTES = 50 * 1024 * 1024;
 const QR_MAX_EXPIRED_RETRIES = 3;
 const QR_MAX_DECLINED_RETRIES = 2;
-const AI_REPLY_DELAY_SECONDS = new Set([0, 15, 20, 25, 30, 35, 40]);
+const AI_REPLY_DELAY_SECONDS = new Set([0, 5, 10, 15, 20, 25, 30, 35, 40]);
 
 /** Legacy channels have no delay; reject malformed stored values safely. */
 export function parseAiReplyDelaySeconds(config: Record<string, unknown>): number {
