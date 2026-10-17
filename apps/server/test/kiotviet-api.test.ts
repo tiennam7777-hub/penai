@@ -63,6 +63,7 @@ describe("KiotViet orchid order draft", () => {
       .mockResolvedValueOnce({ ok: true, json: async () => ({ access_token: "test-token" }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ data: {
         id: 916, code: "SP00016", fullName: "LAN HỒ ĐIỆP (Cây)", isActive: true, allowsSale: true,
+        saleTax: { taxId: 2, value: 5 },
       } }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 42, code: "DH12345" }) });
     vi.stubGlobal("fetch", fetchMock);
@@ -80,6 +81,7 @@ describe("KiotViet orchid order draft", () => {
     expect(body).not.toHaveProperty("soldById");
     expect(body.orderDetails).toEqual([expect.objectContaining({
       productId: 916, productCode: "SP00016", quantity: 5, price: 200_000,
+      orderDetailTaxs: [{ taxId: 2 }],
     })]);
     expect(body.description).toContain("Chị Mai");
     expect(body.description).toContain("Zalo UID 12345");
@@ -88,7 +90,7 @@ describe("KiotViet orchid order draft", () => {
   it("uses zero price and calls out missing price in a draft", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ access_token: "test-token" }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 916, code: "SP00016" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 916, code: "SP00016", saleTax: { taxId: 2 } }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ data: { id: 42, code: "DH12345" } }) });
     vi.stubGlobal("fetch", fetchMock);
     await createKiotVietOrchidDraft({
@@ -110,6 +112,18 @@ describe("KiotViet orchid order draft", () => {
       ...input, branchId: 55291, customer: "Chị Mai", zaloUid: "12345", channelName: "Hot 4",
       stems: 5, color: "vàng", pot: "chậu lan", price: null, delivery: "10:00 18/10/2026",
     })).rejects.toThrow("SP00016");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("never posts if SP00016 has no sales VAT configured", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ access_token: "test-token" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 916, code: "SP00016" }) });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(createKiotVietOrchidDraft({
+      ...input, branchId: 55291, customer: "Chị Mai", zaloUid: "12345", channelName: "Hot 4",
+      stems: 5, color: "vàng", pot: "chậu lan", price: "1.000.000đ", delivery: "10:00 18/10/2026",
+    })).rejects.toThrow("mức thuế");
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

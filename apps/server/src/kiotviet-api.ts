@@ -74,6 +74,11 @@ export async function createKiotVietOrchidDraft(input: {
   const token = await accessToken(input.clientId, input.clientSecret, signal);
   const headers = { Retailer: input.retailer, Authorization: `Bearer ${token}` };
   const product = await orchidProduct(headers, signal);
+  const saleTax = product.saleTax as { taxId?: unknown } | null | undefined;
+  const saleTaxId = saleTax?.taxId;
+  if (!Number.isSafeInteger(saleTaxId) || Number(saleTaxId) <= 0) {
+    throw new Error("Mã SP00016 chưa có mức thuế bán hàng hợp lệ trong KiotViet");
+  }
   const totalPrice = parseKiotVietPrice(input.price);
   const missing = [
     ...(totalPrice === null ? ["giá bán"] : []),
@@ -100,6 +105,7 @@ export async function createKiotVietOrchidDraft(input: {
       quantity: input.stems,
       price: totalPrice === null ? 0 : Math.round((totalPrice / input.stems) * 100) / 100,
       note: `${clean(input.pot)} ${input.stems} cành, màu ${clean(input.color)}; ${totalPrice === null ? "GIÁ CHƯA CHỐT" : `tổng giá đã trao đổi ${totalPrice}đ`}`,
+      orderDetailTaxs: [{ taxId: Number(saleTaxId) }],
     }],
   };
   // Never retry POST automatically. A timeout can occur after KiotViet accepted the order.
