@@ -18,7 +18,9 @@ lines = [
 for detail in data["details"]:
     lines.append((f"{detail['code']} - {detail['name']}: {detail['quantity']:g} × {detail['price']:,.0f}đ", font))
 lines.extend([
-    (f"Tạm tính: {data['total']:,.0f}đ (chưa thu tiền)", font),
+    (("GIÁ CHƯA CHỐT — tổng tạm 0đ, cần bổ sung bằng -cn"
+      if data['total'] == 0 and 'Giá hoa: chưa chốt' in data['description']
+      else f"Tạm tính: {data['total']:,.0f}đ (chưa thu tiền)"), font),
     ("", font),
     ("GHI CHÚ ĐƠN HÀNG", font),
 ])

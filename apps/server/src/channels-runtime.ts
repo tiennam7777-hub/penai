@@ -1322,7 +1322,7 @@ export function makeInboundHandler(
                   }
                 }
                 const billGroupId = channel.config["kiotviet_bill_group"];
-                if (saved && recordId && order.price && typeof billGroupId === "string" && /^\d{1,30}$/.test(billGroupId)) {
+                if (saved && recordId && typeof billGroupId === "string" && /^\d{1,30}$/.test(billGroupId)) {
                   try {
                     const runtime = channelHandlers.get(channel.id)?.channel;
                     if (!isPersonalChannel(runtime) || !runtime.isConnected()) throw new Error(`${channel.name} chưa kết nối Zalo`);
@@ -1330,8 +1330,9 @@ export function makeInboundHandler(
                       retailer: credentials.retailer, clientId: common.clientId, clientSecret: common.clientSecret,
                       orderId: saved.orderId, code: saved.code,
                     });
+                    const priceNotice = order.price ? "" : " Giá chưa chốt; phiếu tạm 0đ, nhân viên dùng -cn để bổ sung.";
                     const ids = await withKiotVietSlipImage({ ...slip, delivery: order.delivery }, (path) => runtime.sendManual({
-                      threadId: billGroupId, peerKind: "group", text: `Đã lên bill Đặt Hàng ${saved.code} cho ${customer}.`, filePaths: [path],
+                      threadId: billGroupId, peerKind: "group", text: `Đã lên bill Đặt Hàng ${saved.code} cho ${customer}.${priceNotice}`, filePaths: [path],
                       source: "agent", threadName: "Đã Lên Bill",
                     }));
                     if (!ids.length) throw new Error("Zalo không trả mã ảnh đã gửi");
