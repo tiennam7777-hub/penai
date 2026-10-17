@@ -64,6 +64,7 @@ import {
 import { stemCountForPhoto } from "./orchid-photo-count.js";
 import { knownOrchidShippingHint, orchidShippingHintContext, completeOrchidShippingReply, orchidDeliveryPriorityContext } from "./orchid-shipping-reply.js";
 import { orchidCompanyPaymentContext } from "./orchid-payment-context.js";
+import { classifyOrchidFlowerComplaint, formatOrchidFlowerComplaintDispatch, orchidFlowerComplaintFingerprint } from "./orchid-flower-complaint.js";
 import { requestedOrchidYellowSamples, orchidYellowSamplePath } from "./orchid-yellow-samples.js";
 
 /** Handler + channel theo channelId — cho webhook route (WhatsApp, Teams) dùng. */
@@ -1113,6 +1114,7 @@ export function makeInboundHandler(
       : null;
     const shippingContext = orchidShippingHintContext(shippingHint);
     let dispatchContext = "";
+    let complaintReply: string | null = null;
     const orderGroupId = channel.config["orchid_order_dispatch_group"];
     if (agent.key === "nhan-vien-kinh-doanh-orchids-world" && channel.kind === "zalo_personal" &&
         msg.peerKind === "direct" && (mayConfirmOrchidOrder(msg.text) || mayCancelOrchidOrder(msg.text)) &&
@@ -1171,6 +1173,52 @@ export function makeInboundHandler(
         logger.warn(`Không kiểm tra được thay đổi đơn trên ${channel.name}: ${String(error)}`);
       }
     }
+    if (!staffDelegation && agent.key === "nhan-vien-kinh-doanh-orchids-world" && channel.kind === "zalo_personal" &&
+        msg.peerKind === "direct" && typeof orderGroupId === "string" && /^\d{1,30}$/.test(orderGroupId)) {
+      try {
+        const provider = rt.providers.get(agent.provider, ctx.workspaceId);
+        const limited = rt.gate
+          ? gatedProvider(rt.gate, provider, { providerKey: agent.provider, priority: 0 })
+          : provider;
+        const customerClass = personData?.tags.some((tag) => /(?:khách\s*)?sỉ/i.test(tag.name))
+          ? "wholesale" : "retail";
+        const now = msg.sentAt ?? new Date();
+        const action = await classifyOrchidFlowerComplaint(limited, agent.model, handoffMessages,
+          { text: msg.text, senderName: msg.senderName ?? msg.senderId }, customerClass, now);
+        if (action) {
+          complaintReply = action === "wholesale_escalation" ? "Anh kiểm tra và báo em nhe."
+            : /\banh\b/i.test(addressAs ?? "") && !/\bchị\b/i.test(addressAs ?? "")
+              ? "Em kiểm tra và báo anh ạ." : "Em kiểm tra và báo chị ạ.";
+          const sourceThreadId = msg.chatKey.slice(msg.chatKey.indexOf(":") + 1);
+          const thread = await getInboxThread(db, ctx, channel.id, sourceThreadId);
+          const customer = thread?.profileName || thread?.contactAlias || thread?.name || msg.senderName || msg.senderId;
+          const dispatchText = formatOrchidFlowerComplaintDispatch(customer);
+          const claimId = await claimOrchidOrderDispatch(db, ctx, {
+            channelId: channel.id, threadId: sourceThreadId,
+            fingerprint: orchidFlowerComplaintFingerprint(msg.messageId ?? "", msg.text, now),
+            targetThreadId: orderGroupId, message: dispatchText,
+          });
+          if (claimId) {
+            const runtime = channelHandlers.get(channel.id)?.channel;
+            try {
+              if (!isPersonalChannel(runtime) || !runtime.isConnected()) throw new Error(`${channel.name} chưa kết nối Zalo`);
+              const ids = await runtime.sendManual({
+                threadId: orderGroupId, peerKind: "group", text: dispatchText,
+                source: "agent", threadName: "Phan Don Cam Hoa",
+              });
+              if (!ids.length) throw new Error("Zalo không trả mã tin đã gửi");
+              await finishOrchidOrderDispatch(db, ctx, claimId, ids[0] ?? null);
+            } catch (error) {
+              await finishOrchidOrderDispatch(db, ctx, claimId, null, String(error)).catch(() => {});
+              logger.warn(`Không gửi được phản ánh hoa sang nhóm phân đơn: ${String(error)}`);
+            }
+          }
+        }
+      } catch (error) {
+        logger.warn(`Không kiểm tra được phản ánh hoa trên ${channel.name}: ${String(error)}`);
+      }
+    }
+    if (complaintReply) return { kind: "reply", text: complaintReply };
     const userMessage = handoffContext || dispatchContext || shippingContext || deliveryContext || paymentContext
       ? `${handoffContext}\n\n${dispatchContext ? `${dispatchContext}\n\n` : ""}${deliveryContext ? `${deliveryContext}\n\n` : ""}${shippingContext ? `${shippingContext}\n\n` : ""}${paymentContext ? `${paymentContext}\n\n` : ""}[YÊU CẦU MỚI NHẤT CẦN TRẢ LỜI]\n${latestUserMessage}`
       : latestUserMessage;
