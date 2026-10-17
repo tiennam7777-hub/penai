@@ -16,17 +16,32 @@ export async function claimKiotVietOrderDraft(
   return result.rows[0]?.id ? String(result.rows[0].id) : null;
 }
 
-export async function claimKiotVietOrderUpdate(
-  db: Db, ctx: WorkspaceContext,
-  input: { channelId: string; threadId: string; fingerprint: string; payloadFingerprint: string },
+/** Customer follow-ups must not create another slip for a recent live order. */
+export async function hasKiotVietOrderSince(
+  db: Db, ctx: WorkspaceContext, channelId: string, threadId: string, since: Date,
+): Promise<boolean> {
+  const result = await withWorkspace(db, ctx, (tx) => tx.execute(sql`
+    SELECT 1 FROM kiotviet_order_drafts
+    WHERE workspace_id = ${ctx.workspaceId} AND source_channel_id = ${channelId}
+      AND source_thread_id = ${threadId} AND created_at >= ${since}
+      AND status IN ('sending', 'sent', 'updating', 'failed')
+    LIMIT 1`));
+  return result.rows.length > 0;
+}
+
+/** Staff -cn targets the latest live slip, even when its original classifier payload is unchanged. */
+export async function claimLatestKiotVietOrderForStaffUpdate(
+  db: Db, ctx: WorkspaceContext, channelId: string, threadId: string,
 ): Promise<{ id: string; orderId: number; code: string } | null> {
   const result = await withWorkspace(db, ctx, (tx) => tx.execute(sql`
     UPDATE kiotviet_order_drafts SET status = 'updating', updated_at = now()
-    WHERE workspace_id = ${ctx.workspaceId}
-      AND source_channel_id = ${input.channelId} AND source_thread_id = ${input.threadId}
-      AND order_fingerprint = ${input.fingerprint} AND status = 'sent'
-      AND kiot_order_id IS NOT NULL AND kiot_order_code IS NOT NULL
-      AND last_payload_fingerprint IS DISTINCT FROM ${input.payloadFingerprint}
+    WHERE id = (
+      SELECT id FROM kiotviet_order_drafts
+      WHERE workspace_id = ${ctx.workspaceId} AND source_channel_id = ${channelId}
+        AND source_thread_id = ${threadId} AND status = 'sent'
+        AND kiot_order_id IS NOT NULL AND kiot_order_code IS NOT NULL
+      ORDER BY created_at DESC LIMIT 1
+    )
     RETURNING id, kiot_order_id, kiot_order_code`));
   const row = result.rows[0];
   return row ? { id: String(row.id), orderId: Number(row.kiot_order_id), code: String(row.kiot_order_code) } : null;
@@ -38,7 +53,7 @@ export async function finishKiotVietOrderUpdate(
 ): Promise<void> {
   await withWorkspace(db, ctx, (tx) => tx.execute(sql`
     UPDATE kiotviet_order_drafts SET
-      status = ${"error" in result ? "failed" : "sent"},
+      status = 'sent',
       last_payload_fingerprint = ${"payloadFingerprint" in result ? result.payloadFingerprint : sql`last_payload_fingerprint`},
       error = ${"error" in result ? result.error.slice(0, 500) : null},
       bill_image_status = ${"error" in result ? sql`bill_image_status` : "pending"},

@@ -174,6 +174,28 @@ describe("Inbox: ghi tin đi/đến + bỏ bản dội lại", () => {
     expect(logs).toEqual([]);
   });
 
+  it("thu hồi -lb và -cn từ điện thoại rồi mới chạy lệnh nội bộ", async () => {
+    const logs: ChannelMessageLog[] = [];
+    const order: string[] = [];
+    const channel = new ZaloPersonalChannel({
+      id: "zp-bill", name: "Hot 1", token: "{}", config: {}, requirePairing: true,
+      onInbound: async () => ({ kind: "ignore" }),
+      onMessageLog: (entry) => logs.push(entry),
+      onSelfCommand: async (_threadId, command) => { order.push(`run:${command}`); },
+    });
+    (channel as unknown as { api: unknown }).api = {
+      undo: async () => { order.push("recall"); },
+    };
+    const handle = (channel as unknown as { handleMessage: (m: unknown) => Promise<void> }).handleMessage.bind(channel);
+    for (const command of ["-lb", "-cn"]) {
+      await handle({ type: ThreadType.User, threadId: "customer", isSelf: true,
+        data: { msgId: `msg-${command}`, cliMsgId: `cli-${command}`, uidFrom: "owner",
+          content: command, msgType: "webchat", ts: String(Date.now()) } });
+    }
+    expect(order).toEqual(["recall", "run:-lb", "recall", "run:-cn"]);
+    expect(logs).toEqual([]);
+  });
+
   it("tin khách gửi tới ghi nguồn zalo kèm tên người gửi (kể cả khi agent không được trả lời)", async () => {
     const { channel, logs } = setup();
     const handle = (channel as unknown as { handleMessage: (m: unknown) => Promise<void> }).handleMessage.bind(channel);

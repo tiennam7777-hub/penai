@@ -77,7 +77,7 @@ export async function createKiotVietOrchidDraft(input: {
   shippingFee?: string | null;
   vatFee?: string | null;
   companyInvoice?: boolean;
-  existing?: { orderId: number; code: string; preserveDelivery: boolean; preserveAddress: boolean };
+  existing?: { orderId: number; code: string; fillMissing: true };
 }): Promise<{ orderId: number; code: string; customerName: string; description: string }> {
   const signal = AbortSignal.timeout(20_000);
   const token = await accessToken(input.clientId, input.clientSecret, signal);
@@ -157,28 +157,74 @@ export async function createKiotVietOrchidDraft(input: {
     }
     const oldDelivery = current.orderDelivery && typeof current.orderDelivery === "object"
       ? current.orderDelivery as Record<string, unknown> : {};
-    if (input.existing.preserveDelivery && typeof oldDelivery.expectedDelivery === "string") {
-      body.orderDelivery.expectedDelivery = oldDelivery.expectedDelivery;
-      const oldTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.exec(oldDelivery.expectedDelivery)?.[0];
-      if (oldTime) {
-        const date = `${oldTime.slice(11, 16)} ${oldTime.slice(8, 10)}/${oldTime.slice(5, 7)}/${oldTime.slice(0, 4)}`;
-        body.description = body.description.replace(`Giao: ${clean(input.delivery ?? "khách báo sau")}.`, `Giao: ${date}.`);
-      }
+    if (!Number.isSafeInteger(current.customerId) || Number(current.customerId) <= 0) {
+      throw new Error(`Phiếu ${input.existing.code} thiếu mã khách hiện tại; không ghi đè khách nhân viên đã chọn`);
     }
-    if (input.existing.preserveAddress && typeof oldDelivery.address === "string" && oldDelivery.address) {
-      body.orderDelivery.address = oldDelivery.address;
-      body.description = body.description.replace(`Địa chỉ: ${clean(input.address ?? "khách báo sau")}.`,
-        `Địa chỉ: ${clean(oldDelivery.address)}.`);
+    // Retail GET omits creator/cashier; use the account configured for this integration.
+    const creatorId = current.cashierId ?? current.createdBy ?? input.cashierUserId;
+    if (!Number.isSafeInteger(creatorId) || Number(creatorId) <= 0) {
+      throw new Error(`KiotViet không trả mã người tạo phiếu ${input.existing.code}; dừng để giữ người nhân viên đã chọn`);
     }
-    body.purchaseDate = String(current.purchaseDate ?? body.purchaseDate);
+    const oldLines = Array.isArray(current.orderDetails) ? current.orderDetails as Array<Record<string, unknown>> : [];
+    if (!oldLines.length) throw new Error(`Phiếu ${input.existing.code} thiếu dòng hàng hiện tại`);
+    const mergedLines = oldLines.map((line) => ({ ...line }));
+    const flowerLine = mergedLines.find((line) => line.productCode === "SP00016");
+    if (flowerLine && Number(flowerLine.price ?? 0) === 0 && totalPrice !== null) {
+      flowerLine.price = Math.round((totalPrice / Number(flowerLine.quantity ?? input.stems)) * 100) / 100;
+    }
+    for (const newLine of details.slice(1)) {
+      if (!mergedLines.some((line) => line.productCode === newLine.productCode)) mergedLines.push(newLine);
+    }
+    let oldNote = String(current.description ?? "").replace(/\s*Cần bổ sung:[^.]*\./i, "").trim();
+    if (input.delivery) oldNote = oldNote.replace(/Giao: khách báo sau\./i, `Giao: ${clean(input.delivery)}.`);
+    if (input.address) oldNote = oldNote.replace(/Địa chỉ: khách báo sau\./i, `Địa chỉ: ${clean(input.address)}.`);
+    if (input.price) oldNote = oldNote.replace(/Giá hoa: chưa chốt\./i, `Giá hoa: ${clean(input.price)}.`);
+    const additions: string[] = [];
+    for (const [label, value] of [["Bảng chữ", input.cardText], ["SĐT người nhận", input.recipientPhone],
+      ["Lưu ý", input.instructions]] as const) {
+      if (value && !new RegExp(`${label}:`, "i").test(oldNote)) additions.push(`${label}: ${clean(value)}.`);
+    }
+    if (!/Khách chat:/i.test(oldNote)) additions.push(`Khách chat: ${clean(input.customer)}; nguồn ${clean(input.channelName)} / Zalo UID ${clean(input.zaloUid)}.`);
+    const mergedDelivery = { ...oldDelivery };
+    if (!mergedDelivery.type) mergedDelivery.type = 1;
+    if (!mergedDelivery.partnerDeliveryId) mergedDelivery.partnerDeliveryId = 107020;
+    if (!mergedDelivery.partnerDelivery) mergedDelivery.partnerDelivery = { code: "DT000001", name: "Anh Sang" };
+    if (!mergedDelivery.receiver && input.recipientPhone) mergedDelivery.receiver = String(current.customerName ?? customer.name);
+    if (!mergedDelivery.contactNumber && input.recipientPhone) mergedDelivery.contactNumber = input.recipientPhone;
+    if (!mergedDelivery.address && input.address) mergedDelivery.address = input.address;
+    if (!mergedDelivery.expectedDelivery && expectedDelivery) mergedDelivery.expectedDelivery = expectedDelivery;
+    const updateBody: Record<string, unknown> = {
+      ...body, id: input.existing.orderId,
+      purchaseDate: String(current.purchaseDate ?? body.purchaseDate),
+      customer: { id: current.customerId, code: current.customerCode, name: current.customerName },
+      orderDetails: mergedLines, orderDelivery: mergedDelivery,
+      description: [oldNote, ...additions].filter(Boolean).join(" "),
+      cashierId: creatorId,
+    };
+    for (const key of ["soldById", "discount", "discountRatio", "discountAfterTax", "method",
+      "saleChannelId", "pricingMode", "usingCod", "invoiceOrderSurcharges"] as const) {
+      if (current[key] !== undefined && current[key] !== null) updateBody[key] = current[key];
+    }
+    if (current.SaleChannelId !== undefined && current.SaleChannelId !== null) updateBody.saleChannelId = current.SaleChannelId;
+    const response = await fetch(`https://public.kiotapi.com/orders/${input.existing.orderId}`, {
+      method: "PUT", headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify(updateBody), signal,
+    });
+    if (!response.ok) throw new Error(`KiotViet từ chối cập nhật phiếu đặt hàng (HTTP ${response.status})`);
+    const payload = await response.json() as Record<string, unknown>;
+    const order = (payload.data && typeof payload.data === "object" ? payload.data : payload) as Record<string, unknown>;
+    if (order.id !== input.existing.orderId || order.code !== input.existing.code) {
+      throw new Error(`KiotViet có thể đã cập nhật phiếu ${input.existing.code} nhưng không trả mã đúng; cần đối chiếu thủ công`);
+    }
+    return { orderId: input.existing.orderId, code: input.existing.code,
+      customerName: String(current.customerName), description: String(updateBody.description) };
   }
   // Never retry POST automatically. A timeout can occur after KiotViet accepted the order.
-  const response = await fetch(input.existing
-    ? `https://public.kiotapi.com/orders/${input.existing.orderId}` : "https://public.kiotapi.com/orders", {
-    method: input.existing ? "PUT" : "POST", headers: { ...headers, "Content-Type": "application/json" },
-    body: JSON.stringify(input.existing ? { ...body, id: input.existing.orderId } : body), signal,
+  const response = await fetch("https://public.kiotapi.com/orders", {
+    method: "POST", headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify(body), signal,
   });
-  if (!response.ok) throw new Error(`KiotViet từ chối ${input.existing ? "cập nhật" : "tạo"} phiếu đặt hàng (HTTP ${response.status})`);
+  if (!response.ok) throw new Error(`KiotViet từ chối tạo phiếu đặt hàng (HTTP ${response.status})`);
   const payload = await response.json() as Record<string, unknown>;
   const order = (payload.data && typeof payload.data === "object" ? payload.data : payload) as Record<string, unknown>;
   if (!Number.isSafeInteger(order.id) || Number(order.id) <= 0 || typeof order.code !== "string" || !order.code) {

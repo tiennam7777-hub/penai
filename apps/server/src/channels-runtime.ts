@@ -24,7 +24,8 @@ import {
   claimOrchidOrderDispatch,
   finishOrchidOrderDispatch,
   claimKiotVietOrderDraft,
-  claimKiotVietOrderUpdate,
+  hasKiotVietOrderSince,
+  claimLatestKiotVietOrderForStaffUpdate,
   finishKiotVietOrderDraft,
   finishKiotVietOrderUpdate,
   finishKiotVietBillImage,
@@ -81,6 +82,13 @@ export const channelHandlers = new Map<
   string,
   { handler: InboundHandler; channel: Channel; workspaceId: string }
 >();
+const orchidKiotStaffCommands = new Map<string, (threadId: string, command: "-lb" | "-cn") => Promise<string>>();
+
+export async function runOrchidKiotStaffCommand(channelId: string, threadId: string, command: "-lb" | "-cn"): Promise<string> {
+  const handler = orchidKiotStaffCommands.get(channelId);
+  if (!handler) throw new Error("Kênh kinh doanh chưa sẵn sàng");
+  return handler(threadId, command);
+}
 
 // Lệnh từ người trực Inbox chỉ được tạo tại route đã xác thực, không đi qua Zalo.
 const orchidStaffDelegations = new WeakMap<InboundMessage, string>();
@@ -595,6 +603,80 @@ export function makeInboundHandler(
   channel: EnabledChannel,
 ): InboundHandler {
   const { db } = rt.db;
+  if (channel.kind === "zalo_personal" &&
+      ["cdf2a276-fa3d-4fe3-a46b-3ce1162a7678", "657116ed-7570-4f2e-8550-a3d323618724", "6bc2dc02-3d10-4737-931d-a37532bcabb2"].includes(channel.id)) {
+    orchidKiotStaffCommands.set(channel.id, async (threadId, command) => {
+      const ctx = systemContext(channel.workspaceId);
+      const thread = await getInboxThread(db, ctx, channel.id, threadId);
+      if (!thread || thread.kind !== "direct") throw new Error("Chỉ dùng lệnh trong hội thoại khách hàng đã có");
+      const agent = channel.agentId ? await getAgentById(db, ctx, channel.agentId) : null;
+      if (agent?.key !== "nhan-vien-kinh-doanh-orchids-world") throw new Error("Kênh chưa gắn Agent kinh doanh");
+      const credentials = await getKiotVietCredentials(db, ctx);
+      if (!credentials?.branchId) throw new Error("KiotViet chưa kết nối chi nhánh nhận đơn");
+      const billGroupId = channel.config["kiotviet_bill_group"];
+      if (typeof billGroupId !== "string" || !/^\d{1,30}$/.test(billGroupId)) throw new Error("Chưa cấu hình nhóm Đã lên bill");
+      const runtime = channelHandlers.get(channel.id)?.channel;
+      if (!isPersonalChannel(runtime) || !runtime.isConnected()) throw new Error("Zalo của kênh chưa kết nối");
+      const history = await listInboxMessages(db, ctx, channel.id, threadId, { limit: 200 });
+      const provider = rt.providers.get(agent.provider, ctx.workspaceId);
+      const limited = rt.gate ? gatedProvider(rt.gate, provider, { providerKey: agent.provider, priority: 0 }) : provider;
+      const now = new Date();
+      const order = await classifyConfirmedOrchidOrder(limited, agent.model, history,
+        { text: command, senderName: "Nhân viên" }, now, "staff");
+      if (!order) throw new Error("Chưa xác định đủ số cành và màu của đơn hiện tại; chưa gọi KiotViet");
+      const customer = thread.contactAlias || thread.profileName || thread.name;
+      const common = {
+        retailer: credentials.retailer, clientId: decryptSecret(credentials.clientIdEncrypted),
+        clientSecret: decryptSecret(credentials.clientSecretEncrypted), branchId: credentials.branchId,
+        ...(credentials.cashierUserId ? { cashierUserId: credentials.cashierUserId } : {}),
+        customer, customerPhone: thread.phone, zaloUid: threadId, channelName: channel.name,
+        stems: order.stems, color: order.color, pot: order.pot, price: order.price,
+        delivery: order.delivery, address: order.address, recipientPhone: order.recipientPhone,
+        cardText: order.cardText, instructions: order.instructions, shippingFee: order.shippingFee,
+        vatFee: order.vatFee, companyInvoice: order.companyInvoice,
+      };
+      const fingerprint = orchidOrderSessionFingerprint(history, order, now);
+      const payloadFingerprint = orchidOrderPayloadFingerprint(order);
+      const claim = command === "-lb"
+        ? await claimKiotVietOrderDraft(db, ctx, { channelId: channel.id, threadId, fingerprint, payloadFingerprint })
+        : await claimLatestKiotVietOrderForStaffUpdate(db, ctx, channel.id, threadId);
+      if (!claim) throw new Error(command === "-lb" ? "Đơn này đã có phiếu hoặc đang xử lý; dùng -cn để bổ sung"
+        : "Chưa có phiếu đặt hàng để cập nhật");
+      const id = typeof claim === "string" ? claim : claim.id;
+      let saved: { orderId: number; code: string };
+      try {
+        saved = await createKiotVietOrchidDraft({ ...common,
+          ...(command === "-cn" && typeof claim !== "string" ? { existing: {
+            orderId: claim.orderId, code: claim.code, fillMissing: true as const,
+          } } : {}),
+        });
+        if (command === "-lb") await finishKiotVietOrderDraft(db, ctx, id, saved);
+        else await finishKiotVietOrderUpdate(db, ctx, id, { payloadFingerprint });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        if (command === "-lb") await finishKiotVietOrderDraft(db, ctx, id, { error: reason });
+        else await finishKiotVietOrderUpdate(db, ctx, id, { error: reason });
+        throw error;
+      }
+      try {
+        const slip = await readKiotVietOrderSlip({ retailer: credentials.retailer,
+          clientId: common.clientId, clientSecret: common.clientSecret,
+          orderId: saved.orderId, code: saved.code });
+        const notice = `${command === "-lb" ? "Đã lên bill Đặt Hàng" : "Đã cập nhật bill Đặt Hàng"} ${saved.code} cho ${customer}.`;
+        const ids = await withKiotVietSlipImage(slip, (path) => runtime.sendManual({
+          threadId: billGroupId, peerKind: "group", text: notice, filePaths: [path],
+          source: "agent", threadName: "Đã Lên Bill",
+        }));
+        if (!ids.length) throw new Error("Zalo không trả mã xác nhận gửi nhóm");
+        await finishKiotVietBillImage(db, ctx, id, { groupId: billGroupId, msgId: ids.at(-1)! });
+        return `${notice} Đã gửi ảnh phiếu vào nhóm Đã lên bill.`;
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        await finishKiotVietBillImage(db, ctx, id, { error: reason }).catch(() => {});
+        throw new Error(`Phiếu ${saved.code} đã lưu trên KiotViet nhưng chưa gửi được ảnh nhóm: ${reason}`);
+      }
+    });
+  }
   return async (msg, hooks?: RunHooks): Promise<InboundResult> => {
     const ctx = systemContext(channel.workspaceId);
     const staffDelegation = orchidStaffDelegations.get(msg);
@@ -1190,11 +1272,18 @@ export function makeInboundHandler(
               : "[HỆ THỐNG: Đơn này đã được ghi nhận để tránh gửi trùng. Không tự khẳng định đã báo nhóm lần nữa.]";
           }
           if (order) {
-            // One KiotViet slip per customer order; later confirmations update that slip.
+            // Customer follow-ups never update a saved KiotViet slip.
             try {
               const credentials = await getKiotVietCredentials(db, ctx);
               if (credentials?.branchId) {
+                kiotCreation: {
                 const orderHistory = await listInboxMessages(db, ctx, channel.id, sourceThreadId, { limit: 200 });
+                const lastReset = [...orderHistory].reverse().find((m) => m.direction === "in" && /^\/new\s*$/i.test(m.text.trim()));
+                const since = lastReset ? new Date(lastReset.sentAt) : new Date(now.getTime() - 48 * 3600_000);
+                if (await hasKiotVietOrderSince(db, ctx, channel.id, sourceThreadId, since)) {
+                  kiotContext = "[HỆ THỐNG: Hội thoại đã có phiếu đặt hàng gần đây. Không tự tạo hoặc cập nhật thêm; nhân viên dùng -cn để bổ sung, -lb cho đơn mới.]";
+                  break kiotCreation;
+                }
                 const sessionFingerprint = orchidOrderSessionFingerprint(orderHistory, order, now);
                 const payloadFingerprint = orchidOrderPayloadFingerprint(order);
                 const common = {
@@ -1231,28 +1320,6 @@ export function makeInboundHandler(
                     logger.warn(`Không tạo được đơn nháp KiotViet trên ${channel.name}: ${reason}`);
                     kiotContext = "[HỆ THỐNG: Chưa xác nhận tạo được đơn nháp KiotViet; cần nhân viên kiểm tra, không khẳng định đã lên đơn.]";
                   }
-                } else if (order.price) {
-                  const update = await claimKiotVietOrderUpdate(db, ctx, {
-                    channelId: channel.id, threadId: sourceThreadId,
-                    fingerprint: sessionFingerprint, payloadFingerprint,
-                  });
-                  if (update) {
-                    try {
-                      saved = await createKiotVietOrchidDraft({ ...common, existing: {
-                        orderId: update.orderId, code: update.code,
-                        preserveDelivery: !/(?:\d{1,2}\s*(?:h|giờ)|thứ|mai|ngày)/i.test(msg.text),
-                        preserveAddress: !/(?:địa chỉ|dia chi|đường|duong|phường|phuong|quận|quan|số nhà|so nha)/i.test(msg.text),
-                      } });
-                      await finishKiotVietOrderUpdate(db, ctx, update.id, { payloadFingerprint });
-                      recordId = update.id;
-                      kiotContext = `[HỆ THỐNG: Đã cập nhật phiếu đặt hàng KiotViet mã ${saved.code}. Chưa tạo hóa đơn hoặc ghi nhận thanh toán.]`;
-                    } catch (error) {
-                      const reason = error instanceof Error ? error.message : String(error);
-                      await finishKiotVietOrderUpdate(db, ctx, update.id, { error: reason }).catch(() => {});
-                      logger.warn(`Không cập nhật được phiếu KiotViet ${update.code}: ${reason}`);
-                      kiotContext = `[HỆ THỐNG: Chưa xác nhận cập nhật được phiếu ${update.code}; cần nhân viên đối chiếu.]`;
-                    }
-                  }
                 }
                 const billGroupId = channel.config["kiotviet_bill_group"];
                 if (saved && recordId && order.price && typeof billGroupId === "string" && /^\d{1,30}$/.test(billGroupId)) {
@@ -1264,16 +1331,17 @@ export function makeInboundHandler(
                       orderId: saved.orderId, code: saved.code,
                     });
                     const ids = await withKiotVietSlipImage({ ...slip, delivery: order.delivery }, (path) => runtime.sendManual({
-                      threadId: billGroupId, peerKind: "group", filePaths: [path],
+                      threadId: billGroupId, peerKind: "group", text: `Đã lên bill Đặt Hàng ${saved.code} cho ${customer}.`, filePaths: [path],
                       source: "agent", threadName: "Đã Lên Bill",
                     }));
                     if (!ids.length) throw new Error("Zalo không trả mã ảnh đã gửi");
-                    await finishKiotVietBillImage(db, ctx, recordId, { groupId: billGroupId, msgId: ids[0]! });
+                    await finishKiotVietBillImage(db, ctx, recordId, { groupId: billGroupId, msgId: ids.at(-1)! });
                   } catch (imageError) {
                     const reason = imageError instanceof Error ? imageError.message : String(imageError);
                     await finishKiotVietBillImage(db, ctx, recordId, { error: reason }).catch(() => {});
                     logger.warn(`Đã lên phiếu ${saved.code} nhưng chưa gửi ảnh nhóm Đã Lên Bill: ${reason}`);
                   }
+                }
                 }
               }
             } catch (error) {

@@ -4002,7 +4002,7 @@ export const INDEX_HTML = `<!doctype html>
     var wrap = el("div", { "class": "ibx" });
     wrap.innerHTML = '<div class="ibx-list"><div class="row" style="padding:8px"><input id="ibxQ" placeholder="Tìm tên, uid, SĐT…"><select id="ibxKind" style="flex:0 0 auto;min-width:0"><option value="">Tất cả</option><option value="direct">Cá nhân</option><option value="group">Nhóm</option><option value="unread">Chưa đọc</option></select></div><div class="row" style="padding:0 8px 8px;gap:6px"><select id="ibxTag" style="flex:1;min-width:0"><option value="">Mọi nhãn Inbox</option></select><select id="ibxHidden" style="flex:0 0 auto;min-width:0" title="Xem hội thoại đang hiện hoặc đã ẩn"><option value="0">Đang hiện</option><option value="1">Đã ẩn</option></select></div><div id="ibxThreads" class="ibx-threads"></div></div>' +
       '<div class="ibx-chat"><div id="ibxHead" class="ibx-head muted">Chọn một hội thoại bên trái.</div><div class="ibx-main"><div id="ibxMsgs" class="ibx-msgs"></div><aside id="ibxDetails" class="ibx-details" style="display:none"><div class="ibx-details-top"><b>Thông tin hội thoại</b><button type="button" class="ghost sm" id="ibxDetailsClose" aria-label="Đóng thông tin">✕</button></div><div class="ibx-details-tabs"><button type="button" class="ghost sm" id="ibxInfoTab">Ảnh & tệp</button><button type="button" class="ghost sm" id="ibxSearchTab">🔎 Tìm tin</button></div><div id="ibxDetailsBody" class="ibx-details-body"></div></aside></div>' +
-      '<div class="ibx-compose" id="ibxCompose" style="display:none"><div id="ibxReply"></div><div id="ibxImg"></div><div id="ibxQuickSuggestions" class="ibx-quick-suggestions"></div><div class="row" style="align-items:flex-end"><textarea id="ibxText" rows="2" placeholder="Nhập tin nhắn… (-ld: giao AI làm việc vừa hứa; -mã: tin nhắn nhanh; Enter để gửi)"></textarea><input type="file" id="ibxFile" multiple accept="image/png,image/jpeg,image/gif,image/webp,.pdf,.doc,.docx,.xls,.xlsx" hidden><button class="ghost" id="ibxAttach" title="Chọn tối đa 6 ảnh hoặc một file Word, Excel, PDF">📎</button><button class="ghost" id="ibxDelegate" style="display:none" title="Lệnh nội bộ, không gửi -ld cho khách">AI làm giúp</button><button id="ibxSend">Gửi</button></div></div></div>';
+      '<div class="ibx-compose" id="ibxCompose" style="display:none"><div id="ibxReply"></div><div id="ibxImg"></div><div id="ibxQuickSuggestions" class="ibx-quick-suggestions"></div><div class="row" style="align-items:flex-end"><textarea id="ibxText" rows="2" placeholder="Nhập tin nhắn… (-ld: AI làm giúp; -lb: lên bill; -cn: bổ sung bill; Enter để gửi)"></textarea><input type="file" id="ibxFile" multiple accept="image/png,image/jpeg,image/gif,image/webp,.pdf,.doc,.docx,.xls,.xlsx" hidden><button class="ghost" id="ibxAttach" title="Chọn tối đa 6 ảnh hoặc một file Word, Excel, PDF">📎</button><button class="ghost" id="ibxDelegate" style="display:none" title="Lệnh nội bộ, không gửi -ld cho khách">AI làm giúp</button><button id="ibxSend">Gửi</button></div></div></div>';
     m.appendChild(wrap);
 
     function stopEs() { if (S.es) { try { S.es.close(); } catch (e) {} S.es = null; } }
@@ -4027,9 +4027,10 @@ export const INDEX_HTML = `<!doctype html>
       S.quickMatches = []; S.quickToken = null; S.quickIndex = 0;
       var box = $("#ibxQuickSuggestions"); if (box) { box.style.display = "none"; box.innerHTML = ""; }
     }
-    function orchidDelegateCommand() {
+    function orchidStaffCommand() {
+      var command = $("#ibxText").value.trim().toLowerCase();
       return ["cdf2a276-fa3d-4fe3-a46b-3ce1162a7678", "657116ed-7570-4f2e-8550-a3d323618724", "6bc2dc02-3d10-4737-931d-a37532bcabb2"].indexOf(S.ch) >= 0 &&
-        $("#ibxText").value.trim().toLowerCase() === "-ld";
+        ["-ld", "-lb", "-cn"].indexOf(command) >= 0 ? command : "";
     }
     function chooseQuickReply(item) {
       var input = $("#ibxText"), token = S.quickToken;
@@ -4040,7 +4041,7 @@ export const INDEX_HTML = `<!doctype html>
       hideQuickSuggestions();
     }
     function updateQuickSuggestions() {
-      if (orchidDelegateCommand()) { hideQuickSuggestions(); return; }
+      if (orchidStaffCommand()) { hideQuickSuggestions(); return; }
       var input = $("#ibxText"), pos = input.selectionStart, before = input.value.slice(0, pos);
       var match = /(^|\\s)-([a-z0-9_-]{0,32})$/i.exec(before);
       if (!match || input.selectionStart !== input.selectionEnd) { hideQuickSuggestions(); return; }
@@ -4664,7 +4665,7 @@ export const INDEX_HTML = `<!doctype html>
       }
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
-        if (orchidDelegateCommand()) { send(); return; }
+        if (orchidStaffCommand()) { send(); return; }
         if (S.quickMatches.length) { chooseQuickReply(S.quickMatches[S.quickIndex]); return; }
         if (S.quickToken) { toast("Không tìm thấy mã tin nhắn nhanh này", true); return; }
         send();
@@ -4677,7 +4678,7 @@ export const INDEX_HTML = `<!doctype html>
     };
     function send() {
       if (!S.cur || S.loadingAttach) return;
-      if (orchidDelegateCommand()) {
+      if (orchidStaffCommand() === "-ld") {
         if (S.imgs.length || S.file || S.reply || S.cur.virtual) { toast("Bỏ trích dẫn/file và chọn hội thoại đã có trước khi dùng -ld", true); return; }
         var delegateButton = $("#ibxSend"), delegateChannel = S.ch, delegateThread = S.cur.threadId;
         delegateButton.disabled = true;
@@ -4702,8 +4703,9 @@ export const INDEX_HTML = `<!doctype html>
       if (!body.text && !body.images && !body.file) return;
       var btn = $("#ibxSend"); btn.disabled = true;
       var tid = S.cur.threadId, channelId = S.ch, attachButton = $("#ibxAttach"); attachButton.disabled = true;
-      api("/v1/inbox/" + channelId + "/threads/" + encodeURIComponent(tid) + "/send", { method: "POST", body: body }).then(function () {
-        if (body.text && !body.images && !body.file) S.lastStaffSent = { channelId: channelId, threadId: tid, text: body.text.trim() };
+      api("/v1/inbox/" + channelId + "/threads/" + encodeURIComponent(tid) + "/send", { method: "POST", body: body }).then(function (res) {
+        if (res.notice) toast(res.notice);
+        if (res.sent !== false && body.text && !body.images && !body.file) S.lastStaffSent = { channelId: channelId, threadId: tid, text: body.text.trim() };
         else S.lastStaffSent = null;
         if (!S.cur || S.ch !== channelId || S.cur.threadId !== tid) return;
         $("#ibxText").value = ""; hideQuickSuggestions(); S.imgs = []; S.file = null; S.reply = null; renderImg(); renderReply();

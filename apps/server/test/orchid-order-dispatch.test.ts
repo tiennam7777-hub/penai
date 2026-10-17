@@ -63,6 +63,21 @@ describe("orchid order dispatch", () => {
         { ...base, price: "1.600.000đ" }, now));
     expect(orchidOrderPayloadFingerprint(base)).not.toBe(orchidOrderPayloadFingerprint({ ...base, price: "1.600.000đ" }));
   });
+
+  it("treats -lb as a staff instruction with no customer confirmation requirement", async () => {
+    let system = "";
+    const provider = { chat: async (input: { system: string }) => {
+      system = input.system;
+      return { stopReason: "end", toolCalls: [], content: JSON.stringify({ confirmed: true,
+        customer: "Anh Nam", stems: 10, color: "vàng", pot: "chậu thấp",
+        price: null, delivery: null, deliveryDeferred: true,
+        address: null, addressDeferred: true }) };
+    } } as unknown as Provider;
+    const order = await classifyConfirmedOrchidOrder(provider, "test", [],
+      { text: "-lb", senderName: "Nhân viên" }, new Date("2026-10-18T01:00:00Z"), "staff");
+    expect(order).toMatchObject({ stems: 10, color: "vàng", delivery: null, address: null });
+    expect(system).toContain("Không đòi khách xác nhận");
+  });
 });
 
 describe("orchid cancellation dispatch", () => {

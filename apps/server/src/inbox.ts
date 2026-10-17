@@ -77,7 +77,7 @@ import {
   type ChannelMessageLog,
   type ZaloSendSource,
 } from "@penai/channels";
-import { channelHandlers, runOrchidStaffDelegation } from "./channels-runtime.js";
+import { channelHandlers, runOrchidKiotStaffCommand, runOrchidStaffDelegation } from "./channels-runtime.js";
 import { expectsCurrentColorPhotos, latestDelegableStaffRow, promisedPotStemCount, ORCHID_SALES_AGENT_ID, ORCHID_SALES_CHANNEL_IDS } from "./orchid-staff-delegation.js";
 import { readPhotoAcknowledgement } from "./photo-burst.js";
 import { inboxZaloQuote, type InboxZaloQuote } from "./inbox-quote.js";
@@ -241,13 +241,17 @@ export function inboxHooks(
     saveInboxFile: async (buf: Buffer, ext: string) =>
       saveOutboundImage(dataDir, ch.workspaceId, ch.id, { buf, ext: ext.replace(/[^a-z0-9]/gi, "").slice(0, 8) || "bin" }),
     ...(ORCHID_SALES_CHANNEL_IDS.has(ch.id) ? {
-      onSelfCommand: async (threadId: string) => {
+      onSelfCommand: async (threadId: string, command: "-ld" | "-lb" | "-cn") => {
         try {
-          // Tin hứa gửi từ điện thoại được listener lưu chậm hơn bản dội Zalo một chút.
-          await new Promise((resolve) => setTimeout(resolve, 1_700));
-          await delegateOrchidStaffPromise(db, ctx, dataDir, ch.id, threadId);
+          if (command === "-ld") {
+            // Tin hứa gửi từ điện thoại được listener lưu chậm hơn bản dội Zalo một chút.
+            await new Promise((resolve) => setTimeout(resolve, 1_700));
+            await delegateOrchidStaffPromise(db, ctx, dataDir, ch.id, threadId);
+          } else {
+            await runOrchidKiotStaffCommand(ch.id, threadId, command);
+          }
         } catch (error) {
-          logger.warn(`zalo.staff_delegate_fail: ${ch.id}/${threadId}: ${String(error)}`);
+          logger.warn(`zalo.staff_command_fail: ${command} ${ch.id}/${threadId}: ${String(error)}`);
         }
       },
     } : {}),
@@ -667,6 +671,10 @@ export function isPlatformRejected(err: unknown): boolean {
 }
 
 export async function sendInbox(dataDir: string, req: InboxSendRequest): Promise<{ msgIds: string[] }> {
+  if (req.peerKind === "direct" && ORCHID_SALES_CHANNEL_IDS.has(req.channelId) &&
+      /^-(?:ld|lb|cn)$/i.test(req.text?.trim() ?? "")) {
+    throw new Error("Lệnh nội bộ phải chạy trong Inbox; không gửi nguyên mã cho khách");
+  }
   const runtime = inboxRuntime(req.channelId);
   if (!runtime || !runtime.isConnected()) {
     const err = new Error(`Kênh ${platformOf(req.channelId)} chưa kết nối — vào Channels → Kết nối QR để quét lại.`) as Error & { code?: string };
@@ -1097,6 +1105,20 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
     if (!isValidThreadId(kindOf(channelId), threadId)) return reply.code(400).send({ error: "Mã hội thoại không hợp lệ" });
     const parsed = SendBody.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" });
+    const staffCommand = parsed.data.text?.trim().toLowerCase();
+    if (staffCommand === "-lb" || staffCommand === "-cn" || staffCommand === "-ld") {
+      if (!ORCHID_SALES_CHANNEL_IDS.has(channelId) || parsed.data.image || parsed.data.images?.length || parsed.data.file || parsed.data.replyToId) {
+        return reply.code(400).send({ error: "Lệnh nội bộ chỉ dùng riêng trong DM Hot 1/4/6, không kèm ảnh hoặc trích dẫn" });
+      }
+      try {
+        if (staffCommand === "-ld") {
+          await delegateOrchidStaffPromise(db, req.authCtx, dataDir, channelId, threadId);
+          return { sent: false, notice: "AI đã thực hiện lời nhắn vừa rồi" };
+        }
+        const notice = await runOrchidKiotStaffCommand(channelId, threadId, staffCommand);
+        return { sent: false, notice };
+      } catch (err) { return sendError(reply, err, channelId); }
+    }
     const thread = await getInboxThread(db, req.authCtx, channelId, threadId);
     const peerKind = thread?.kind ?? parsed.data.peerKind ?? "direct";
     let quote: InboxZaloQuote | null = null;
@@ -1153,6 +1175,9 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
     if (!(await guard(req, reply, channelId))) return;
     const parsed = NewMessageBody.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" });
+    if (/^-(?:ld|lb|cn)$/i.test(parsed.data.text?.trim() ?? "")) {
+      return reply.code(400).send({ error: "Lệnh nội bộ chỉ dùng trong hội thoại khách hàng đã có" });
+    }
     const rt = inboxRuntime(channelId);
     if (!rt?.isConnected()) return reply.code(409).send({ error: `Kênh ${platformOf(channelId)} chưa kết nối`, code: "NOT_CONNECTED" });
     let threadId = parsed.data.to ?? "";

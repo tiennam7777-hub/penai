@@ -80,6 +80,7 @@ describe("KiotViet orchid order draft", () => {
     const body = JSON.parse(options.body);
     expect(body).toMatchObject({ branchId: 55291, cashierId: 77, totalPayment: 0, makeInvoice: false,
       customer: { id: 22, code: "KH22", name: "Chị Mai" }, orderDelivery: { partnerDeliveryId: 107020 } });
+    expect(body.description).toContain("Khách chat: Chị Mai; nguồn Hot 4 / Zalo UID 12345");
     expect(body).not.toHaveProperty("soldById");
     expect(body.orderDetails).toEqual([expect.objectContaining({
       productId: 916, productCode: "SP00016", quantity: 5, price: 200_000,
@@ -199,7 +200,7 @@ describe("KiotViet orchid order draft", () => {
     expect(fetchMock.mock.calls[1]![0]).toBe("https://public.kiotapi.com/orders/50");
   });
 
-  it("updates the same unpaid slip and keeps its delivery date when the new Ok gives no new time", async () => {
+  it("fills missing slip fields only after -cn and preserves staff customer, cashier, date and address", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ access_token: "token" }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 916, code: "SP00016" }) })
@@ -207,13 +208,16 @@ describe("KiotViet orchid order draft", () => {
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 921, code: "SP00021" }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 42, code: "DH42", status: 1,
         branchId: 55291, totalPayment: 0, purchaseDate: "2026-10-18T00:53:37",
+        customerId: 99, customerCode: "KH99", customerName: "Khách nhân viên đã chọn", soldById: 66,
+        description: "Chậu: 10 cành. Màu: vàng. Giao: 09:00 19/10/2026. Địa chỉ: 495 La Xuan Oai. Giá hoa: chưa chốt. Cần bổ sung: giá bán.",
+        orderDetails: [{ productId: 916, productCode: "SP00016", quantity: 10, price: 0 }],
         orderDelivery: { expectedDelivery: "2026-10-19T09:00:00", address: "495 La Xuan Oai" } }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 42, code: "DH42" }) });
     vi.stubGlobal("fetch", fetchMock);
-    await createKiotVietOrchidDraft({ ...input, branchId: 55291, customer: "Chị Mai", zaloUid: "12345",
+    await createKiotVietOrchidDraft({ ...input, branchId: 55291, cashierUserId: 77, customer: "Chị Mai", zaloUid: "12345",
       channelName: "Hot 1", stems: 10, color: "vàng", pot: "chậu thấp", price: "1.600.000đ",
       shippingFee: "135.000đ", delivery: "09:00 26/10/2026", address: "495 La Xuan Oai",
-      existing: { orderId: 42, code: "DH42", preserveDelivery: true, preserveAddress: true } });
+      existing: { orderId: 42, code: "DH42", fillMissing: true } });
     const [url, options] = fetchMock.mock.calls[5]!;
     expect(url).toBe("https://public.kiotapi.com/orders/42");
     expect(options.method).toBe("PUT");
@@ -224,5 +228,10 @@ describe("KiotViet orchid order draft", () => {
       expectedDelivery: "2026-10-19T09:00:00" });
     expect(body.makeInvoice).toBe(false);
     expect(body.orderDetails.map((x: {productCode:string})=>x.productCode)).toEqual(["SP00016", "SP00021"]);
+    expect(body.customer).toMatchObject({ id: 99, name: "Khách nhân viên đã chọn" });
+    expect(body.cashierId).toBe(77);
+    expect(body.soldById).toBe(66);
+    expect(body.orderDetails[0].price).toBe(160000);
+    expect(body.description).toContain("Khách chat: Chị Mai; nguồn Hot 1 / Zalo UID 12345");
   });
 });

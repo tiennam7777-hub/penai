@@ -1199,13 +1199,13 @@ export class ZaloPersonalChannel implements Channel {
     const freshSelfCommand = Number.isFinite(messageAt) && messageAt > 1_000_000_000_000 &&
       Date.now() - messageAt >= -30_000 && Date.now() - messageAt <= 120_000;
     if (message.isSelf && peerKind === "direct" && freshSelfCommand && !this.sentMsgIds.has(msgId) &&
-        this.deps.onSelfCommand && /^[-/]ld$/i.test(text.trim())) {
+        this.deps.onSelfCommand && /^(?:[-/]ld|-(?:lb|cn))$/i.test(text.trim())) {
       const cliMsgId = String((message.data as { cliMsgId?: unknown }).cliMsgId ?? "");
       if (this.api && msgId && cliMsgId) {
         try {
           await this.api.undo({ msgId, cliMsgId }, threadId, ThreadType.User);
           try {
-            await this.deps.onSelfCommand(threadId);
+            await this.deps.onSelfCommand(threadId, text.trim().toLowerCase().replace(/^\//, "-") as "-ld" | "-lb" | "-cn");
           } catch (error) {
             logger.warn(`zalo.staff_command_delegate_fail: ${errorMessage(error)}`);
           }

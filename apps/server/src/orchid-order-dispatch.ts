@@ -64,6 +64,7 @@ export function parseConfirmedOrchidOrder(raw: string | null): ConfirmedOrchidOr
 export async function classifyConfirmedOrchidOrder(
   provider: Provider, model: string, messages: InboxMessageRow[],
   current: { text: string; senderName: string }, now: Date,
+  mode: "customer" | "staff" = "customer",
 ): Promise<ConfirmedOrchidOrder | null> {
   if (!current.text.trim()) return null;
   const last = messages.at(-1);
@@ -77,13 +78,14 @@ export async function classifyConfirmedOrchidOrder(
     return `${speaker}: ${m.text.trim().slice(0, 600)}`;
   }).join("\n").slice(-9_000);
   const fullTranscript = currentLogged
-    ? transcript : `${transcript}\nKhách (${current.senderName}): ${current.text.trim().slice(0, 600)}`;
+    ? transcript : mode === "staff" ? transcript
+      : `${transcript}\nKhách (${current.senderName}): ${current.text.trim().slice(0, 600)}`;
   const nowText = new Intl.DateTimeFormat("vi-VN", {
     timeZone: "Asia/Ho_Chi_Minh", dateStyle: "full", timeStyle: "short",
   }).format(now);
   const response = await provider.chat({
-    model, system: SYSTEM,
-    messages: [{ role: "user", content: `Hiện tại: ${nowText}\n\nHội thoại:\n${fullTranscript}\n\nTin khách mới nhất cần xét: ${current.text.trim().slice(0, 1000)}` }],
+    model, system: mode === "staff" ? `${SYSTEM}\nƯU TIÊN LỆNH NỘI BỘ: Nhân viên đã yêu cầu ${current.text.trim()} cho đơn hiện tại. Không đòi khách xác nhận. confirmed=true khi có đủ số cành và màu từ hội thoại. Thiếu giờ hoặc địa chỉ thì đặt deliveryDeferred/addressDeferred=true để tạo phiếu đặt hàng cần bổ sung. Không tự bịa giá, tên, màu hoặc giờ.` : SYSTEM,
+    messages: [{ role: "user", content: `Hiện tại: ${nowText}\n\nHội thoại:\n${fullTranscript}\n\n${mode === "staff" ? "Lệnh nội bộ nhân viên" : "Tin khách mới nhất cần xét"}: ${current.text.trim().slice(0, 1000)}` }],
     maxTokens: 700,
   });
   if (response.stopReason !== "end" || response.toolCalls.length) return null;
