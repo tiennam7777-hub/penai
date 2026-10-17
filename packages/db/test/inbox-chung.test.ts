@@ -16,6 +16,7 @@ import {
   recordInboxMessage,
   setInboxThreadTags,
   setInboxThreadHidden,
+  setInboxCustomerNote,
   updateInboxTagColor,
   setUserInboxChannels,
   type DbHandle,
@@ -57,6 +58,24 @@ const msg = (over: Record<string, unknown> = {}) => ({
 });
 
 describe("Inbox dùng chung (0034)", () => {
+  it("lưu ghi chú đúng khách và kênh, không chạm nhóm hay workspace khác", async () => {
+    const secondChannel = (await createChannel(dbh.db, ctxA(), {
+      kind: "whatsapp_personal", name: "WhatsApp note B", agentId: fx.agentA,
+    })).id;
+    const threadId = "note-customer-1";
+    await recordInboxMessage(dbh.db, ctxA(), wa, msg({ threadId, senderId: threadId, msgId: "note-msg-a" }));
+    await recordInboxMessage(dbh.db, ctxA(), secondChannel, msg({ threadId, senderId: threadId, msgId: "note-msg-b" }));
+    expect((await setInboxCustomerNote(dbh.db, ctxA(), wa, threadId, "Khách thích hoa tím"))?.customerNote).toBe("Khách thích hoa tím");
+    expect((await getInboxThread(dbh.db, ctxA(), wa, threadId))?.customerNoteUpdatedAt).toBeTruthy();
+    expect((await listInboxThreads(dbh.db, ctxA(), wa, { q: threadId })).threads[0]?.customerNote).toBe("Khách thích hoa tím");
+    expect((await getInboxThread(dbh.db, ctxA(), secondChannel, threadId))?.customerNote).toBe("");
+    expect(await setInboxCustomerNote(dbh.db, ctxB(), wa, threadId, "Không được" )).toBeNull();
+    expect(await setInboxCustomerNote(dbh.db, ctxA(), wa, "missing-customer", "Không được")).toBeNull();
+    const groupId = "note-group-1";
+    await recordInboxMessage(dbh.db, ctxA(), wa, msg({ threadId: groupId, peerKind: "group", msgId: "note-group-msg" }));
+    expect(await setInboxCustomerNote(dbh.db, ctxA(), wa, groupId, "Không được")).toBeNull();
+    expect((await setInboxCustomerNote(dbh.db, ctxA(), wa, threadId, ""))?.customerNote).toBe("");
+  });
   it("ẩn nhóm trong một kênh, nhóm cùng mã ở kênh khác vẫn hiện và có thể khôi phục", async () => {
     const secondChannel = (await createChannel(dbh.db, ctxA(), {
       kind: "whatsapp_personal", name: "WhatsApp A2", agentId: fx.agentA,

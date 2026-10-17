@@ -38,6 +38,7 @@ import {
   deleteInboxTag,
   setInboxThreadTags,
   setInboxThreadHidden,
+  setInboxCustomerNote,
   markInboxThreadRead,
   markAgentMessageRecalled,
   markInboxMessageRemoved,
@@ -921,6 +922,17 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
     const thread = await setInboxThreadHidden(db, req.authCtx, channelId, threadId, parsed.data.hidden);
     if (!thread) return reply.code(404).send({ error: "Không tìm thấy hội thoại" });
     broadcast(req.authCtx.workspaceId, channelId, "thread_visibility", { channelId, thread });
+    return { thread };
+  });
+
+  app.put(`${base}/:channelId/threads/:threadId/note`, async (req, reply) => {
+    const { channelId, threadId } = req.params as { channelId: string; threadId: string };
+    if (!(await guard(req, reply, channelId))) return;
+    const parsed = z.object({ note: z.string().max(10000) }).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "Ghi chú phải là văn bản tối đa 10.000 ký tự" });
+    const thread = await setInboxCustomerNote(db, req.authCtx, channelId, threadId, parsed.data.note);
+    if (!thread) return reply.code(404).send({ error: "Không tìm thấy khách trong kênh này" });
+    broadcast(req.authCtx.workspaceId, channelId, "customer_note", { channelId, threadId, note: thread.customerNote, updatedAt: thread.customerNoteUpdatedAt });
     return { thread };
   });
 

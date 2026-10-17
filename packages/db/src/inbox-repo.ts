@@ -37,6 +37,8 @@ export interface InboxThread {
   phone: string;
   isContact: boolean;
   hiddenInInbox: boolean;
+  customerNote: string;
+  customerNoteUpdatedAt: string | null;
   memberCount: number | null;
   lastMessage: string;
   lastMessageAt: string | null;
@@ -209,6 +211,8 @@ function mapThread(r: Raw): InboxThread {
     phone: String(r.phone ?? ""),
     isContact: r.is_contact === true,
     hiddenInInbox: r.hidden_in_inbox === true,
+    customerNote: String(r.customer_note ?? ""),
+    customerNoteUpdatedAt: iso(r.customer_note_updated_at),
     memberCount: r.member_count == null ? null : Number(r.member_count),
     lastMessage: String(r.last_message ?? ""),
     lastMessageAt: iso(r.last_message_at),
@@ -420,6 +424,17 @@ export async function setInboxThreadHidden(
   const res = await withWorkspace(db, ctx, (tx) => tx.execute(sql`
     UPDATE inbox_threads SET hidden_in_inbox = ${hidden}
     WHERE channel_id = ${channelId} AND thread_id = ${threadId} RETURNING 1`));
+  return res.rows.length ? getInboxThread(db, ctx, channelId, threadId) : null;
+}
+
+/** Ghi chú riêng cho khách trong đúng kênh; không tạo hội thoại mới và không gửi tin. */
+export async function setInboxCustomerNote(
+  db: Db, ctx: WorkspaceContext, channelId: string, threadId: string, note: string,
+): Promise<InboxThread | null> {
+  const res = await withWorkspace(db, ctx, (tx) => tx.execute(sql`
+    UPDATE inbox_threads SET customer_note = ${note}, customer_note_updated_at = now()
+    WHERE workspace_id = ${ctx.workspaceId} AND channel_id = ${channelId}
+      AND thread_id = ${threadId} AND kind = 'direct' RETURNING 1`));
   return res.rows.length ? getInboxThread(db, ctx, channelId, threadId) : null;
 }
 

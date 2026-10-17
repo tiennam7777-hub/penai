@@ -4234,7 +4234,7 @@ export const INDEX_HTML = `<!doctype html>
       var recalled = t.recallWaitingForCustomer;
       h.className = "ibx-head";
       var displayName = t.profileName || t.contactAlias || t.name || t.threadId;
-      h.innerHTML = '<div class="ibx-head-person"><b>' + (t.kind === "group" ? "👥 " : "👤 ") + esc(displayName) + '</b> ' + (!t.virtual && t.kind === "direct" ? ' <button type="button" class="ghost sm" id="ibxEditTags">🏷 Gắn/bỏ nhãn</button>' : '') + (!t.virtual ? ' <button type="button" class="ghost sm" id="ibxHideThread">' + (t.hiddenInInbox ? "👁 Hiện lại" : "🙈 Ẩn trò chuyện") + '</button>' : '') + (t.name && displayName !== t.name ? '<div class="muted">Zalo: ' + esc(t.name) + '</div>' : '') + ' <span class="muted">' + (t.kind === "group" ? "nhóm" : "cá nhân") + " · uid <code>" + esc(t.threadId) + "</code>" + (t.phone ? " · " + esc(t.phone) : "") + "</span></div>" +
+      h.innerHTML = '<div class="ibx-head-person"><b>' + (t.kind === "group" ? "👥 " : "👤 ") + esc(displayName) + '</b> ' + (!t.virtual && t.kind === "direct" ? ' <button type="button" class="ghost sm" id="ibxEditTags">🏷 Gắn/bỏ nhãn</button> <button type="button" class="ghost sm" id="ibxCustomerNote">📝 Ghi chú' + (t.customerNote ? ' ✓' : '') + '</button>' : '') + (!t.virtual ? ' <button type="button" class="ghost sm" id="ibxHideThread">' + (t.hiddenInInbox ? "👁 Hiện lại" : "🙈 Ẩn trò chuyện") + '</button>' : '') + (t.name && displayName !== t.name ? '<div class="muted">Zalo: ' + esc(t.name) + '</div>' : '') + ' <span class="muted">' + (t.kind === "group" ? "nhóm" : "cá nhân") + " · uid <code>" + esc(t.threadId) + "</code>" + (t.phone ? " · " + esc(t.phone) : "") + "</span></div>" +
         (t.tags && t.tags.length ? '<div class="ibx-head-tags">' + inboxTagPills(t) + '</div>' : '') +
         '<div class="row" style="gap:6px">' + (t.virtual ? '<span class="muted">Hội thoại sẽ xuất hiện trong Inbox sau khi gửi tin đầu tiên.</span>' : '<span class="muted">AI trả lời:</span><select id="ibxAi" style="padding:3px 6px"><option value="auto">Theo cấu hình kênh</option><option value="off">Tắt cho hội thoại này</option></select>') +
         (paused ? '<span class="pill">⏸️ tạm dừng tới ' + esc(ibxTime(t.pausedUntil)) + '</span>' : "") +
@@ -4242,6 +4242,7 @@ export const INDEX_HTML = `<!doctype html>
         (paused || recalled ? '<button class="ghost sm" id="ibxResume">Cho AI trả lời lại</button>' : "") + "</div>";
       var aiSelect = $("#ibxAi"); if (aiSelect) { aiSelect.value = t.aiMode || "auto"; aiSelect.onchange = function () { setAi({ mode: this.value }); }; }
       var tagButton = $("#ibxEditTags"); if (tagButton) tagButton.onclick = editInboxTags;
+      var noteButton = $("#ibxCustomerNote"); if (noteButton) noteButton.onclick = editCustomerNote;
       var hideButton = $("#ibxHideThread"); if (hideButton) hideButton.onclick = function () {
         var btn = this, tid = S.cur.threadId, hidden = !S.cur.hiddenInInbox; btn.disabled = true;
         api("/v1/inbox/" + S.ch + "/threads/" + encodeURIComponent(tid) + "/visibility", { method: "PUT", body: { hidden: hidden } }).then(function () {
@@ -4250,6 +4251,31 @@ export const INDEX_HTML = `<!doctype html>
         }).catch(function (e) { toast(e.message, true); btn.disabled = false; });
       };
       var r = $("#ibxResume"); if (r) r.onclick = function () { setAi({ resume: true }); };
+    }
+    function editCustomerNote() {
+      if (!S.cur || S.cur.virtual || S.cur.kind !== "direct") return;
+      var channelId = S.ch, threadId = S.cur.threadId;
+      var customerName = S.cur.profileName || S.cur.contactAlias || S.cur.name || threadId;
+      var dlg = el("dialog", { style: "width:460px;max-width:95vw;padding:18px" });
+      dlg.innerHTML = '<h3 style="margin:0 0 8px">Ghi chú: ' + esc(customerName) + '</h3>' +
+        '<p class="muted" style="margin:0 0 10px">Chỉ người trực Inbox thấy ghi chú này. Nội dung không gửi cho khách.</p>' +
+        '<textarea id="ibxCustomerNoteText" rows="8" maxlength="10000" style="width:100%;box-sizing:border-box" placeholder="Viết ghi chú cho khách này…"></textarea>' +
+        '<div class="dialog-actions"><button type="button" class="ghost" id="ibxCustomerNoteCancel">Đóng</button><button type="button" id="ibxCustomerNoteSave">Lưu ghi chú</button></div>';
+      document.body.appendChild(dlg);
+      $("#ibxCustomerNoteText", dlg).value = S.cur.customerNote || "";
+      $("#ibxCustomerNoteCancel", dlg).onclick = function () { dlg.close(); };
+      $("#ibxCustomerNoteSave", dlg).onclick = function () {
+        var button = this, note = $("#ibxCustomerNoteText", dlg).value; button.disabled = true;
+        api("/v1/inbox/" + channelId + "/threads/" + encodeURIComponent(threadId) + "/note", { method: "PUT", body: { note: note } }).then(function (j) {
+          if (S.ch === channelId) {
+            S.threads.forEach(function (thread) { if (thread.threadId === threadId) { thread.customerNote = j.thread.customerNote; thread.customerNoteUpdatedAt = j.thread.customerNoteUpdatedAt; } });
+            if (S.cur && S.cur.threadId === threadId) { S.cur.customerNote = j.thread.customerNote; S.cur.customerNoteUpdatedAt = j.thread.customerNoteUpdatedAt; renderHead(); }
+          }
+          dlg.close(); toast("Đã lưu ghi chú cho " + customerName);
+        }).catch(function (e) { toast(e.message, true); button.disabled = false; });
+      };
+      dlg.addEventListener("close", function () { dlg.remove(); });
+      dlg.showModal();
     }
     function editInboxTags() {
       if (!S.cur || S.cur.kind !== "direct") return;
@@ -4502,6 +4528,12 @@ export const INDEX_HTML = `<!doctype html>
         S.threads.forEach(function (thread) { if (thread.threadId === d.threadId) thread.tags = d.tags || []; });
         if (S.cur && S.cur.threadId === d.threadId) { S.cur.tags = d.tags || []; renderHead(); }
         if (S.tag) loadThreads(); else renderThreads();
+      });
+      es.addEventListener("customer_note", function (ev) {
+        var d; try { d = JSON.parse(ev.data); } catch (e) { return; }
+        if (d.channelId !== S.ch) return;
+        S.threads.forEach(function (thread) { if (thread.threadId === d.threadId) { thread.customerNote = d.note; thread.customerNoteUpdatedAt = d.updatedAt; } });
+        if (S.cur && S.cur.threadId === d.threadId) { S.cur.customerNote = d.note; S.cur.customerNoteUpdatedAt = d.updatedAt; renderHead(); }
       });
       es.addEventListener("thread_visibility", function (ev) {
         var d; try { d = JSON.parse(ev.data); } catch (e) { return; }
