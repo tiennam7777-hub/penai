@@ -73,7 +73,8 @@ import {
   type ChannelMessageLog,
   type ZaloSendSource,
 } from "@penai/channels";
-import { channelHandlers } from "./channels-runtime.js";
+import { channelHandlers, runOrchidStaffDelegation } from "./channels-runtime.js";
+import { expectsCurrentColorPhotos, latestDelegableStaffMessage, ORCHID_SALES_AGENT_ID, ORCHID_SALES_CHANNEL_IDS } from "./orchid-staff-delegation.js";
 import { readPhotoAcknowledgement } from "./photo-burst.js";
 import { inboxZaloQuote, type InboxZaloQuote } from "./inbox-quote.js";
 import { stemCountForPhoto } from "./orchid-photo-count.js";
@@ -744,6 +745,8 @@ function sendError(reply: FastifyReply, err: unknown, channelId: string) {
 export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDir: string }): void {
   const { db, dataDir } = deps;
   inboxDataDir = dataDir;
+  const activeDelegations = new Set<string>();
+  const completedDelegations = new Map<string, string>();
 
   async function guard(req: FastifyRequest, reply: FastifyReply, channelId: string): Promise<boolean> {
     if (!/^[0-9a-f-]{36}$/i.test(channelId) || !(await canUseInboxChannel(db, req.authCtx, channelId))) {
@@ -989,6 +992,67 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
       return { sent: true, msgIds: out.msgIds };
     } catch (err) {
       return sendError(reply, err, channelId);
+    }
+  });
+
+  // -ld là lệnh nội bộ của người trực, không gửi nguyên mã lệnh sang Zalo.
+  app.post(`${base}/:channelId/threads/:threadId/delegate`, async (req, reply) => {
+    const { channelId, threadId } = req.params as { channelId: string; threadId: string };
+    if (!(await guard(req, reply, channelId))) return;
+    if (!ORCHID_SALES_CHANNEL_IDS.has(channelId) || !isValidThreadId(kindOf(channelId), threadId)) {
+      return reply.code(400).send({ error: "-ld chỉ dùng trong DM Hot 1, Hot 4, Hot 6" });
+    }
+    const channel = await getChannelById(db, req.authCtx, channelId);
+    const thread = await getInboxThread(db, req.authCtx, channelId, threadId);
+    if (!channel || channel.agentId !== ORCHID_SALES_AGENT_ID || !thread || thread.kind !== "direct" ||
+        (channel.config as Record<string, unknown>)["agent_reply"] === false) {
+      return reply.code(409).send({ error: "Hội thoại này chưa bật Agent kinh doanh" });
+    }
+    if (!inboxRuntime(channelId)?.isConnected()) {
+      return reply.code(409).send({ error: "Kênh Zalo chưa kết nối; chưa giao việc cho AI" });
+    }
+    const key = `${channelId}:${threadId}`;
+    if (activeDelegations.has(key)) return reply.code(409).send({ error: "AI đang thực hiện -ld cho hội thoại này" });
+    activeDelegations.add(key);
+    try {
+      const parsed = z.object({ expectedText: z.string().trim().max(10_000).optional() }).safeParse(req.body ?? {});
+      if (!parsed.success) return reply.code(400).send({ error: "Nội dung giao việc không hợp lệ" });
+      let staffMessage: string | null = null;
+      let staffMessageId = "";
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const messages = await listInboxMessages(db, req.authCtx, channelId, threadId, { limit: 1 });
+        staffMessage = latestDelegableStaffMessage(messages);
+        staffMessageId = messages.at(-1)?.id ?? "";
+        if (!parsed.data.expectedText || staffMessage === parsed.data.expectedText) break;
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+      if (parsed.data.expectedText && staffMessage !== parsed.data.expectedText) {
+        return reply.code(409).send({ error: "Chưa thấy lời nhắn vừa gửi trong Inbox; thử lại sau một chút." });
+      }
+      if (!staffMessage) return reply.code(422).send({ error: "Tin mới nhất phải là lời nhân viên vừa nhắn cho khách. Chưa giao việc cho AI." });
+      if (completedDelegations.get(key) === staffMessageId) {
+        return reply.code(409).send({ error: "AI đã thực hiện -ld cho lời nhắn này. Hãy nhắn việc mới trước khi giao tiếp." });
+      }
+      const result = await runOrchidStaffDelegation(channelId, threadId, staffMessage, thread.name);
+      if (result.kind !== "reply" || result.text.trim() === "KHONG_LAM" ||
+          (!result.text.trim() && !result.media?.length)) {
+        return reply.code(422).send({ error: "AI chưa xác định được việc cần làm từ lời nhắn vừa rồi; chưa gửi gì cho khách." });
+      }
+      if (expectsCurrentColorPhotos(staffMessage) && !result.media?.length) {
+        return reply.code(422).send({ error: "AI chưa lấy được ảnh màu đang có; chưa gửi lời hứa suông cho khách." });
+      }
+      await sendInbox(dataDir, {
+        channelId, workspaceId: req.authCtx.workspaceId, threadId, peerKind: "direct",
+        ...(result.text.trim() ? { text: result.text } : {}),
+        ...(result.media?.length ? { filePaths: result.media } : {}),
+        source: "agent",
+      });
+      completedDelegations.set(key, staffMessageId);
+      return { delegated: true };
+    } catch (err) {
+      return sendError(reply, err, channelId);
+    } finally {
+      activeDelegations.delete(key);
     }
   });
 

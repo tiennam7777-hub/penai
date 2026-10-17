@@ -72,6 +72,23 @@ export const channelHandlers = new Map<
   { handler: InboundHandler; channel: Channel; workspaceId: string }
 >();
 
+// Lệnh từ người trực Inbox chỉ được tạo tại route đã xác thực, không đi qua Zalo.
+const orchidStaffDelegations = new WeakMap<InboundMessage, string>();
+
+export async function runOrchidStaffDelegation(
+  channelId: string, threadId: string, staffMessage: string, customerName?: string,
+): Promise<InboundResult> {
+  const entry = channelHandlers.get(channelId);
+  if (!entry || entry.channel.kind !== "zalo_personal") throw new Error("Kênh Zalo chưa sẵn sàng");
+  const msg: InboundMessage = {
+    channelId, channelKind: "zalo_personal", chatKey: `direct:${threadId}`,
+    senderId: threadId, ...(customerName ? { senderName: customerName } : {}),
+    peerKind: "direct", text: "-ld",
+  };
+  orchidStaffDelegations.set(msg, staffMessage);
+  return entry.handler(msg);
+}
+
 /**
  * Interceptor inbound: module ngoài (bộ điều phối quy trình...) đăng ký để "nghe"
  * tin nhắn kênh TRƯỚC khi agent xử lý. Trả InboundResult = đã tiêu thụ tin
@@ -570,6 +587,7 @@ export function makeInboundHandler(
   const { db } = rt.db;
   return async (msg, hooks?: RunHooks): Promise<InboundResult> => {
     const ctx = systemContext(channel.workspaceId);
+    const staffDelegation = orchidStaffDelegations.get(msg);
     const hasPhoto = (msg.media ?? []).some((m) => m.kind === "photo");
     const silentPhoto = hasPhoto && !msg.text.trim();
     const photoEditOnlyGroup = msg.channelKind === "zalo_personal" &&
@@ -592,7 +610,7 @@ export function makeInboundHandler(
 
     // Interceptor (bộ điều phối quy trình...): chạy TRƯỚC pairing/agent — phản hồi
     // của đại lý trong nhóm demo phải tới orchestrator dù người gửi chưa pair.
-    for (const interceptor of silentPhoto || autoEditPhoto ? [] : inboundInterceptors) {
+    for (const interceptor of silentPhoto || autoEditPhoto || staffDelegation ? [] : inboundInterceptors) {
       try {
         const res = await interceptor(msg);
         if (res) return res;
@@ -607,7 +625,7 @@ export function makeInboundHandler(
 
     // Inbox Zalo: nhân viên đã tắt AI cho hội thoại này, hoặc vừa trả lời tay
     // (web/điện thoại) → AI im trong lúc tạm dừng.
-    if (isPersonalChannelKind(msg.channelKind)) {
+    if (isPersonalChannelKind(msg.channelKind) && !staffDelegation) {
       const threadId = msg.chatKey.slice(msg.chatKey.indexOf(":") + 1);
       const block = await getInboxThreadAgentBlock(db, ctx, channel.id, threadId).catch((error) => {
         logger.warn(`Không đọc được trạng thái AI của hội thoại ${channel.id}/${threadId}: ${String(error)}`);
@@ -646,7 +664,7 @@ export function makeInboundHandler(
 
     // Duyệt nhóm theo thread; không bắt từng thành viên ghép nối lần nữa.
     // DM vẫn phải có pairing đã duyệt.
-    if (channel.requirePairing && !silentPhoto && !(msg.channelKind === "zalo_personal" && msg.peerKind === "group")) {
+    if (channel.requirePairing && !staffDelegation && !silentPhoto && !(msg.channelKind === "zalo_personal" && msg.peerKind === "group")) {
       const paired = await isPaired(db, ctx, channel.id, msg.senderId);
       if (!paired) {
         const pairing = await createPairing(db, ctx, channel.id, genPairingCode(), msg.senderId);
@@ -818,7 +836,7 @@ export function makeInboundHandler(
 
     // Kênh bán lan: lọc trước mọi text/tool của Agent. Adapter đã lưu tin vào
     // Inbox trước khi gọi handler; ignore chỉ ngăn AI nhắn lại cho khách.
-    if (channel.config["orchid_sales_scope"] === true) {
+    if (channel.config["orchid_sales_scope"] === true && !staffDelegation) {
       const scopeText = [msg.text, ...(msg.media ?? []).flatMap((m) => [m.text ?? "", m.note ?? ""])]
         .filter(Boolean).join("\n").trim();
       const scopeImages = (msg.media ?? []).filter((m) => m.kind === "photo" && m.dataUrl)
@@ -1055,7 +1073,15 @@ export function makeInboundHandler(
       : savedImages.length === 1 && recognizedCounts.length === 1
         ? `[DỮ KIỆN ẢNH: Ảnh khách gửi lại khớp ảnh trong thư viện chậu ${recognizedCounts[0]} cành. Dùng số cành này để trả lời; không đoán lại bằng mắt.]\n`
         : "";
-    const latestUserMessage = mergeMediaText(
+    const latestUserMessage = staffDelegation
+      ? `[LỆNH NỘI BỘ TỪ NHÂN VIÊN QUA -ld — không phải tin của khách, không gửi mã lệnh này cho khách]\n` +
+        `Nhân viên vừa nói với khách: ${staffDelegation.slice(0, 1000)}\n` +
+        `Hãy thực hiện ngay phần việc nhân viên vừa nhận làm trong đúng hội thoại này. ` +
+        `Nếu đã hứa gửi màu/ảnh hoa đang có, đọc lại thư mục shared/hinh-hoa-dang-co-42dbp ` +
+        `và chọn ảnh hiện có bằng send_file; hệ thống sẽ gửi kết quả một lần. Không chỉ nhắn lại lời hứa. ` +
+        `Nếu câu nhân viên không chỉ ra việc có thể thực hiện an toàn, chỉ trả về đúng KHONG_LAM. ` +
+        `Không tự đoán hay gửi gì cho khách.`
+      : mergeMediaText(
       quotedPhotoDataUrl
         ? `${photoStemContext}[Khách đang trả lời trực tiếp ảnh đã gửi. Ảnh đi kèm lượt này chính là ảnh khách chọn; không suy đoán theo vị trí trong album.]\n${inboundText}`
         : `${photoStemContext}${inboundText}`,
@@ -1301,6 +1327,7 @@ export function makeInboundHandler(
       logger.warn(`Chặn câu kết đảo vai xưng hô trên kênh ${channel.id}`);
       return outgoingMedia.length ? { kind: "reply", text: "", media: outgoingMedia } : { kind: "ignore" };
     }
+    if (staffDelegation && !cleanText && !outgoingMedia.length) return { kind: "ignore" };
     return {
       kind: "reply",
       // Đã có media hoặc thẻ duyệt gửi đi → final rỗng là hợp lệ (nội dung nằm
