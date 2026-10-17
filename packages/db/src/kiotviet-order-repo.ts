@@ -5,15 +5,45 @@ import { withWorkspace } from "./context.js";
 
 export async function claimKiotVietOrderDraft(
   db: Db, ctx: WorkspaceContext,
-  input: { channelId: string; threadId: string; fingerprint: string },
+  input: { channelId: string; threadId: string; fingerprint: string; payloadFingerprint: string },
 ): Promise<string | null> {
   const result = await withWorkspace(db, ctx, (tx) => tx.execute(sql`
     INSERT INTO kiotviet_order_drafts
-      (workspace_id, source_channel_id, source_thread_id, order_fingerprint)
-    VALUES (${ctx.workspaceId}, ${input.channelId}, ${input.threadId}, ${input.fingerprint})
+      (workspace_id, source_channel_id, source_thread_id, order_fingerprint, last_payload_fingerprint)
+    VALUES (${ctx.workspaceId}, ${input.channelId}, ${input.threadId}, ${input.fingerprint}, ${input.payloadFingerprint})
     ON CONFLICT (source_channel_id, source_thread_id, order_fingerprint) DO NOTHING
     RETURNING id`));
   return result.rows[0]?.id ? String(result.rows[0].id) : null;
+}
+
+export async function claimKiotVietOrderUpdate(
+  db: Db, ctx: WorkspaceContext,
+  input: { channelId: string; threadId: string; fingerprint: string; payloadFingerprint: string },
+): Promise<{ id: string; orderId: number; code: string } | null> {
+  const result = await withWorkspace(db, ctx, (tx) => tx.execute(sql`
+    UPDATE kiotviet_order_drafts SET status = 'updating', updated_at = now()
+    WHERE workspace_id = ${ctx.workspaceId}
+      AND source_channel_id = ${input.channelId} AND source_thread_id = ${input.threadId}
+      AND order_fingerprint = ${input.fingerprint} AND status = 'sent'
+      AND kiot_order_id IS NOT NULL AND kiot_order_code IS NOT NULL
+      AND last_payload_fingerprint IS DISTINCT FROM ${input.payloadFingerprint}
+    RETURNING id, kiot_order_id, kiot_order_code`));
+  const row = result.rows[0];
+  return row ? { id: String(row.id), orderId: Number(row.kiot_order_id), code: String(row.kiot_order_code) } : null;
+}
+
+export async function finishKiotVietOrderUpdate(
+  db: Db, ctx: WorkspaceContext, id: string,
+  result: { payloadFingerprint: string } | { error: string },
+): Promise<void> {
+  await withWorkspace(db, ctx, (tx) => tx.execute(sql`
+    UPDATE kiotviet_order_drafts SET
+      status = ${"error" in result ? "failed" : "sent"},
+      last_payload_fingerprint = ${"payloadFingerprint" in result ? result.payloadFingerprint : sql`last_payload_fingerprint`},
+      error = ${"error" in result ? result.error.slice(0, 500) : null},
+      bill_image_status = ${"error" in result ? sql`bill_image_status` : "pending"},
+      updated_at = now()
+    WHERE id = ${id}`));
 }
 
 export async function finishKiotVietOrderDraft(

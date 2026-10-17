@@ -190,12 +190,39 @@ describe("KiotViet orchid order draft", () => {
         customerName: "Chị Mai", description: "Chậu 5 cành, màu vàng", orderDetails: [
           { productCode: "SP00016", productName: "LAN HỒ ĐIỆP", quantity: 5, price: 200_000 },
         ], orderDelivery: { partnerDeliveryId: 107020, expectedDelivery: "2026-10-19T09:00:00",
-          partnerDelivery: { name: "Anh Sang" } } }) });
+          partnerDelivery: { code: "DT000001", name: "Anh Sang" } } }) });
     vi.stubGlobal("fetch", fetchMock);
     await expect(readKiotVietOrderSlip({ ...input, orderId: 50, code: "DH50" })).resolves.toMatchObject({
       total: 1_000_000, customer: "Chị Mai", partner: "Anh Sang",
       details: [{ code: "SP00016", quantity: 5, price: 200_000 }],
     });
     expect(fetchMock.mock.calls[1]![0]).toBe("https://public.kiotapi.com/orders/50");
+  });
+
+  it("updates the same unpaid slip and keeps its delivery date when the new Ok gives no new time", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ access_token: "token" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 916, code: "SP00016" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [{ id: 22, code: "KH22", name: "Chị Mai" }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 921, code: "SP00021" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 42, code: "DH42", status: 1,
+        branchId: 55291, totalPayment: 0, purchaseDate: "2026-10-18T00:53:37",
+        orderDelivery: { expectedDelivery: "2026-10-19T09:00:00", address: "495 La Xuan Oai" } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 42, code: "DH42" }) });
+    vi.stubGlobal("fetch", fetchMock);
+    await createKiotVietOrchidDraft({ ...input, branchId: 55291, customer: "Chị Mai", zaloUid: "12345",
+      channelName: "Hot 1", stems: 10, color: "vàng", pot: "chậu thấp", price: "1.600.000đ",
+      shippingFee: "135.000đ", delivery: "09:00 26/10/2026", address: "495 La Xuan Oai",
+      existing: { orderId: 42, code: "DH42", preserveDelivery: true, preserveAddress: true } });
+    const [url, options] = fetchMock.mock.calls[5]!;
+    expect(url).toBe("https://public.kiotapi.com/orders/42");
+    expect(options.method).toBe("PUT");
+    const body = JSON.parse(options.body);
+    expect(body.id).toBe(42);
+    expect(body.orderDelivery).toMatchObject({ type: 1, partnerDeliveryId: 107020,
+      partnerDelivery: { code: "DT000001", name: "Anh Sang" },
+      expectedDelivery: "2026-10-19T09:00:00" });
+    expect(body.makeInvoice).toBe(false);
+    expect(body.orderDetails.map((x: {productCode:string})=>x.productCode)).toEqual(["SP00016", "SP00021"]);
   });
 });

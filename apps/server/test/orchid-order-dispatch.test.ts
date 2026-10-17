@@ -4,6 +4,7 @@ import {
   formatOrchidOrderCancellation, formatOrchidOrderDispatch,
   mayCancelOrchidOrder, mayConfirmOrchidOrder, orchidCancellationFingerprint,
   orchidOrderFingerprint, parseConfirmedOrchidOrder, parseOrchidOrderCancellation,
+  orchidOrderSessionFingerprint, orchidOrderPayloadFingerprint,
 } from "../src/orchid-order-dispatch.js";
 import type { Provider } from "@penai/providers";
 
@@ -47,6 +48,20 @@ describe("orchid order dispatch", () => {
     expect(result).toBeNull();
     expect(prompt).toContain("Khách (Tiến Nam): Ok e");
     expect(prompt).toContain("Tin khách mới nhất cần xét: Ok e");
+  });
+  it("keeps one order key when later confirmations add a price", () => {
+    const history = [
+      { id: "47330", direction: "in", text: "/new" },
+      { id: "47332", direction: "in", text: "A dat chau 10 cay vang, sang thu 2 giao" },
+      { id: "47340", direction: "in", text: "Ok e" },
+    ] as Parameters<typeof orchidOrderSessionFingerprint>[0];
+    const base = { customer: "Anh Nam", stems: 10, color: "vàng", pot: "chậu lan",
+      price: null, delivery: "09:00 19/10/2026" };
+    const now = new Date("2026-10-17T17:57:00Z");
+    expect(orchidOrderSessionFingerprint(history, base, now)).toBe(
+      orchidOrderSessionFingerprint([...history, { id: "47354", direction: "in", text: "Ok e" } as typeof history[number]],
+        { ...base, price: "1.600.000đ" }, now));
+    expect(orchidOrderPayloadFingerprint(base)).not.toBe(orchidOrderPayloadFingerprint({ ...base, price: "1.600.000đ" }));
   });
 });
 

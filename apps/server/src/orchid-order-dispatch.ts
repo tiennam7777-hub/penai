@@ -104,6 +104,26 @@ export function orchidOrderFingerprint(order: ConfirmedOrchidOrder): string {
   return createHash("sha256").update(values.join("\u001f")).digest("hex");
 }
 
+/** Stable across later "Ok" and price updates for the same customer order. */
+export function orchidOrderSessionFingerprint(messages: InboxMessageRow[], order: ConfirmedOrchidOrder, now: Date): string {
+  const reset = [...messages].reverse().find((m) => m.direction === "in" && /^\/new\s*$/i.test(m.text.trim()));
+  const afterReset = reset ? messages.slice(messages.indexOf(reset) + 1) : messages;
+  const starts = afterReset.filter((m) => m.direction === "in" &&
+    /(?:đặt|dat|lấy|lay|chốt|chot).*(?:chậu|chau|cây|cay|cành|canh|lan)/i.test(m.text));
+  const anchor = starts.length ? `order:${starts.at(-1)!.id}` : reset ? `reset:${reset.id}`
+    : `day:${new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Ho_Chi_Minh" }).format(now)}:${order.stems}:${order.color}`;
+  return `session:${createHash("sha256").update(anchor).digest("hex")}`;
+}
+
+export function orchidOrderPayloadFingerprint(order: ConfirmedOrchidOrder): string {
+  return createHash("sha256").update(JSON.stringify({
+    stems: order.stems, color: order.color, pot: order.pot, price: order.price,
+    delivery: order.delivery, address: order.address, recipientPhone: order.recipientPhone,
+    cardText: order.cardText, instructions: order.instructions, shippingFee: order.shippingFee,
+    vatFee: order.vatFee, companyInvoice: order.companyInvoice,
+  })).digest("hex");
+}
+
 export interface OrchidOrderCancellation {
   scope: "all" | "partial";
   cancelled: string;

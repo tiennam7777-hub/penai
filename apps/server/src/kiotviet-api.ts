@@ -77,6 +77,7 @@ export async function createKiotVietOrchidDraft(input: {
   shippingFee?: string | null;
   vatFee?: string | null;
   companyInvoice?: boolean;
+  existing?: { orderId: number; code: string; preserveDelivery: boolean; preserveAddress: boolean };
 }): Promise<{ orderId: number; code: string; customerName: string; description: string }> {
   const signal = AbortSignal.timeout(20_000);
   const token = await accessToken(input.clientId, input.clientSecret, signal);
@@ -135,19 +136,49 @@ export async function createKiotVietOrchidDraft(input: {
     makeInvoice: false,
     orderDetails: details,
     orderDelivery: {
+      type: 1,
       partnerDeliveryId: 107020, // DT000001 Anh Sang, confirmed in this retailer's order history.
+      partnerDelivery: { code: "DT000001", name: "Anh Sang" },
       receiver: customer.name,
       ...(input.recipientPhone ? { contactNumber: input.recipientPhone } : {}),
       ...(input.address ? { address: input.address } : {}),
       ...(expectedDelivery ? { expectedDelivery } : {}),
     },
   };
+  if (input.existing) {
+    const currentResponse = await fetch(`https://public.kiotapi.com/orders/${input.existing.orderId}`, { headers, signal });
+    if (!currentResponse.ok) throw new Error(`Không đọc được phiếu ${input.existing.code} để cập nhật`);
+    const currentPayload = await currentResponse.json() as Record<string, unknown>;
+    const current = (currentPayload.data && typeof currentPayload.data === "object"
+      ? currentPayload.data : currentPayload) as Record<string, unknown>;
+    if (current.id !== input.existing.orderId || current.code !== input.existing.code || current.status !== 1 ||
+        current.branchId !== input.branchId || Number(current.totalPayment ?? 0) !== 0) {
+      throw new Error(`Phiếu ${input.existing.code} đã thay đổi; cần nhân viên kiểm tra trước khi cập nhật`);
+    }
+    const oldDelivery = current.orderDelivery && typeof current.orderDelivery === "object"
+      ? current.orderDelivery as Record<string, unknown> : {};
+    if (input.existing.preserveDelivery && typeof oldDelivery.expectedDelivery === "string") {
+      body.orderDelivery.expectedDelivery = oldDelivery.expectedDelivery;
+      const oldTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.exec(oldDelivery.expectedDelivery)?.[0];
+      if (oldTime) {
+        const date = `${oldTime.slice(11, 16)} ${oldTime.slice(8, 10)}/${oldTime.slice(5, 7)}/${oldTime.slice(0, 4)}`;
+        body.description = body.description.replace(`Giao: ${clean(input.delivery ?? "khách báo sau")}.`, `Giao: ${date}.`);
+      }
+    }
+    if (input.existing.preserveAddress && typeof oldDelivery.address === "string" && oldDelivery.address) {
+      body.orderDelivery.address = oldDelivery.address;
+      body.description = body.description.replace(`Địa chỉ: ${clean(input.address ?? "khách báo sau")}.`,
+        `Địa chỉ: ${clean(oldDelivery.address)}.`);
+    }
+    body.purchaseDate = String(current.purchaseDate ?? body.purchaseDate);
+  }
   // Never retry POST automatically. A timeout can occur after KiotViet accepted the order.
-  const response = await fetch("https://public.kiotapi.com/orders", {
-    method: "POST", headers: { ...headers, "Content-Type": "application/json" },
-    body: JSON.stringify(body), signal,
+  const response = await fetch(input.existing
+    ? `https://public.kiotapi.com/orders/${input.existing.orderId}` : "https://public.kiotapi.com/orders", {
+    method: input.existing ? "PUT" : "POST", headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify(input.existing ? { ...body, id: input.existing.orderId } : body), signal,
   });
-  if (!response.ok) throw new Error(`KiotViet từ chối tạo đơn nháp (HTTP ${response.status})`);
+  if (!response.ok) throw new Error(`KiotViet từ chối ${input.existing ? "cập nhật" : "tạo"} phiếu đặt hàng (HTTP ${response.status})`);
   const payload = await response.json() as Record<string, unknown>;
   const order = (payload.data && typeof payload.data === "object" ? payload.data : payload) as Record<string, unknown>;
   if (!Number.isSafeInteger(order.id) || Number(order.id) <= 0 || typeof order.code !== "string" || !order.code) {
@@ -185,7 +216,9 @@ export async function readKiotVietOrderSlip(input: {
     ? order.orderDelivery as Record<string, unknown> : {};
   const partner = delivery.partnerDelivery && typeof delivery.partnerDelivery === "object"
     ? delivery.partnerDelivery as Record<string, unknown> : {};
-  if (delivery.partnerDeliveryId !== 107020) throw new Error(`Phiếu ${input.code} chưa gắn đúng đối tác Anh Sang`);
+  if (Number(delivery.partnerDeliveryId) !== 107020 || partner.code !== "DT000001" || partner.name !== "Anh Sang") {
+    throw new Error(`Phiếu ${input.code} chưa gắn đúng đối tác Anh Sang`);
+  }
   return { code: input.code, customer: String(order.customerName ?? ""),
     description: String(order.description ?? ""), total: Number(order.total), details,
     partner: String(partner.name ?? "Anh Sang"),
