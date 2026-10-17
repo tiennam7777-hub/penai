@@ -76,6 +76,7 @@ import { orchidCompanyPaymentContext } from "./orchid-payment-context.js";
 import { classifyOrchidFlowerComplaint, formatOrchidFlowerComplaintDispatch, orchidFlowerComplaintFingerprint } from "./orchid-flower-complaint.js";
 import { createKiotVietOrchidDraft, readKiotVietOrderSlip } from "./kiotviet-api.js";
 import { withKiotVietSlipImage } from "./kiotviet-slip-image.js";
+import { kiotVietBillNotice } from "./kiotviet-bill-notice.js";
 import { requestedOrchidYellowSamples, orchidYellowSamplePath } from "./orchid-yellow-samples.js";
 
 /** Handler + channel theo channelId — cho webhook route (WhatsApp, Teams) dùng. */
@@ -663,8 +664,9 @@ export function makeInboundHandler(
         const slip = await readKiotVietOrderSlip({ retailer: credentials.retailer,
           clientId: common.clientId, clientSecret: common.clientSecret,
           orderId: saved.orderId, code: saved.code });
-        const notice = `${command === "-lb" ? "Đã lên bill Đặt Hàng" : "Đã cập nhật bill Đặt Hàng"} ${saved.code} cho ${customer}.`;
-        const ids = await withKiotVietSlipImage(slip, (path) => runtime.sendManual({
+        const notice = kiotVietBillNotice(command === "-lb" ? "create" : "update", saved.code, customer);
+        const ids = await withKiotVietSlipImage({ ...slip, delivery: order.delivery },
+          { dataDir: rt.config.dataDir, workspaceId: ctx.workspaceId, channelId: channel.id }, (path) => runtime.sendManual({
           threadId: billGroupId, peerKind: "group", text: notice, filePaths: [path],
           source: "agent", threadName: "Đã Lên Bill",
         }));
@@ -1334,9 +1336,9 @@ export function makeInboundHandler(
                       retailer: credentials.retailer, clientId: common.clientId, clientSecret: common.clientSecret,
                       orderId: saved.orderId, code: saved.code,
                     });
-                    const priceNotice = order.price ? "" : " Giá chưa chốt; phiếu tạm 0đ, nhân viên dùng -cn để bổ sung.";
-                    const ids = await withKiotVietSlipImage({ ...slip, delivery: order.delivery }, (path) => runtime.sendManual({
-                      threadId: billGroupId, peerKind: "group", text: `Đã lên bill Đặt Hàng ${saved.code} cho ${customer}.${priceNotice}`, filePaths: [path],
+                    const ids = await withKiotVietSlipImage({ ...slip, delivery: order.delivery },
+                      { dataDir: rt.config.dataDir, workspaceId: ctx.workspaceId, channelId: channel.id }, (path) => runtime.sendManual({
+                      threadId: billGroupId, peerKind: "group", text: kiotVietBillNotice("create", saved.code, customer), filePaths: [path],
                       source: "agent", threadName: "Đã Lên Bill",
                     }));
                     if (!ids.length) throw new Error("Zalo không trả mã ảnh đã gửi");
