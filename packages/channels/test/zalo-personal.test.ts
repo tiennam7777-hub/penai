@@ -15,6 +15,25 @@ import {
 import { supportedChannelKinds } from "../src/manager.js";
 
 describe("Zalo photo download", () => {
+  it("keeps an Inbox copy of an incoming photo before its CDN link expires", async () => {
+    const onMessageLog = vi.fn();
+    const saveInboxFile = vi.fn(async () => "/saved/inbox-photo.jpg");
+    const channel = new ZaloPersonalChannel({
+      id: "zp-inbox-photo", name: "Zalo", token: "{}", config: {}, requirePairing: true,
+      onInbound: async () => ({ kind: "ignore" }), onMessageLog, saveInboxFile,
+    });
+    const bytes = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(bytes, { status: 200, headers: { "content-type": "image/jpeg" } })));
+    try {
+      await (channel as unknown as { logListenerMessage: (message: Message, peerKind: "direct", threadId: string, senderId: string, senderName: string) => Promise<void> })
+        .logListenerMessage({ isSelf: false, data: { msgId: "photo-1", msgType: "chat.photo", content: { href: "https://photo-stal-1.zdn.vn/gr/jpg/example.jpg" } } } as Message,
+          "direct", "customer-1", "customer-1", "Chị Mai");
+      expect(saveInboxFile).toHaveBeenCalledWith(bytes, "jpg");
+      expect(onMessageLog).toHaveBeenCalledWith(expect.objectContaining({ contentType: "photo", media: expect.objectContaining({ localPath: "/saved/inbox-photo.jpg" }) }));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
   it("retries an empty CDN response before handing the image to OC2", async () => {
     const channel = new ZaloPersonalChannel({
       id: "zp-photo", name: "Zalo", token: "{}", config: {}, requirePairing: true,

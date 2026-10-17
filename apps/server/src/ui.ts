@@ -200,6 +200,18 @@ export const INDEX_HTML = `<!doctype html>
   .ibx-meta { font-size: .72rem; opacity: .8; text-align: right; flex-shrink: 0; }
   .ibx-badge { display: inline-block; background: #ef4444; color: #fff; border-radius: 999px; padding: 0 7px; font-size: .72rem; margin-top: 3px; }
   .ibx-chat { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .ibx-main { flex:1; display:flex; min-height:0; min-width:0; }
+  .ibx-details { width:300px; flex:none; border-left:1px solid var(--border); background:var(--card); display:flex; flex-direction:column; min-height:0; }
+  .ibx-details-top { display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-bottom:1px solid var(--border); }
+  .ibx-details-tabs, .ibx-details-cats { display:flex; gap:5px; padding:8px; flex-wrap:wrap; border-bottom:1px solid var(--border); }
+  .ibx-details-tabs button.active, .ibx-details-cats button.active { background:var(--accent); color:#fff; }
+  .ibx-details-body { overflow-y:auto; flex:1; padding:10px; }
+  .ibx-media-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; }
+  .ibx-media-tile { width:100%; aspect-ratio:1; overflow:hidden; border:1px solid var(--border); border-radius:6px; padding:0; background:rgba(128,128,128,.08); cursor:pointer; }
+  .ibx-media-tile img { width:100%; height:100%; object-fit:cover; }
+  .ibx-explore-row { display:block; width:100%; text-align:left; border:1px solid var(--border); border-radius:7px; padding:8px; margin:0 0 7px; background:transparent; color:inherit; overflow-wrap:anywhere; cursor:pointer; }
+  .ibx-explore-row:hover { background:rgba(128,128,128,.1); }
+  .ibx-explore-meta { font-size:.75rem; opacity:.7; margin-top:4px; }
   .ibx-head { padding: 10px 14px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
   .ibx-msgs { flex: 1; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
   .ibx-msg { max-width: 72%; display: flex; flex-direction: column; }
@@ -248,6 +260,7 @@ export const INDEX_HTML = `<!doctype html>
   .ibx-rx { display: flex; gap: 3px; flex-wrap: wrap; margin: 2px 4px 0; }
   .ibx-rx span { font-size: .78rem; background: rgba(128,128,128,.14); border-radius: 999px; padding: 0 6px; cursor: default; }
   .ibx-compose textarea { flex: 1; resize: vertical; min-height: 42px; }
+  @media (max-width: 1100px) { .ibx-chat { position:relative; } .ibx-details { position:absolute; z-index:5; right:0; top:0; bottom:0; width:min(330px,100%); box-shadow:-5px 0 18px rgba(0,0,0,.16); } }
   @media (max-width: 860px) { .ibx { flex-direction: column; height: auto; } .ibx-list { width: 100%; max-height: 300px; border-right: 0; border-bottom: 1px solid var(--border); } .ibx-msgs { min-height: 360px; } .ibx-msg { max-width: 90%; } }
 </style>
 </head>
@@ -3894,14 +3907,15 @@ export const INDEX_HTML = `<!doctype html>
 
   PAGES.inbox = function () {
     var m = page("Inbox", "Nhiều người cùng xem và trả lời khách trên Zalo cá nhân, WhatsApp cá nhân. Nhân viên trả lời thì AI tự tạm im trong hội thoại đó.");
-    var S = { channels: [], canManage: false, ch: null, threads: [], total: 0, tags: [], tag: "", quick: [], quickMatches: [], quickToken: null, quickIndex: 0, hidden: false, cur: null, msgs: [], filter: "", kind: "", imgs: [], loadingAttach: false, file: null, reply: null, es: null, seq: 0, lastStaffSent: null };
+    var S = { channels: [], canManage: false, ch: null, threads: [], total: 0, tags: [], tag: "", quick: [], quickMatches: [], quickToken: null, quickIndex: 0, hidden: false, cur: null, msgs: [], filter: "", kind: "", imgs: [], loadingAttach: false, file: null, reply: null, es: null, seq: 0, lastStaffSent: null,
+      detailsOpen: false, detailsTab: "info", detailsCategory: "media", exploreRows: [], exploreNext: null, exploreSeq: 0, exploreQ: "", exploreSender: "", exploreDirection: "", exploreSenders: [], jumped: false };
     var top = el("div", { "class": "row", style: "margin-bottom:10px" });
     top.innerHTML = '<select id="ibxCh" style="max-width:260px"></select><span id="ibxSt" class="muted"></span><span style="flex:1"></span>' +
       '<button class="ghost sm" id="ibxQuick">⚡ Tin nhắn nhanh</button><button class="ghost sm" id="ibxFriend" style="display:none">＋ Kết bạn</button><button class="ghost sm" id="ibxNew">＋ Nhắn tin mới</button><button class="ghost sm" id="ibxSync" style="display:none">🔄 Đồng bộ danh bạ</button><button class="ghost sm" id="ibxSet" style="display:none">⚙️ Cài đặt</button>';
     m.appendChild(top);
     var wrap = el("div", { "class": "ibx" });
     wrap.innerHTML = '<div class="ibx-list"><div class="row" style="padding:8px"><input id="ibxQ" placeholder="Tìm tên, uid, SĐT…"><select id="ibxKind" style="flex:0 0 auto;min-width:0"><option value="">Tất cả</option><option value="direct">Cá nhân</option><option value="group">Nhóm</option><option value="unread">Chưa đọc</option></select></div><div class="row" style="padding:0 8px 8px;gap:6px"><select id="ibxTag" style="flex:1;min-width:0"><option value="">Mọi nhãn Inbox</option></select><select id="ibxHidden" style="flex:0 0 auto;min-width:0" title="Xem hội thoại đang hiện hoặc đã ẩn"><option value="0">Đang hiện</option><option value="1">Đã ẩn</option></select></div><div id="ibxThreads" class="ibx-threads"></div></div>' +
-      '<div class="ibx-chat"><div id="ibxHead" class="ibx-head muted">Chọn một hội thoại bên trái.</div><div id="ibxMsgs" class="ibx-msgs"></div>' +
+      '<div class="ibx-chat"><div id="ibxHead" class="ibx-head muted">Chọn một hội thoại bên trái.</div><div class="ibx-main"><div id="ibxMsgs" class="ibx-msgs"></div><aside id="ibxDetails" class="ibx-details" style="display:none"><div class="ibx-details-top"><b>Thông tin hội thoại</b><button type="button" class="ghost sm" id="ibxDetailsClose" aria-label="Đóng thông tin">✕</button></div><div class="ibx-details-tabs"><button type="button" class="ghost sm" id="ibxInfoTab">Ảnh & tệp</button><button type="button" class="ghost sm" id="ibxSearchTab">🔎 Tìm tin</button></div><div id="ibxDetailsBody" class="ibx-details-body"></div></aside></div>' +
       '<div class="ibx-compose" id="ibxCompose" style="display:none"><div id="ibxReply"></div><div id="ibxImg"></div><div id="ibxQuickSuggestions" class="ibx-quick-suggestions"></div><div class="row" style="align-items:flex-end"><textarea id="ibxText" rows="2" placeholder="Nhập tin nhắn… (-ld: giao AI làm việc vừa hứa; -mã: tin nhắn nhanh; Enter để gửi)"></textarea><input type="file" id="ibxFile" multiple accept="image/png,image/jpeg,image/gif,image/webp,.pdf,.doc,.docx,.xls,.xlsx" hidden><button class="ghost" id="ibxAttach" title="Chọn tối đa 6 ảnh hoặc một file Word, Excel, PDF">📎</button><button class="ghost" id="ibxDelegate" style="display:none" title="Lệnh nội bộ, không gửi -ld cho khách">AI làm giúp</button><button id="ibxSend">Gửi</button></div></div></div>';
     m.appendChild(wrap);
 
@@ -4229,20 +4243,23 @@ export const INDEX_HTML = `<!doctype html>
     }
     function renderHead() {
       var t = S.cur, h = $("#ibxHead");
-      if (!t) { h.innerHTML = "Chọn một hội thoại bên trái."; return; }
+      if (!t) { h.innerHTML = "Chọn một hội thoại bên trái."; renderDetails(); return; }
       var paused = t.pausedUntil && new Date(t.pausedUntil).getTime() > Date.now();
       var recalled = t.recallWaitingForCustomer;
       h.className = "ibx-head";
       var displayName = t.profileName || t.contactAlias || t.name || t.threadId;
       h.innerHTML = '<div class="ibx-head-person"><b>' + (t.kind === "group" ? "👥 " : "👤 ") + esc(displayName) + '</b> ' + (!t.virtual && t.kind === "direct" ? ' <button type="button" class="ghost sm" id="ibxEditTags">🏷 Gắn/bỏ nhãn</button> <button type="button" class="ghost sm" id="ibxCustomerNote">📝 Ghi chú' + (t.customerNote ? ' ✓' : '') + '</button>' : '') + (!t.virtual ? ' <button type="button" class="ghost sm" id="ibxHideThread">' + (t.hiddenInInbox ? "👁 Hiện lại" : "🙈 Ẩn trò chuyện") + '</button>' : '') + (t.name && displayName !== t.name ? '<div class="muted">Zalo: ' + esc(t.name) + '</div>' : '') + ' <span class="muted">' + (t.kind === "group" ? "nhóm" : "cá nhân") + " · uid <code>" + esc(t.threadId) + "</code>" + (t.phone ? " · " + esc(t.phone) : "") + "</span></div>" +
         (t.tags && t.tags.length ? '<div class="ibx-head-tags">' + inboxTagPills(t) + '</div>' : '') +
-        '<div class="row" style="gap:6px">' + (t.virtual ? '<span class="muted">Hội thoại sẽ xuất hiện trong Inbox sau khi gửi tin đầu tiên.</span>' : '<span class="muted">AI trả lời:</span><select id="ibxAi" style="padding:3px 6px"><option value="auto">Theo cấu hình kênh</option><option value="off">Tắt cho hội thoại này</option></select>') +
+        '<div class="row" style="gap:6px">' + (t.virtual ? '<span class="muted">Hội thoại sẽ xuất hiện trong Inbox sau khi gửi tin đầu tiên.</span>' : '<button type="button" class="ghost sm" id="ibxDetailsToggle">📁 Ảnh, tệp & tìm tin</button><span class="muted">AI trả lời:</span><select id="ibxAi" style="padding:3px 6px"><option value="auto">Theo cấu hình kênh</option><option value="off">Tắt cho hội thoại này</option></select>') +
         (paused ? '<span class="pill">⏸️ tạm dừng tới ' + esc(ibxTime(t.pausedUntil)) + '</span>' : "") +
         (recalled ? '<span class="pill">⏸️ chờ khách hỏi mới sau khi thu hồi tin AI</span>' : "") +
         (paused || recalled ? '<button class="ghost sm" id="ibxResume">Cho AI trả lời lại</button>' : "") + "</div>";
       var aiSelect = $("#ibxAi"); if (aiSelect) { aiSelect.value = t.aiMode || "auto"; aiSelect.onchange = function () { setAi({ mode: this.value }); }; }
       var tagButton = $("#ibxEditTags"); if (tagButton) tagButton.onclick = editInboxTags;
       var noteButton = $("#ibxCustomerNote"); if (noteButton) noteButton.onclick = editCustomerNote;
+      var detailsButton = $("#ibxDetailsToggle"); if (detailsButton) detailsButton.onclick = function () {
+        S.detailsOpen = !S.detailsOpen; renderDetails(); if (S.detailsOpen) { loadExplore(false); loadExploreSenders(); }
+      };
       var hideButton = $("#ibxHideThread"); if (hideButton) hideButton.onclick = function () {
         var btn = this, tid = S.cur.threadId, hidden = !S.cur.hiddenInInbox; btn.disabled = true;
         api("/v1/inbox/" + S.ch + "/threads/" + encodeURIComponent(tid) + "/visibility", { method: "PUT", body: { hidden: hidden } }).then(function () {
@@ -4277,6 +4294,116 @@ export const INDEX_HTML = `<!doctype html>
       dlg.addEventListener("close", function () { dlg.remove(); });
       dlg.showModal();
     }
+    function exploreSenderName(x) {
+      if (x.direction === "in") return x.senderName || "Khách";
+      if (x.source === "agent") return "AI";
+      return x.webUserName || x.senderName || "Nhân viên";
+    }
+    function exploreFileUrl(x) {
+      var md = x.media || {};
+      if (md.file) return "/v1/inbox/" + S.ch + "/file?p=" + encodeURIComponent(md.file);
+      return String(md.url || "").startsWith("https://") || String(md.url || "").startsWith("http://") ? md.url : "";
+    }
+    function exploreLink(x) {
+      var md = x.media || {};
+      if (String(md.url || "").startsWith("https://") || String(md.url || "").startsWith("http://")) return md.url;
+      var words = String(x.text || "").replaceAll(String.fromCharCode(10), " ").split(" ");
+      for (var i = 0; i < words.length; i++) if (words[i].startsWith("https://") || words[i].startsWith("http://")) return words[i];
+      return "";
+    }
+    function renderExploreRows() {
+      var box = $("#ibxExploreRows"), more = $("#ibxExploreMore"); if (!box) return;
+      box.innerHTML = "";
+      var rows = S.exploreRows;
+      if (!rows.length) box.appendChild(el("div", { "class": "muted", style: "padding:12px 0" }, "Chưa có mục phù hợp trong lịch sử PenAI đã lưu."));
+      var grid = S.detailsTab === "info" && S.detailsCategory === "media" ? el("div", { "class": "ibx-media-grid" }) : null;
+      rows.forEach(function (x) {
+        var url = exploreFileUrl(x), label = exploreSenderName(x) + " · " + ibxTime(x.sentAt);
+        if (grid && x.contentType === "photo" && url) {
+          var tile = el("button", { type: "button", "class": "ibx-media-tile", title: label + " — xem ảnh" });
+          var img = el("img", { src: url, alt: "Ảnh từ " + exploreSenderName(x), loading: "lazy", referrerpolicy: "no-referrer" });
+          tile.appendChild(img); tile.onclick = function () { showInboxPhoto(url); }; grid.appendChild(tile);
+        } else {
+          var row = el("div", { "class": "ibx-explore-row" });
+          var title = x.contentType === "file" ? "📎 " + ((x.media || {}).name || "Tài liệu") :
+            x.contentType === "video" ? "🎬 Video" : x.contentType === "photo" ? "🖼 Ảnh" :
+            S.detailsCategory === "link" && S.detailsTab === "info" ? "🔗 " + (exploreLink(x) || "Liên kết") :
+            String(x.text || (x.media && x.media.name) || "[Tin không có chữ]").slice(0, 180);
+          var jump = el("button", { type: "button", "class": "ghost sm", style: "display:block;width:100%;text-align:left;white-space:normal;overflow-wrap:anywhere" }, esc(title));
+          jump.onclick = function () { jumpToExploreMessage(x.id); }; row.appendChild(jump);
+          row.appendChild(el("div", { "class": "ibx-explore-meta" }, esc(label)));
+          var link = x.contentType === "file" || x.contentType === "video" ? url :
+            S.detailsCategory === "link" && S.detailsTab === "info" ? exploreLink(x) : "";
+          if (link) {
+            var a = el("a", { href: link, target: "_blank", rel: "noopener noreferrer", style: "display:inline-block;margin-top:5px;font-size:.8rem" }, x.contentType === "file" ? "Mở / tải tệp ↗" : "Mở liên kết ↗");
+            row.appendChild(a);
+          }
+          box.appendChild(row);
+        }
+      });
+      if (grid) box.prepend(grid);
+      if (more) more.style.display = S.exploreNext ? "" : "none";
+    }
+    function renderDetails() {
+      var panel = $("#ibxDetails"); if (!panel) return;
+      panel.style.display = S.detailsOpen && S.cur && !S.cur.virtual ? "" : "none";
+      if (panel.style.display === "none") return;
+      $("#ibxInfoTab").classList.toggle("active", S.detailsTab === "info");
+      $("#ibxSearchTab").classList.toggle("active", S.detailsTab === "search");
+      var body = $("#ibxDetailsBody");
+      if (S.detailsTab === "info") {
+        body.innerHTML = '<div class="ibx-details-cats"><button type="button" class="ghost sm" data-cat="media">Ảnh / Video</button><button type="button" class="ghost sm" data-cat="file">Tài liệu</button><button type="button" class="ghost sm" data-cat="link">Liên kết</button></div><div id="ibxExploreRows"></div><button type="button" class="ghost sm" id="ibxExploreMore" style="display:none;width:100%">Xem thêm</button>';
+        Array.prototype.forEach.call(body.querySelectorAll("[data-cat]"), function (button) {
+          button.classList.toggle("active", button.getAttribute("data-cat") === S.detailsCategory);
+          button.onclick = function () { S.detailsCategory = this.getAttribute("data-cat"); renderDetails(); loadExplore(false); };
+        });
+      } else {
+        body.innerHTML = '<div style="display:grid;gap:7px;margin-bottom:10px"><input id="ibxExploreQ" maxlength="150" placeholder="Tìm nội dung tin hoặc tên tệp" aria-label="Tìm nội dung tin"><select id="ibxExploreSender" aria-label="Lọc người gửi"><option value="">Mọi người gửi</option>' + S.exploreSenders.map(function (name) { return '<option value="' + esc(name) + '">' + esc(name) + '</option>'; }).join("") + '</select><select id="ibxExploreDirection" aria-label="Lọc chiều tin"><option value="">Tin đến và đi</option><option value="in">Khách gửi</option><option value="out">Đã gửi</option></select><button type="button" id="ibxExploreGo">Tìm trong hội thoại</button></div><div id="ibxExploreRows"></div><button type="button" class="ghost sm" id="ibxExploreMore" style="display:none;width:100%">Xem thêm</button>';
+        $("#ibxExploreQ").value = S.exploreQ; $("#ibxExploreSender").value = S.exploreSender; $("#ibxExploreDirection").value = S.exploreDirection;
+        $("#ibxExploreGo").onclick = function () { S.exploreQ = $("#ibxExploreQ").value; S.exploreSender = $("#ibxExploreSender").value; S.exploreDirection = $("#ibxExploreDirection").value; loadExplore(false); };
+        $("#ibxExploreQ").onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); $("#ibxExploreGo").click(); } };
+      }
+      $("#ibxExploreMore").onclick = function () { loadExplore(true); };
+      renderExploreRows();
+    }
+    function loadExploreSenders() {
+      if (!S.cur || S.cur.virtual) return;
+      var channelId = S.ch, threadId = S.cur.threadId;
+      api("/v1/inbox/" + channelId + "/threads/" + encodeURIComponent(threadId) + "/senders").then(function (j) {
+        if (S.ch !== channelId || !S.cur || S.cur.threadId !== threadId) return;
+        S.exploreSenders = j.senders || []; if (S.detailsOpen && S.detailsTab === "search") renderDetails();
+      }).catch(function (e) { toast(e.message, true); });
+    }
+    function loadExplore(append) {
+      if (!S.cur || S.cur.virtual || !S.detailsOpen) return;
+      if (append && !S.exploreNext) return;
+      var channelId = S.ch, threadId = S.cur.threadId, seq = ++S.exploreSeq;
+      if (!append) { S.exploreRows = []; S.exploreNext = null; renderExploreRows(); }
+      var category = S.detailsTab === "search" ? "all" : S.detailsCategory;
+      var qs = "?category=" + category + "&limit=40" + (append ? "&before=" + encodeURIComponent(S.exploreNext) : "") +
+        (S.detailsTab === "search" && S.exploreQ ? "&q=" + encodeURIComponent(S.exploreQ) : "") +
+        (S.detailsTab === "search" && S.exploreSender ? "&sender=" + encodeURIComponent(S.exploreSender) : "") +
+        (S.detailsTab === "search" && S.exploreDirection ? "&direction=" + S.exploreDirection : "");
+      api("/v1/inbox/" + channelId + "/threads/" + encodeURIComponent(threadId) + "/explore" + qs).then(function (j) {
+        if (seq !== S.exploreSeq || S.ch !== channelId || !S.cur || S.cur.threadId !== threadId) return;
+        S.exploreRows = append ? S.exploreRows.concat(j.messages || []) : (j.messages || []);
+        S.exploreNext = j.nextBefore || null; renderExploreRows();
+      }).catch(function (e) { toast(e.message, true); });
+    }
+    function jumpToExploreMessage(messageId) {
+      if (!S.cur) return;
+      var channelId = S.ch, threadId = S.cur.threadId;
+      api("/v1/inbox/" + channelId + "/threads/" + encodeURIComponent(threadId) + "/messages/" + encodeURIComponent(messageId) + "/context").then(function (j) {
+        if (S.ch !== channelId || !S.cur || S.cur.threadId !== threadId) return;
+        S.msgs = j.messages || []; S.jumped = true; renderMsgs(false);
+        var target = Array.prototype.find.call($("#ibxMsgs").querySelectorAll(".ibx-msg"), function (n) { return n.getAttribute("data-id") === messageId; });
+        if (target) { target.classList.add("ibx-quote-target"); $("#ibxMsgs").scrollTop = target.offsetTop - $("#ibxMsgs").offsetTop - 100; }
+        if (window.innerWidth <= 1100) { S.detailsOpen = false; renderDetails(); }
+      }).catch(function (e) { toast(e.message, true); });
+    }
+    $("#ibxDetailsClose").onclick = function () { S.detailsOpen = false; renderDetails(); };
+    $("#ibxInfoTab").onclick = function () { if (S.detailsTab !== "info") { S.detailsTab = "info"; renderDetails(); loadExplore(false); } };
+    $("#ibxSearchTab").onclick = function () { if (S.detailsTab !== "search") { S.detailsTab = "search"; renderDetails(); loadExplore(false); loadExploreSenders(); } };
     function editInboxTags() {
       if (!S.cur || S.cur.kind !== "direct") return;
       var tid = S.cur.threadId;
@@ -4341,6 +4468,10 @@ export const INDEX_HTML = `<!doctype html>
     function renderMsgs(keepScroll) {
       var box = $("#ibxMsgs"), old = box.scrollHeight - box.scrollTop;
       box.innerHTML = "";
+      if (S.jumped) {
+        var latest = el("button", { "class": "ghost sm", style: "display:block;margin:6px auto" }, "↓ Về tin mới nhất");
+        latest.onclick = function () { if (S.cur) openThread(S.cur); }; box.appendChild(latest);
+      }
       if (S.msgs.length >= 50) { var more = el("button", { "class": "ghost sm", style: "display:block;margin:6px auto" }, "Tải tin cũ hơn"); more.onclick = loadOlder; box.appendChild(more); }
       if (!S.msgs.length) box.appendChild(el("div", { "class": "muted", style: "padding:16px;text-align:center" }, "Chưa có tin nhắn được lưu (hệ thống chỉ lưu từ lúc kết nối). Gửi tin đầu tiên ở ô bên dưới."));
       S.msgs.forEach(function (x) { box.appendChild(msgEl(x)); });
@@ -4353,13 +4484,15 @@ export const INDEX_HTML = `<!doctype html>
       }).catch(function (e) { toast(e.message, true); });
     }
     function openThread(t) {
-      S.cur = t; S.imgs = []; S.file = null; S.reply = null; hideQuickSuggestions(); renderImg(); renderReply();
+      S.cur = t; S.imgs = []; S.file = null; S.reply = null; S.jumped = false; S.exploreSeq++; S.exploreRows = []; S.exploreNext = null; S.exploreSenders = []; S.exploreQ = ""; S.exploreSender = ""; S.exploreDirection = "";
+      hideQuickSuggestions(); renderImg(); renderReply(); renderDetails(); if (S.detailsOpen && !t.virtual) { loadExplore(false); loadExploreSenders(); }
       Array.prototype.forEach.call(document.querySelectorAll(".ibx-item"), function (n) { n.classList.remove("active"); });
       renderThreads(); renderHead();
       $("#ibxCompose").style.display = "";
       $("#ibxMsgs").innerHTML = '<div class="muted" style="padding:16px">Đang tải…</div>';
-      api("/v1/inbox/" + S.ch + "/threads/" + encodeURIComponent(t.threadId) + "/messages?limit=50").then(function (j) {
-        if (!S.cur || S.cur.threadId !== t.threadId) return;
+      var channelId = S.ch;
+      api("/v1/inbox/" + channelId + "/threads/" + encodeURIComponent(t.threadId) + "/messages?limit=50").then(function (j) {
+        if (!S.cur || S.ch !== channelId || S.cur.threadId !== t.threadId) return;
         if (j.thread) { S.cur = j.thread; renderHead(); }
         S.msgs = j.messages || []; renderMsgs(false);
       }).catch(function (e) { $("#ibxMsgs").innerHTML = '<div class="err" style="padding:16px">' + esc(e.message) + "</div>"; });
@@ -4564,7 +4697,7 @@ export const INDEX_HTML = `<!doctype html>
     $("#ibxKind").onchange = function () { S.kind = this.value; loadThreads(); };
     $("#ibxTag").onchange = function () { S.tag = this.value; loadThreads(); };
     $("#ibxHidden").onchange = function () { S.hidden = this.value === "1"; S.cur = null; S.msgs = []; renderHead(); $("#ibxMsgs").innerHTML = ""; $("#ibxCompose").style.display = "none"; loadThreads(); };
-    $("#ibxCh").onchange = function () { S.ch = this.value; S.tag = ""; S.tags = []; S.hidden = false; $("#ibxHidden").value = "0"; S.cur = null; S.msgs = []; S.imgs = []; S.file = null; S.reply = null; hideQuickSuggestions(); renderImg(); renderReply(); renderStatus(); renderHead(); $("#ibxMsgs").innerHTML = ""; $("#ibxCompose").style.display = "none"; loadTags(); loadQuickReplies(); loadThreads(); };
+    $("#ibxCh").onchange = function () { S.ch = this.value; S.tag = ""; S.tags = []; S.hidden = false; S.detailsOpen = false; S.exploreSeq++; $("#ibxHidden").value = "0"; S.cur = null; S.msgs = []; S.imgs = []; S.file = null; S.reply = null; hideQuickSuggestions(); renderImg(); renderReply(); renderStatus(); renderHead(); $("#ibxMsgs").innerHTML = ""; $("#ibxCompose").style.display = "none"; loadTags(); loadQuickReplies(); loadThreads(); };
     $("#ibxSync").onclick = function () {
       var b = this; b.disabled = true;
       api("/v1/inbox/" + S.ch + "/sync-contacts", { method: "POST", body: {} })

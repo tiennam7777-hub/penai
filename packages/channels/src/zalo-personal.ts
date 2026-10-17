@@ -1381,9 +1381,9 @@ export class ZaloPersonalChannel implements Channel {
     }
     try {
       const described = describeZaloContent(message.data.content, String(message.data.msgType ?? ""));
-      // CDN links expire. Preserve an incoming document in this workspace while
-      // the link is still valid, including conversations awaiting approval.
-      if (!message.isSelf && described.contentType === "file" && described.media?.url && this.deps.saveInboxFile) {
+      // CDN links expire. Keep photos, videos and documents from customers and
+      // from staff's phone in this workspace while the link is still valid.
+      if (["file", "photo", "video"].includes(described.contentType) && described.media?.url && this.deps.saveInboxFile) {
         try {
           const url = trustedZaloMediaUrl(described.media.url);
           if (url && (!described.media.size || described.media.size <= INBOX_FILE_MAX_BYTES)) {
@@ -1413,7 +1413,11 @@ export class ZaloPersonalChannel implements Channel {
               if (total > INBOX_FILE_MAX_BYTES) throw new Error("file vượt 50 MB");
               chunks.push(part);
             }
-            const ext = String(described.media.name || "").match(/\.([a-z0-9]{1,8})$/i)?.[1] || "bin";
+            if (!total) throw new Error("CDN trả file rỗng");
+            const mime = (response.headers.get("content-type") || "").split(";")[0]!.trim().toLowerCase();
+            const ext = String(described.media.name || "").match(/\.([a-z0-9]{1,8})$/i)?.[1]
+              || ({ "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif", "video/mp4": "mp4" } as Record<string, string>)[mime]
+              || (described.contentType === "photo" ? "jpg" : described.contentType === "video" ? "mp4" : "bin");
             described.media.localPath = await this.deps.saveInboxFile(Buffer.concat(chunks), ext);
           }
         } catch (error) {

@@ -556,6 +556,70 @@ export async function listInboxMessages(
   return (res.rows as Raw[]).map(mapMessage).reverse();
 }
 
+/** Duyệt toàn bộ lịch sử của một hội thoại để tìm tin hoặc xem lại media cũ. */
+export async function browseInboxThreadMessages(
+  db: Db, ctx: WorkspaceContext, channelId: string, threadId: string,
+  opts: { category?: "all" | "media" | "photo" | "video" | "file" | "link"; query?: string; sender?: string; direction?: "in" | "out"; beforeId?: string; limit?: number } = {},
+): Promise<{ messages: InboxMessageRow[]; nextBefore: string | null }> {
+  const limit = Math.min(Math.max(opts.limit ?? 40, 1), 100);
+  const conds = [sql`m.channel_id = ${channelId}`, sql`m.thread_id = ${threadId}`];
+  if (opts.beforeId && /^\d{1,19}$/.test(opts.beforeId)) conds.push(sql`m.id < ${opts.beforeId}::bigint`);
+  if (opts.direction) conds.push(sql`m.direction = ${opts.direction}`);
+  if (opts.category === "photo" || opts.category === "video" || opts.category === "file") conds.push(sql`m.content_type = ${opts.category}`);
+  if (opts.category === "media") conds.push(sql`m.content_type IN ('photo', 'video')`);
+  if (opts.category === "link") conds.push(sql`(m.content_type = 'link' OR (m.content_type = 'text' AND m.text ~* 'https?://'))`);
+  const query = opts.query?.trim();
+  if (query) {
+    const like = `%${query.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    conds.push(sql`(m.text ILIKE ${like} OR m.sender_name ILIKE ${like}
+      OR COALESCE(u.name, '') ILIKE ${like} OR COALESCE(m.media->>'name', '') ILIKE ${like})`);
+  }
+  const sender = opts.sender?.trim();
+  if (sender) {
+    const like = `%${sender.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    conds.push(sql`(m.sender_name ILIKE ${like} OR COALESCE(u.name, '') ILIKE ${like})`);
+  }
+  const where = sql.join(conds, sql` AND `);
+  const res = await withWorkspace(db, ctx, (tx) => tx.execute(sql`
+    SELECT m.*, u.name AS web_user_name FROM inbox_messages m
+    LEFT JOIN users u ON u.id = m.web_user_id
+    WHERE ${where} ORDER BY m.id DESC LIMIT ${limit + 1}`));
+  const rows = (res.rows as Raw[]).map(mapMessage);
+  const hasMore = rows.length > limit;
+  const messages = rows.slice(0, limit);
+  return { messages, nextBefore: hasMore ? messages[messages.length - 1]!.id : null };
+}
+
+export async function listInboxThreadSenders(
+  db: Db, ctx: WorkspaceContext, channelId: string, threadId: string,
+): Promise<string[]> {
+  const res = await withWorkspace(db, ctx, (tx) => tx.execute(sql`
+    SELECT DISTINCT COALESCE(NULLIF(u.name, ''), NULLIF(m.sender_name, '')) AS name
+    FROM inbox_messages m LEFT JOIN users u ON u.id = m.web_user_id
+    WHERE m.channel_id = ${channelId} AND m.thread_id = ${threadId}
+    ORDER BY name LIMIT 100`));
+  return (res.rows as Raw[]).map((r) => String(r.name ?? "")).filter(Boolean);
+}
+
+/** Tin xung quanh một kết quả tìm kiếm để mở đúng đoạn hội thoại. */
+export async function inboxMessageContext(
+  db: Db, ctx: WorkspaceContext, channelId: string, threadId: string, messageId: string,
+): Promise<InboxMessageRow[]> {
+  if (!/^\d{1,19}$/.test(messageId)) return [];
+  const res = await withWorkspace(db, ctx, (tx) => tx.execute(sql`
+    SELECT m.*, u.name AS web_user_name, ${REACTIONS_SUBQUERY} AS reactions
+    FROM inbox_messages m LEFT JOIN users u ON u.id = m.web_user_id
+    WHERE m.channel_id = ${channelId} AND m.thread_id = ${threadId}
+      AND m.id IN (
+        SELECT id FROM inbox_messages WHERE channel_id = ${channelId} AND thread_id = ${threadId}
+          AND id <= ${messageId}::bigint ORDER BY id DESC LIMIT 25)
+       OR (m.channel_id = ${channelId} AND m.thread_id = ${threadId}
+         AND m.id IN (SELECT id FROM inbox_messages WHERE channel_id = ${channelId} AND thread_id = ${threadId}
+           AND id > ${messageId}::bigint ORDER BY id ASC LIMIT 25))
+    ORDER BY m.id ASC`));
+  return (res.rows as Raw[]).map(mapMessage);
+}
+
 export async function countInboxMessages(
   db: Db,
   ctx: WorkspaceContext,

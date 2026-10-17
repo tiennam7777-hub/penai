@@ -24,6 +24,9 @@ import {
   clearInboxPauses,
   getChannelById,
   getInboxThread,
+  browseInboxThreadMessages,
+  inboxMessageContext,
+  listInboxThreadSenders,
   listChannels,
   listUserInboxChannelIds,
   listInboxMessages,
@@ -1035,6 +1038,41 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
       }),
     ]);
     return { thread, messages: messages.map((m) => publicMessage(m, req.authCtx.workspaceId)) };
+  });
+
+  app.get(`${base}/:channelId/threads/:threadId/explore`, async (req, reply) => {
+    const { channelId, threadId } = req.params as { channelId: string; threadId: string };
+    if (!(await guard(req, reply, channelId))) return;
+    const parsed = z.object({
+      category: z.enum(["all", "media", "photo", "video", "file", "link"]).optional(),
+      q: z.string().max(150).optional(), sender: z.string().max(100).optional(),
+      direction: z.enum(["in", "out"]).optional(),
+      before: z.string().regex(/^\d{1,19}$/).optional(),
+      limit: z.coerce.number().int().min(1).max(100).optional(),
+    }).safeParse(req.query);
+    if (!parsed.success) return reply.code(400).send({ error: "Bộ lọc lịch sử không hợp lệ" });
+    if (!(await getInboxThread(db, req.authCtx, channelId, threadId))) return reply.code(404).send({ error: "Không tìm thấy hội thoại" });
+    const result = await browseInboxThreadMessages(db, req.authCtx, channelId, threadId, {
+      category: parsed.data.category, query: parsed.data.q, sender: parsed.data.sender,
+      direction: parsed.data.direction, beforeId: parsed.data.before, limit: parsed.data.limit,
+    });
+    return { messages: result.messages.map((m) => publicMessage(m, req.authCtx.workspaceId)), nextBefore: result.nextBefore };
+  });
+
+  app.get(`${base}/:channelId/threads/:threadId/senders`, async (req, reply) => {
+    const { channelId, threadId } = req.params as { channelId: string; threadId: string };
+    if (!(await guard(req, reply, channelId))) return;
+    if (!(await getInboxThread(db, req.authCtx, channelId, threadId))) return reply.code(404).send({ error: "Không tìm thấy hội thoại" });
+    return { senders: await listInboxThreadSenders(db, req.authCtx, channelId, threadId) };
+  });
+
+  app.get(`${base}/:channelId/threads/:threadId/messages/:messageId/context`, async (req, reply) => {
+    const { channelId, threadId, messageId } = req.params as { channelId: string; threadId: string; messageId: string };
+    if (!(await guard(req, reply, channelId))) return;
+    if (!/^\d{1,19}$/.test(messageId)) return reply.code(400).send({ error: "Mã tin nhắn không hợp lệ" });
+    const messages = await inboxMessageContext(db, req.authCtx, channelId, threadId, messageId);
+    if (!messages.some((m) => m.id === messageId)) return reply.code(404).send({ error: "Không tìm thấy tin nhắn" });
+    return { messages: messages.map((m) => publicMessage(m, req.authCtx.workspaceId)) };
   });
 
   app.get(`${base}/:channelId/threads/:threadId/messages/by-msg-id/:msgId`, async (req, reply) => {

@@ -5,6 +5,9 @@ import {
   createChannel,
   createDb,
   getInboxThread,
+  browseInboxThreadMessages,
+  inboxMessageContext,
+  listInboxThreadSenders,
   clearInboxPauses,
   createInboxTag,
   deleteInboxTag,
@@ -58,6 +61,22 @@ const msg = (over: Record<string, unknown> = {}) => ({
 });
 
 describe("Inbox dùng chung (0034)", () => {
+  it("duyệt ảnh, tài liệu, liên kết và tìm người gửi trong đúng hội thoại", async () => {
+    const threadId = "explore-customer-1";
+    await recordInboxMessage(dbh.db, ctxA(), wa, msg({ threadId, senderId: threadId, senderName: "Chị Mai", msgId: "explore-photo", contentType: "photo", text: "", media: { url: "https://example.test/photo.jpg" } }));
+    await recordInboxMessage(dbh.db, ctxA(), wa, msg({ threadId, senderId: threadId, senderName: "Chị Mai", msgId: "explore-file", contentType: "file", text: "", media: { name: "bao-gia.pdf" } }));
+    await recordInboxMessage(dbh.db, ctxA(), wa, msg({ threadId, senderId: threadId, senderName: "Chị Mai", msgId: "explore-link", contentType: "text", text: "Xem https://example.test/mau" }));
+    const photos = await browseInboxThreadMessages(dbh.db, ctxA(), wa, threadId, { category: "media" });
+    expect(photos.messages.map((x) => x.msgId)).toEqual(["explore-photo"]);
+    expect((await browseInboxThreadMessages(dbh.db, ctxA(), wa, threadId, { category: "file", query: "bao-gia" })).messages.map((x) => x.msgId)).toEqual(["explore-file"]);
+    expect((await browseInboxThreadMessages(dbh.db, ctxA(), wa, threadId, { category: "link" })).messages.map((x) => x.msgId)).toEqual(["explore-link"]);
+    expect((await browseInboxThreadMessages(dbh.db, ctxA(), wa, threadId, { sender: "Mai", direction: "in", limit: 2 })).nextBefore).toBeTruthy();
+    expect((await listInboxThreadSenders(dbh.db, ctxA(), wa, threadId))).toContain("Chị Mai");
+    const target = photos.messages[0]!;
+    expect((await inboxMessageContext(dbh.db, ctxA(), wa, threadId, target.id)).some((x) => x.id === target.id)).toBe(true);
+    expect((await browseInboxThreadMessages(dbh.db, ctxB(), wa, threadId)).messages).toEqual([]);
+    expect((await browseInboxThreadMessages(dbh.db, ctxA(), wa, "another-thread")).messages).toEqual([]);
+  });
   it("lưu ghi chú đúng khách và kênh, không chạm nhóm hay workspace khác", async () => {
     const secondChannel = (await createChannel(dbh.db, ctxA(), {
       kind: "whatsapp_personal", name: "WhatsApp note B", agentId: fx.agentA,
