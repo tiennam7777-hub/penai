@@ -188,6 +188,31 @@ describe("Đăng nhập web (cookie) + role member + agent grants", () => {
     }
     const agents = await app.inject({ method: "GET", url: "/v1/agents", headers });
     expect(agents.json()).toMatchObject({ agents: [{ id: fx.agentA }] });
+    const library = await app.inject({ method: "GET", url: "/v1/library", headers });
+    expect(library.json()).toMatchObject({ canToggleWrite: true });
+    const photo = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(128)]);
+    const upload = await app.inject({
+      method: "PUT", url: "/v1/library/shared/file?path=moderator-photo.jpg",
+      headers: { ...headers, "content-type": "application/octet-stream" }, payload: photo,
+    });
+    expect(upload.statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: "/v1/library/shared/list", headers })).json())
+      .toMatchObject({ entries: expect.arrayContaining([expect.objectContaining({ name: "moderator-photo.jpg" })]) });
+    const deleted = await app.inject({ method: "DELETE", url: "/v1/library/shared/entry?path=moderator-photo.jpg", headers });
+    expect(deleted.statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: "/v1/library/shared/trash", headers })).json())
+      .toMatchObject({ items: expect.arrayContaining([expect.objectContaining({ path: "moderator-photo.jpg" })]) });
+    expect((await app.inject({ method: "PUT", url: `/v1/library/${fx.agentB}/agent-write`, headers,
+      payload: { writable: true } })).statusCode).toBe(404);
+    expect((await app.inject({ method: "PUT", url: `/v1/library/${fx.agentA}/agent-write`, headers,
+      payload: { writable: true, systemPrompt: "không được đổi" } })).statusCode).toBe(400);
+    const enabled = await app.inject({ method: "PUT", url: `/v1/library/${fx.agentA}/agent-write`, headers,
+      payload: { writable: true } });
+    expect(enabled.json()).toMatchObject({ libraryWritable: true });
+    expect((await app.inject({ method: "PUT", url: `/v1/library/${fx.agentA}/agent-write`, headers,
+      payload: { writable: false } })).statusCode).toBe(200);
+    expect((await app.inject({ method: "PATCH", url: `/v1/agents/${fx.agentA}`, headers,
+      payload: { name: "Không được đổi" } })).statusCode).toBe(403);
     expect((await app.inject({ method: "GET", url: "/v1/channels", headers })).statusCode).toBe(403);
     expect((await app.inject({ method: "POST", url: "/v1/channels", headers, payload: {} })).statusCode).toBe(403);
     expect((await app.inject({ method: "GET", url: "/v1/users", headers })).statusCode).toBe(403);

@@ -3708,7 +3708,7 @@ export const INDEX_HTML = `<!doctype html>
           ? "Mọi agent trong bộ phận đọc được qua <code>shared/</code> — chỉ để thứ thật sự dùng chung. Thư mục <code>skills/</code> do trang Skills quản lý."
           : "Agent thấy qua <code>thu-vien/</code> · trong lệnh exec: <code>" + esc(s.absRoot) + "/</code>") + "</div>";
       h.appendChild(t);
-      if (s.kind === "agent" && !isModerator()) {
+      if (s.kind === "agent") {
         var can = !!(info && info.canToggleWrite);
         var w = el("label", { style: "display:flex;align-items:center;gap:6px;font-size:.85rem;white-space:nowrap" });
         w.innerHTML = '<input type="checkbox" id="libW" style="flex:0"' + (s.libraryWritable ? " checked" : "") + (can ? "" : " disabled") + "> Cho agent ghi vào thư viện" + (can ? "" : ' <span class="muted">(chỉ quản trị bộ phận đổi được)</span>');
@@ -3717,7 +3717,7 @@ export const INDEX_HTML = `<!doctype html>
         cb.onchange = function () {
           var v = cb.checked;
           if (v && !confirm("Cho agent ghi vào thư viện này? Agent sẽ tạo, sửa, ghi đè được file trong thư viện (kể cả khi người chat yêu cầu). File agent xóa vẫn vào thùng rác 30 ngày.")) { cb.checked = false; return; }
-          api("/v1/agents/" + s.id, { method: "PATCH", body: { libraryWritable: v } })
+          api(libApi(s.id, "/agent-write"), { method: "PUT", body: { writable: v } })
             .then(function () { toast(v ? "Agent được ghi vào thư viện" : "Thư viện chỉ đọc với agent"); loadScopes().then(loadDir, function () {}); })
             .catch(function (e) { cb.checked = !v; toast(e.message, 1); });
         };

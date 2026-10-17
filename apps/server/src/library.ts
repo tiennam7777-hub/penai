@@ -7,8 +7,8 @@
  *   - <agentId>  : thư viện riêng của 1 agent (<dataDir>/thu-vien/<ws>/<agentId>) —
  *                  agent thấy qua tiền tố "thu-vien/", mặc định chỉ đọc.
  *
- * Quyền: operator trở lên (member bị allowlist web-auth chặn từ trước). Bật/tắt
- * quyền GHI của agent là thiết lập của agent → PATCH /v1/agents/:id (ws_admin).
+ * Quyền: operator trở lên hoặc moderator (member bị allowlist web-auth chặn).
+ * Quản trị và moderator có thể bật/tắt quyền GHI của agent ngay trong Thư viện.
  *
  * An toàn: mọi đường dẫn đi qua cleanRel (không "..", không NUL) + jail theo gốc
  * scope + realpath (chống symlink). Tên file/thư mục chuẩn hóa không dấu để agent
@@ -21,7 +21,7 @@ import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { hasRole, logger, type WorkspaceContext } from "@penai/shared";
-import { getAgentById, listAgents, recordAudit, type Db } from "@penai/db";
+import { getAgentById, listAgents, recordAudit, updateAgent, type Db } from "@penai/db";
 import { assertRealPathInside } from "@penai/tools";
 import { agentLibraryDir, libraryWorkspaceRoot, sharedDirFor } from "./library-paths.js";
 import {
@@ -284,7 +284,30 @@ export function registerLibraryRoutes(app: FastifyInstance, deps: { db: Db; data
         files: s.files,
       });
     }
-    return { scopes, usedBytes: used, ...libraryLimits(), canToggleWrite: hasRole(ctx.role, "ws_admin") };
+    return { scopes, usedBytes: used, ...libraryLimits(), canToggleWrite: ctx.role === "moderator" || hasRole(ctx.role, "ws_admin") };
+  });
+
+  // Quyền này chỉ đổi libraryWritable, không cấp moderator quyền sửa cấu hình Agent khác.
+  app.put("/v1/library/:scope/agent-write", async (req, reply) => {
+    if (!guard(req, reply)) return;
+    if (req.authCtx.role !== "moderator" && !hasRole(req.authCtx.role, "ws_admin")) {
+      return reply.code(403).send({ error: "Cần quyền quản trị Thư viện file" });
+    }
+    try {
+      const parsed = z.object({ writable: z.boolean() }).strict().safeParse(req.body);
+      if (!parsed.success) throw new HttpError(400, "Trạng thái quyền ghi không hợp lệ");
+      const scope = await resolveScope(db, req.authCtx, dataDir, (req.params as { scope: string }).scope);
+      if (scope.kind !== "agent") throw new HttpError(400, "Chỉ thư viện của agent có công tắc này");
+      const ctx = req.authCtx.role === "moderator" ? { ...req.authCtx, role: "operator" as const } : req.authCtx;
+      const agent = await updateAgent(db, ctx, scope.id, { libraryWritable: parsed.data.writable });
+      if (!agent) throw new HttpError(404, "Agent không tồn tại");
+      if (scope.libraryWritable !== agent.libraryWritable) {
+        await recordAudit(db, req.authCtx, "library.agent_write_toggle", {
+          agentId: agent.id, agentKey: agent.key, writable: agent.libraryWritable,
+        });
+      }
+      return { scopeId: agent.id, libraryWritable: agent.libraryWritable };
+    } catch (err) { return fail(reply, err); }
   });
 
   // Liệt kê 1 thư mục
