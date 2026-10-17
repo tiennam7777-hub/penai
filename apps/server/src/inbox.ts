@@ -13,7 +13,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { lookup } from "node:dns/promises";
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { isIP } from "node:net";
 import { join, relative, resolve, sep } from "node:path";
 import AdmZip from "adm-zip";
@@ -74,7 +74,7 @@ import {
   type ZaloSendSource,
 } from "@penai/channels";
 import { channelHandlers, runOrchidStaffDelegation } from "./channels-runtime.js";
-import { expectsCurrentColorPhotos, latestDelegableStaffMessage, ORCHID_SALES_AGENT_ID, ORCHID_SALES_CHANNEL_IDS } from "./orchid-staff-delegation.js";
+import { expectsCurrentColorPhotos, latestDelegableStaffRow, promisedPotStemCount, ORCHID_SALES_AGENT_ID, ORCHID_SALES_CHANNEL_IDS } from "./orchid-staff-delegation.js";
 import { readPhotoAcknowledgement } from "./photo-burst.js";
 import { inboxZaloQuote, type InboxZaloQuote } from "./inbox-quote.js";
 import { stemCountForPhoto } from "./orchid-photo-count.js";
@@ -236,6 +236,17 @@ export function inboxHooks(
     stateDir: resolve(join(dataDir, ch.workspaceId, "channel-state", ch.id)),
     saveInboxFile: async (buf: Buffer, ext: string) =>
       saveOutboundImage(dataDir, ch.workspaceId, ch.id, { buf, ext: ext.replace(/[^a-z0-9]/gi, "").slice(0, 8) || "bin" }),
+    ...(ORCHID_SALES_CHANNEL_IDS.has(ch.id) ? {
+      onSelfCommand: async (threadId: string) => {
+        try {
+          // Tin hứa gửi từ điện thoại được listener lưu chậm hơn bản dội Zalo một chút.
+          await new Promise((resolve) => setTimeout(resolve, 1_700));
+          await delegateOrchidStaffPromise(db, ctx, dataDir, ch.id, threadId);
+        } catch (error) {
+          logger.warn(`zalo.staff_delegate_fail: ${ch.id}/${threadId}: ${String(error)}`);
+        }
+      },
+    } : {}),
     // Tin cũ nền tảng gửi về sau khi liên kết: lưu tuần tự theo thời gian, không tính "chưa đọc"
     onHistory: (entries: ChannelMessageLog[]) => {
       const st = inboxState.get(ch.id);
@@ -682,6 +693,82 @@ export async function sendInbox(dataDir: string, req: InboxSendRequest): Promise
   return { msgIds };
 }
 
+const activeStaffDelegations = new Set<string>();
+const completedStaffDelegations = new Map<string, string>();
+
+function delegationError(statusCode: number, message: string): Error & { statusCode: number } {
+  return Object.assign(new Error(message), { statusCode });
+}
+
+/** Dùng chung cho lệnh nội bộ Inbox và lệnh điện thoại đã thu hồi thành công. */
+export async function delegateOrchidStaffPromise(
+  db: Db, ctx: WorkspaceContext, dataDir: string, channelId: string, threadId: string,
+  expectedText?: string,
+): Promise<void> {
+  if (!ORCHID_SALES_CHANNEL_IDS.has(channelId) || !isValidThreadId("zalo_personal", threadId)) {
+    throw delegationError(400, "-ld chỉ dùng trong DM Hot 1, Hot 4, Hot 6");
+  }
+  const channel = await getChannelById(db, ctx, channelId);
+  const thread = await getInboxThread(db, ctx, channelId, threadId);
+  if (!channel || channel.agentId !== ORCHID_SALES_AGENT_ID || !thread || thread.kind !== "direct" ||
+      (channel.config as Record<string, unknown>)["agent_reply"] === false) {
+    throw delegationError(409, "Hội thoại này chưa bật Agent kinh doanh");
+  }
+  if (!inboxRuntime(channelId)?.isConnected()) {
+    throw delegationError(409, "Kênh Zalo chưa kết nối; chưa giao việc cho AI");
+  }
+  const key = `${channelId}:${threadId}`;
+  if (activeStaffDelegations.has(key)) throw delegationError(409, "AI đang thực hiện -ld cho hội thoại này");
+  activeStaffDelegations.add(key);
+  try {
+    let staffMessage: string | null = null;
+    let staffMessageId = "";
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const messages = await listInboxMessages(db, ctx, channelId, threadId, { limit: 10 });
+      const staffRow = latestDelegableStaffRow(messages);
+      staffMessage = staffRow?.text.trim() ?? null;
+      staffMessageId = staffRow?.id ?? "";
+      if (!expectedText || staffMessage === expectedText) break;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    if (expectedText && staffMessage !== expectedText) {
+      throw delegationError(409, "Chưa thấy lời nhắn vừa gửi trong Inbox; thử lại sau một chút.");
+    }
+    if (!staffMessage) {
+      throw delegationError(422, "Tin mới nhất phải là lời nhân viên vừa nhắn cho khách. Chưa giao việc cho AI.");
+    }
+    if (completedStaffDelegations.get(key) === staffMessageId) {
+      throw delegationError(409, "AI đã thực hiện -ld cho lời nhắn này. Hãy nhắn việc mới trước khi giao tiếp.");
+    }
+
+    const potStems = promisedPotStemCount(staffMessage);
+    if (potStems) {
+      const sampleDir = join(dataDir, ctx.workspaceId, "shared", "so-canh", `chau-lan-${potStems}-canh`);
+      const files = (await readdir(sampleDir, { withFileTypes: true }).catch(() => []))
+        .filter((entry) => entry.isFile() && /\.(?:jpe?g|png|webp)$/i.test(entry.name))
+        .map((entry) => join(sampleDir, entry.name)).sort().slice(0, 4);
+      if (!files.length) throw delegationError(422, `Chưa có ảnh mẫu chậu ${potStems} cành để gửi cho khách.`);
+      await sendInbox(dataDir, { channelId, workspaceId: ctx.workspaceId, threadId,
+        peerKind: "direct", filePaths: files, source: "agent" });
+    } else {
+      const result = await runOrchidStaffDelegation(channelId, threadId, staffMessage, thread.name);
+      if (result.kind !== "reply" || result.text.trim() === "KHONG_LAM" ||
+          (!result.text.trim() && !result.media?.length)) {
+        throw delegationError(422, "AI chưa xác định được việc cần làm từ lời nhắn vừa rồi; chưa gửi gì cho khách.");
+      }
+      if (expectsCurrentColorPhotos(staffMessage) && !result.media?.length) {
+        throw delegationError(422, "AI chưa lấy được ảnh màu đang có; chưa gửi lời hứa suông cho khách.");
+      }
+      await sendInbox(dataDir, { channelId, workspaceId: ctx.workspaceId, threadId, peerKind: "direct",
+        ...(result.text.trim() ? { text: result.text } : {}),
+        ...(result.media?.length ? { filePaths: result.media } : {}), source: "agent" });
+    }
+    completedStaffDelegations.set(key, staffMessageId);
+  } finally {
+    activeStaffDelegations.delete(key);
+  }
+}
+
 export function inboxRuntimeFor(channelId: string): PersonalChannel | null {
   return inboxRuntime(channelId);
 }
@@ -745,8 +832,6 @@ function sendError(reply: FastifyReply, err: unknown, channelId: string) {
 export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDir: string }): void {
   const { db, dataDir } = deps;
   inboxDataDir = dataDir;
-  const activeDelegations = new Set<string>();
-  const completedDelegations = new Map<string, string>();
 
   async function guard(req: FastifyRequest, reply: FastifyReply, channelId: string): Promise<boolean> {
     if (!/^[0-9a-f-]{36}$/i.test(channelId) || !(await canUseInboxChannel(db, req.authCtx, channelId))) {
@@ -999,60 +1084,16 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
   app.post(`${base}/:channelId/threads/:threadId/delegate`, async (req, reply) => {
     const { channelId, threadId } = req.params as { channelId: string; threadId: string };
     if (!(await guard(req, reply, channelId))) return;
-    if (!ORCHID_SALES_CHANNEL_IDS.has(channelId) || !isValidThreadId(kindOf(channelId), threadId)) {
-      return reply.code(400).send({ error: "-ld chỉ dùng trong DM Hot 1, Hot 4, Hot 6" });
-    }
-    const channel = await getChannelById(db, req.authCtx, channelId);
-    const thread = await getInboxThread(db, req.authCtx, channelId, threadId);
-    if (!channel || channel.agentId !== ORCHID_SALES_AGENT_ID || !thread || thread.kind !== "direct" ||
-        (channel.config as Record<string, unknown>)["agent_reply"] === false) {
-      return reply.code(409).send({ error: "Hội thoại này chưa bật Agent kinh doanh" });
-    }
-    if (!inboxRuntime(channelId)?.isConnected()) {
-      return reply.code(409).send({ error: "Kênh Zalo chưa kết nối; chưa giao việc cho AI" });
-    }
-    const key = `${channelId}:${threadId}`;
-    if (activeDelegations.has(key)) return reply.code(409).send({ error: "AI đang thực hiện -ld cho hội thoại này" });
-    activeDelegations.add(key);
     try {
       const parsed = z.object({ expectedText: z.string().trim().max(10_000).optional() }).safeParse(req.body ?? {});
       if (!parsed.success) return reply.code(400).send({ error: "Nội dung giao việc không hợp lệ" });
-      let staffMessage: string | null = null;
-      let staffMessageId = "";
-      for (let attempt = 0; attempt < 5; attempt++) {
-        const messages = await listInboxMessages(db, req.authCtx, channelId, threadId, { limit: 1 });
-        staffMessage = latestDelegableStaffMessage(messages);
-        staffMessageId = messages.at(-1)?.id ?? "";
-        if (!parsed.data.expectedText || staffMessage === parsed.data.expectedText) break;
-        await new Promise((resolve) => setTimeout(resolve, 200));
-      }
-      if (parsed.data.expectedText && staffMessage !== parsed.data.expectedText) {
-        return reply.code(409).send({ error: "Chưa thấy lời nhắn vừa gửi trong Inbox; thử lại sau một chút." });
-      }
-      if (!staffMessage) return reply.code(422).send({ error: "Tin mới nhất phải là lời nhân viên vừa nhắn cho khách. Chưa giao việc cho AI." });
-      if (completedDelegations.get(key) === staffMessageId) {
-        return reply.code(409).send({ error: "AI đã thực hiện -ld cho lời nhắn này. Hãy nhắn việc mới trước khi giao tiếp." });
-      }
-      const result = await runOrchidStaffDelegation(channelId, threadId, staffMessage, thread.name);
-      if (result.kind !== "reply" || result.text.trim() === "KHONG_LAM" ||
-          (!result.text.trim() && !result.media?.length)) {
-        return reply.code(422).send({ error: "AI chưa xác định được việc cần làm từ lời nhắn vừa rồi; chưa gửi gì cho khách." });
-      }
-      if (expectsCurrentColorPhotos(staffMessage) && !result.media?.length) {
-        return reply.code(422).send({ error: "AI chưa lấy được ảnh màu đang có; chưa gửi lời hứa suông cho khách." });
-      }
-      await sendInbox(dataDir, {
-        channelId, workspaceId: req.authCtx.workspaceId, threadId, peerKind: "direct",
-        ...(result.text.trim() ? { text: result.text } : {}),
-        ...(result.media?.length ? { filePaths: result.media } : {}),
-        source: "agent",
-      });
-      completedDelegations.set(key, staffMessageId);
+      await delegateOrchidStaffPromise(db, req.authCtx, dataDir, channelId, threadId, parsed.data.expectedText);
       return { delegated: true };
     } catch (err) {
+      if (err instanceof Error && "statusCode" in err) {
+        return reply.code(Number(err.statusCode)).send({ error: err.message });
+      }
       return sendError(reply, err, channelId);
-    } finally {
-      activeDelegations.delete(key);
     }
   });
 

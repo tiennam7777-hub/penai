@@ -3902,7 +3902,7 @@ export const INDEX_HTML = `<!doctype html>
     var wrap = el("div", { "class": "ibx" });
     wrap.innerHTML = '<div class="ibx-list"><div class="row" style="padding:8px"><input id="ibxQ" placeholder="Tìm tên, uid, SĐT…"><select id="ibxKind" style="flex:0 0 auto;min-width:0"><option value="">Tất cả</option><option value="direct">Cá nhân</option><option value="group">Nhóm</option><option value="unread">Chưa đọc</option></select></div><div class="row" style="padding:0 8px 8px;gap:6px"><select id="ibxTag" style="flex:1;min-width:0"><option value="">Mọi nhãn Inbox</option></select><select id="ibxHidden" style="flex:0 0 auto;min-width:0" title="Xem hội thoại đang hiện hoặc đã ẩn"><option value="0">Đang hiện</option><option value="1">Đã ẩn</option></select></div><div id="ibxThreads" class="ibx-threads"></div></div>' +
       '<div class="ibx-chat"><div id="ibxHead" class="ibx-head muted">Chọn một hội thoại bên trái.</div><div id="ibxMsgs" class="ibx-msgs"></div>' +
-      '<div class="ibx-compose" id="ibxCompose" style="display:none"><div id="ibxReply"></div><div id="ibxImg"></div><div id="ibxQuickSuggestions" class="ibx-quick-suggestions"></div><div class="row" style="align-items:flex-end"><textarea id="ibxText" rows="2" placeholder="Nhập tin nhắn… (-ld: giao AI làm việc vừa hứa; -mã: tin nhắn nhanh; Enter để gửi)"></textarea><input type="file" id="ibxFile" multiple accept="image/png,image/jpeg,image/gif,image/webp,.pdf,.doc,.docx,.xls,.xlsx" hidden><button class="ghost" id="ibxAttach" title="Chọn tối đa 6 ảnh hoặc một file Word, Excel, PDF">📎</button><button id="ibxSend">Gửi</button></div></div></div>';
+      '<div class="ibx-compose" id="ibxCompose" style="display:none"><div id="ibxReply"></div><div id="ibxImg"></div><div id="ibxQuickSuggestions" class="ibx-quick-suggestions"></div><div class="row" style="align-items:flex-end"><textarea id="ibxText" rows="2" placeholder="Nhập tin nhắn… (-ld: giao AI làm việc vừa hứa; -mã: tin nhắn nhanh; Enter để gửi)"></textarea><input type="file" id="ibxFile" multiple accept="image/png,image/jpeg,image/gif,image/webp,.pdf,.doc,.docx,.xls,.xlsx" hidden><button class="ghost" id="ibxAttach" title="Chọn tối đa 6 ảnh hoặc một file Word, Excel, PDF">📎</button><button class="ghost" id="ibxDelegate" style="display:none" title="Lệnh nội bộ, không gửi -ld cho khách">AI làm giúp</button><button id="ibxSend">Gửi</button></div></div></div>';
     m.appendChild(wrap);
 
     function stopEs() { if (S.es) { try { S.es.close(); } catch (e) {} S.es = null; } }
@@ -3921,6 +3921,7 @@ export const INDEX_HTML = `<!doctype html>
       $("#ibxSet").style.display = isAdmin() || isModerator() ? "" : "none";
       $("#ibxFriend").style.display = c.kind === "zalo_personal" ? "" : "none";
       $("#ibxFriend").disabled = !c.connected;
+      $("#ibxDelegate").style.display = ["cdf2a276-fa3d-4fe3-a46b-3ce1162a7678", "657116ed-7570-4f2e-8550-a3d323618724", "6bc2dc02-3d10-4737-931d-a37532bcabb2"].indexOf(S.ch) >= 0 ? "" : "none";
     }
     function hideQuickSuggestions() {
       S.quickMatches = []; S.quickToken = null; S.quickIndex = 0;
@@ -4425,6 +4426,10 @@ export const INDEX_HTML = `<!doctype html>
       }
     });
     $("#ibxSend").onclick = send;
+    $("#ibxDelegate").onclick = function () {
+      if ($("#ibxText").value.trim()) { toast("Gửi lời nhắn cho khách trước, rồi bấm AI làm giúp", true); return; }
+      $("#ibxText").value = "-ld"; send();
+    };
     function send() {
       if (!S.cur || S.loadingAttach) return;
       if (orchidDelegateCommand()) {

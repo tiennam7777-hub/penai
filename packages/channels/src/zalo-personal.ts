@@ -1193,6 +1193,31 @@ export class ZaloPersonalChannel implements Channel {
       if (typeof caption === "string" && !/\.(png|jpe?g|webp|gif)$/i.test(caption)) text = caption;
     }
 
+    // Lệnh từ điện thoại đã được Zalo gửi ra trước khi adapter nhận được.
+    // Thu hồi ngay khi có đủ mã; chỉ sau khi thu hồi thành công mới giao AI làm.
+    const messageAt = Number(message.data.ts);
+    const freshSelfCommand = Number.isFinite(messageAt) && messageAt > 1_000_000_000_000 &&
+      Date.now() - messageAt >= -30_000 && Date.now() - messageAt <= 120_000;
+    if (message.isSelf && peerKind === "direct" && freshSelfCommand && !this.sentMsgIds.has(msgId) &&
+        this.deps.onSelfCommand && /^[-/]ld$/i.test(text.trim())) {
+      const cliMsgId = String((message.data as { cliMsgId?: unknown }).cliMsgId ?? "");
+      if (this.api && msgId && cliMsgId) {
+        try {
+          await this.api.undo({ msgId, cliMsgId }, threadId, ThreadType.User);
+          try {
+            await this.deps.onSelfCommand(threadId);
+          } catch (error) {
+            logger.warn(`zalo.staff_command_delegate_fail: ${errorMessage(error)}`);
+          }
+          return;
+        } catch (error) {
+          logger.warn(`zalo.staff_command_recall_fail: ${errorMessage(error)}`);
+        }
+      } else {
+        logger.warn(`zalo.staff_command_no_recall_id: channel ${this.id}, thread ${threadId}`);
+      }
+    }
+
     // Inbox: ghi MỌI tin (kể cả thread chưa cho agent trả lời). Tin do PenAI
     // tự gửi (agent/web/MCP) đã ghi lúc gửi → bỏ qua bản dội lại.
     await this.logListenerMessage(message, peerKind, threadId, senderId, senderName);

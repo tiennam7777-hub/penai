@@ -146,6 +146,8 @@ export interface ChannelDeps {
    * cho agent trả lời) để server lưu và đẩy realtime cho người trực.
    */
   onMessageLog?: (entry: ChannelMessageLog) => void;
+  /** Lệnh -ld tự gửi từ điện thoại: adapter thu hồi được tin rồi mới giao việc cho server. */
+  onSelfCommand?: (threadId: string) => Promise<void>;
   /** Zalo: bất kỳ người gửi nào thu hồi tin; trả true nếu đó là tin Agent đã gửi. */
   onMessageUndo?: (event: { threadId: string; peerKind: "direct" | "group"; targetMsgId: string; isSelf: boolean }) => Promise<boolean>;
   /** Zalo Personal — danh bạ (bạn bè + nhóm) vừa đồng bộ xong. */

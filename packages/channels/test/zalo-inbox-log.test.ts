@@ -155,6 +155,25 @@ describe("Inbox: ghi tin đi/đến + bỏ bản dội lại", () => {
     expect(logs[1]).toMatchObject({ direction: "out", source: "app", text: "gõ từ điện thoại", peerKind: "group" });
   }, 10_000);
 
+  it("thu hồi -ld từ điện thoại trước khi giao AI và không lưu mã lệnh vào Inbox", async () => {
+    const logs: ChannelMessageLog[] = [];
+    const order: string[] = [];
+    const channel = new ZaloPersonalChannel({
+      id: "zp-staff", name: "Hot 1", token: "{}", config: {}, requirePairing: true,
+      onInbound: async () => ({ kind: "ignore" }),
+      onMessageLog: (entry) => logs.push(entry),
+      onSelfCommand: async (threadId) => { order.push(`delegate:${threadId}`); },
+    });
+    (channel as unknown as { api: unknown }).api = {
+      undo: async (_ids: unknown, threadId: string) => { order.push(`recall:${threadId}`); },
+    };
+    const handle = (channel as unknown as { handleMessage: (m: unknown) => Promise<void> }).handleMessage.bind(channel);
+    await handle({ type: ThreadType.User, threadId: "customer", isSelf: true,
+      data: { msgId: "cmd-1", cliMsgId: "cli-1", uidFrom: "owner", content: "-ld", msgType: "webchat", ts: String(Date.now()) } });
+    expect(order).toEqual(["recall:customer", "delegate:customer"]);
+    expect(logs).toEqual([]);
+  });
+
   it("tin khách gửi tới ghi nguồn zalo kèm tên người gửi (kể cả khi agent không được trả lời)", async () => {
     const { channel, logs } = setup();
     const handle = (channel as unknown as { handleMessage: (m: unknown) => Promise<void> }).handleMessage.bind(channel);
