@@ -83,7 +83,9 @@ export async function createKiotVietOrchidDraft(input: {
   const token = await accessToken(input.clientId, input.clientSecret, signal);
   const headers = { Retailer: input.retailer, Authorization: `Bearer ${token}` };
   const product = await orchidProduct(headers, signal);
-  const customer = await findOrderCustomer(headers, input.customer, signal, input.customerPhone);
+  const customer = input.existing
+    ? { id: 0, code: "", name: input.customer }
+    : await findOrderCustomer(headers, input.customer, signal, input.customerPhone);
   const totalPrice = parseKiotVietPrice(input.price);
   const shipping = parseKiotVietPrice(input.shippingFee ?? null);
   const vat = input.companyInvoice ? parseKiotVietPrice(input.vatFee ?? null) : null;

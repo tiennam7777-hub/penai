@@ -204,7 +204,6 @@ describe("KiotViet orchid order draft", () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ access_token: "token" }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 916, code: "SP00016" }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [{ id: 22, code: "KH22", name: "Chị Mai" }] }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 921, code: "SP00021" }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 42, code: "DH42", status: 1,
         branchId: 55291, totalPayment: 0, purchaseDate: "2026-10-18T00:53:37",
@@ -218,7 +217,7 @@ describe("KiotViet orchid order draft", () => {
       channelName: "Hot 1", stems: 10, color: "vàng", pot: "chậu thấp", price: "1.600.000đ",
       shippingFee: "135.000đ", delivery: "09:00 26/10/2026", address: "495 La Xuan Oai",
       existing: { orderId: 42, code: "DH42", fillMissing: true } });
-    const [url, options] = fetchMock.mock.calls[5]!;
+    const [url, options] = fetchMock.mock.calls[4]!;
     expect(url).toBe("https://public.kiotapi.com/orders/42");
     expect(options.method).toBe("PUT");
     const body = JSON.parse(options.body);
