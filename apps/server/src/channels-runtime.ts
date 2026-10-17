@@ -54,7 +54,8 @@ import { hasPersonalAddressMismatch, requiresPersonalAddressGuard } from "./pers
 import { isFreshCustomerRequest } from "./recall-policy.js";
 import { orchidHandoffContext } from "./orchid-handoff-context.js";
 import { editOrchidPhotoWithOpenAI } from "./orchid-photo-openai.js";
-import { directPhotoPendingDir, isAuthorizedDirectPhotoSender, pendingPhotoCount, publishDirectPhotoBatch, withDirectPhotoLock } from "./orchid-photo-direct-batch.js";
+import { directPhotoPendingDir, isAuthorizedDirectPhotoSender, withDirectPhotoLock } from "./orchid-photo-direct-batch.js";
+import { addDirectPhotos, directPhotoCommand, removeDirectPhotos } from "./orchid-photo-direct-commands.js";
 import { prepareZaloPhotoPaths } from "./outbound-photo-path.js";
 import {
   classifyConfirmedOrchidOrder, classifyOrchidOrderCancellation, formatOrchidOrderCancellation,
@@ -700,9 +701,9 @@ export function makeInboundHandler(
       sessionId = s.id;
     }
 
-    // Hot 4 gửi ảnh riêng, rồi nhắn -sa để thay trọn bộ ảnh đang có.
-    // Chỉ UID đã cấu hình mới vào nhánh này; ảnh cũ được giữ nếu bất kỳ ảnh nào sửa lỗi.
-    if (photoEditDirect && (hasPhoto || msg.text.trim().toLowerCase() === "-sa")) {
+    // Hot 4 gửi ảnh riêng, rồi -sa thay bộ, -bs bổ sung, hoặc -het xóa ảnh khớp.
+    const photoCommand = directPhotoCommand(msg.text);
+    if (photoEditDirect && (hasPhoto || photoCommand)) {
       const userKey = `${channel.kind}-${msg.senderId}`;
       const userDir = resolve(join(rt.config.dataDir, ctx.workspaceId, "users", sanitizeUserKey(userKey)));
       const pendingDir = directPhotoPendingDir(userDir);
@@ -712,31 +713,42 @@ export function makeInboundHandler(
           if (photos.length) {
             const saved = await saveInboundImages(pendingDir, photos, msg.text);
             if (saved.length !== photos.length) throw new Error("Chưa lưu đủ ảnh gốc; chưa cập nhật thư mục");
-            if (msg.text.trim().toLowerCase() !== "-sa") return { kind: "ignore" };
+            if (!photoCommand) return { kind: "ignore" };
           }
-          if (msg.text.trim().toLowerCase() !== "-sa") return { kind: "ignore" };
-          if (await pendingPhotoCount(pendingDir) > 0) {
-            await hooks?.onBlockReply?.("dạ e đã rõ, e sẽ sửa ảnh sáng đẹp và cập nhập ngay");
+          if (!photoCommand) return { kind: "ignore" };
+          const workspaceDir = join(rt.config.dataDir, ctx.workspaceId);
+          if (photoCommand === "-het") {
+            const removed = await removeDirectPhotos({ pendingDir, workspaceDir });
+            await appendMessage(db, ctx, sessionId!, {
+              role: "user", content: { kind: "text", text: `[-het: xóa ${removed.count} ảnh trong shared/hinh-hoa-dang-co-42dbp]` },
+            }).catch(() => {});
+            return { kind: "reply", text: `Đã xóa ${removed.count} ảnh màu khỏi thư mục đang có. Ảnh đã xóa được lưu trong bản sao lưu.` };
           }
           const agent = await getAgentById(db, ctx, channel.agentId);
-          if (!agent) throw new Error("Chưa tìm thấy Agent sửa ảnh");
-          const editor = rt.providers.get(agent.provider, ctx.workspaceId);
-          if (!(editor instanceof CodexProvider)) throw new Error("Agent sửa ảnh cần provider ChatGPT (codex)");
-          const published = await publishDirectPhotoBatch({
-            pendingDir,
-            workspaceDir: join(rt.config.dataDir, ctx.workspaceId),
-            agentPrompt: agent.systemPrompt,
-            editor,
-            carrierModel: agent.model,
+          const provider = agent ? rt.providers.get(agent.provider, ctx.workspaceId) : null;
+          const editor = provider instanceof CodexProvider ? provider : {
+            generateImage: async (): Promise<never> => { throw new Error("Agent sửa ảnh chưa kết nối ChatGPT (codex)"); },
+          };
+          const published = await addDirectPhotos({
+            command: photoCommand,
+            pendingDir, workspaceDir,
+            agentPrompt: agent?.systemPrompt ?? "",
+            editor, carrierModel: agent?.model ?? "gpt-6-sol",
+            onPublished: async (count) => {
+              await hooks?.onBlockReply?.(`Đã cập nhật ngay ${count} ảnh gốc trong bộ màu. Đang sửa ảnh nét, ánh sáng tự nhiên và mờ nền.`);
+            },
           });
           await appendMessage(db, ctx, sessionId!, {
-            role: "user", content: { kind: "text", text: `[-sa: cập nhật ${published.count} ảnh trong shared/hinh-hoa-dang-co-42dbp]` },
+            role: "user", content: { kind: "text", text: `[${photoCommand}: cập nhật ${published.count} ảnh trong shared/hinh-hoa-dang-co-42dbp; sửa xong ${published.edited}]` },
           }).catch(() => {});
-          return { kind: "reply", text: `Đã cập nhật ${published.count} ảnh trong shared/hinh-hoa-dang-co-42dbp.`, media: published.files };
+          const unfinished = published.count - published.edited;
+          return { kind: "reply", text: unfinished
+            ? `Đã cập nhật ${published.count} ảnh; sửa xong ${published.edited} ảnh, ${unfinished} ảnh vẫn là bản gốc vì sửa ảnh lỗi.`
+            : `Đã cập nhật và sửa xong ${published.count} ảnh trong shared/hinh-hoa-dang-co-42dbp.`, media: published.files };
         } catch (error) {
-          logger.warn(`Không cập nhật được ảnh -sa ${channel.id}/${msg.senderId}: ${String(error)}`);
-          if (msg.text.trim().toLowerCase() !== "-sa") return { kind: "ignore" };
-          return { kind: "reply", text: `Chưa cập nhật thư mục ảnh: ${error instanceof Error ? error.message : "lỗi không xác định"}. Ảnh cũ vẫn được giữ; có thể gửi lại -sa.` };
+          logger.warn(`Không xử lý được ảnh ${photoCommand} ${channel.id}/${msg.senderId}: ${String(error)}`);
+          if (!photoCommand) return { kind: "ignore" };
+          return { kind: "reply", text: `Chưa thực hiện lệnh ${photoCommand}: ${error instanceof Error ? error.message : "lỗi không xác định"}.` };
         }
       });
     }
