@@ -67,6 +67,7 @@ import {
   type DbHandle,
   getKiotVietCredentials,
   saveKiotVietCredentials,
+  listKiotVietOrderDrafts,
 } from "@penai/db";
 import {
   createCronJob,
@@ -190,7 +191,7 @@ import {
   normalizeSchedule,
 } from "@penai/core";
 import { CRON_MIN_INTERVAL_MS, deliverLabel } from "./cron-tools.js";
-import { verifyKiotVietRetailConnection } from "./kiotviet-api.js";
+import { checkKiotVietOrchidProduct, verifyKiotVietRetailConnection } from "./kiotviet-api.js";
 import {
   isChannelKindSupported,
   supportedChannelKinds,
@@ -1187,7 +1188,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return { deleted: true };
   });
 
-  // ===== KiotViet Retail API: admin-only credential storage; no order creation yet =====
+  // ===== KiotViet Retail API: admin-only credentials and order draft status =====
   app.get("/v1/kiotviet", async (req, reply) => {
     if (!requireRole(req, reply, "ws_admin")) return;
     const row = await getKiotVietCredentials(db, req.authCtx);
@@ -1198,6 +1199,26 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       updatedAt: row.updatedAt,
       hasCredentials: true,
     } : null };
+  });
+
+  app.get("/v1/kiotviet/drafts", async (req, reply) => {
+    if (!requireRole(req, reply, "ws_admin")) return;
+    return { drafts: await listKiotVietOrderDrafts(db, req.authCtx) };
+  });
+
+  app.get("/v1/kiotviet/product-check", async (req, reply) => {
+    if (!requireRole(req, reply, "ws_admin")) return;
+    const credentials = await getKiotVietCredentials(db, req.authCtx);
+    if (!credentials) return reply.code(404).send({ error: "Chưa lưu kết nối KiotViet" });
+    try {
+      return { product: await checkKiotVietOrchidProduct({
+        retailer: credentials.retailer,
+        clientId: decryptSecret(credentials.clientIdEncrypted),
+        clientSecret: decryptSecret(credentials.clientSecretEncrypted),
+      }) };
+    } catch (error) {
+      return reply.code(502).send({ error: error instanceof Error ? error.message : "Không kiểm tra được mã hàng" });
+    }
   });
 
   app.put("/v1/kiotviet", async (req, reply) => {

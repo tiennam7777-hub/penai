@@ -23,6 +23,9 @@ import {
   getInboxThread,
   claimOrchidOrderDispatch,
   finishOrchidOrderDispatch,
+  claimKiotVietOrderDraft,
+  finishKiotVietOrderDraft,
+  getKiotVietCredentials,
   getPersonContextData,
   loadMessages,
   type EnabledChannel,
@@ -66,6 +69,7 @@ import { stemCountForPhoto } from "./orchid-photo-count.js";
 import { knownOrchidShippingHint, orchidShippingHintContext, completeOrchidShippingReply, orchidDeliveryPriorityContext } from "./orchid-shipping-reply.js";
 import { orchidCompanyPaymentContext } from "./orchid-payment-context.js";
 import { classifyOrchidFlowerComplaint, formatOrchidFlowerComplaintDispatch, orchidFlowerComplaintFingerprint } from "./orchid-flower-complaint.js";
+import { createKiotVietOrchidDraft } from "./kiotviet-api.js";
 import { requestedOrchidYellowSamples, orchidYellowSamplePath } from "./orchid-yellow-samples.js";
 
 /** Handler + channel theo channelId — cho webhook route (WhatsApp, Teams) dùng. */
@@ -1126,6 +1130,7 @@ export function makeInboundHandler(
       : null;
     const shippingContext = orchidShippingHintContext(shippingHint);
     let dispatchContext = "";
+    let kiotContext = "";
     let complaintReply: string | null = null;
     const orderGroupId = channel.config["orchid_order_dispatch_group"];
     if (agent.key === "nhan-vien-kinh-doanh-orchids-world" && channel.kind === "zalo_personal" &&
@@ -1180,6 +1185,42 @@ export function makeInboundHandler(
               ? "[HỆ THỐNG: Yêu cầu hủy này đã được ghi nhận để tránh gửi nhóm trùng. Không nói đã dừng đơn.]"
               : "[HỆ THỐNG: Đơn này đã được ghi nhận để tránh gửi trùng. Không tự khẳng định đã báo nhóm lần nữa.]";
           }
+          if (order) {
+            // Keep KiotViet creation independent of the Zalo group notification.
+            // Claim before POST: a timeout may mean KiotViet accepted it already.
+            try {
+              const credentials = await getKiotVietCredentials(db, ctx);
+              if (credentials?.branchId) {
+                const kiotClaimId = await claimKiotVietOrderDraft(db, ctx, {
+                  channelId: channel.id, threadId: sourceThreadId, fingerprint,
+                });
+                if (kiotClaimId) {
+                  try {
+                    const saved = await createKiotVietOrchidDraft({
+                      retailer: credentials.retailer,
+                      clientId: decryptSecret(credentials.clientIdEncrypted),
+                      clientSecret: decryptSecret(credentials.clientSecretEncrypted),
+                      branchId: credentials.branchId,
+                      customer, zaloUid: msg.senderId, channelName: channel.name,
+                      stems: order.stems, color: order.color, pot: order.pot,
+                      price: order.price, delivery: order.delivery,
+                    });
+                    await finishKiotVietOrderDraft(db, ctx, kiotClaimId, {
+                      orderId: saved.orderId, code: saved.code,
+                    });
+                    kiotContext = `[HỆ THỐNG: Đã tạo phiếu đặt hàng nháp KiotViet mã ${saved.code}. Nhân viên cần kiểm tra thông tin và hoàn tất đơn. Chưa tạo hóa đơn hoặc ghi nhận thanh toán.]`;
+                  } catch (error) {
+                    const reason = error instanceof Error ? error.message : "Lỗi không xác định";
+                    await finishKiotVietOrderDraft(db, ctx, kiotClaimId, { error: reason }).catch(() => {});
+                    logger.warn(`Không tạo được đơn nháp KiotViet trên ${channel.name}: ${reason}`);
+                    kiotContext = "[HỆ THỐNG: Chưa xác nhận tạo được đơn nháp KiotViet; cần nhân viên kiểm tra, không khẳng định đã lên đơn.]";
+                  }
+                }
+              }
+            } catch (error) {
+              logger.warn(`Không kiểm tra được kết nối KiotViet trên ${channel.name}: ${String(error)}`);
+            }
+          }
         }
       } catch (error) {
         logger.warn(`Không kiểm tra được thay đổi đơn trên ${channel.name}: ${String(error)}`);
@@ -1231,8 +1272,8 @@ export function makeInboundHandler(
       }
     }
     if (complaintReply) return { kind: "reply", text: complaintReply };
-    const userMessage = handoffContext || dispatchContext || shippingContext || deliveryContext || paymentContext
-      ? `${handoffContext}\n\n${dispatchContext ? `${dispatchContext}\n\n` : ""}${deliveryContext ? `${deliveryContext}\n\n` : ""}${shippingContext ? `${shippingContext}\n\n` : ""}${paymentContext ? `${paymentContext}\n\n` : ""}[YÊU CẦU MỚI NHẤT CẦN TRẢ LỜI]\n${latestUserMessage}`
+    const userMessage = handoffContext || dispatchContext || kiotContext || shippingContext || deliveryContext || paymentContext
+      ? `${handoffContext}\n\n${dispatchContext ? `${dispatchContext}\n\n` : ""}${kiotContext ? `${kiotContext}\n\n` : ""}${deliveryContext ? `${deliveryContext}\n\n` : ""}${shippingContext ? `${shippingContext}\n\n` : ""}${paymentContext ? `${paymentContext}\n\n` : ""}[YÊU CẦU MỚI NHẤT CẦN TRẢ LỜI]\n${latestUserMessage}`
       : latestUserMessage;
     // Vision = ảnh lượt này + các ảnh gần đây của session (đọc lại từ đĩa) —
     // người dùng gửi ảnh trước, nhắn yêu cầu sau thì model vẫn "nhìn thấy" ảnh.

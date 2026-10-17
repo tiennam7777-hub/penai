@@ -952,7 +952,7 @@ export const INDEX_HTML = `<!doctype html>
     var m = page("KiotViet", "Lưu kết nối Bán buôn/Bán lẻ cho gian hàng Orchids World");
     var c = card(m);
     c.innerHTML = '<div id="kvStatus" class="muted">Đang kiểm tra kết nối đã lưu...</div>' +
-      '<p class="muted">Client ID và Mã bảo mật chỉ được gửi tới máy chủ PenAI để xác minh với KiotViet, rồi lưu mã hóa. PenAI chưa tự tạo đơn khi mới lưu kết nối.</p>' +
+      '<p class="muted">Client ID và Mã bảo mật được lưu mã hóa. Khi khách chốt chậu lan qua Hot 1/4/6, PenAI tạo phiếu đặt hàng nháp với mã SP00016; mỗi cành là một cây. Nhân viên kiểm tra giá, thông tin nhận và hoàn tất đơn. PenAI không tự lập hóa đơn hay thu tiền.</p>' +
       '<label>Gian hàng (Retailer)</label><input id="kvRetailer" value="orchidsworld42" autocomplete="off" style="width:100%">' +
       '<label>Chi nhánh nhận đơn</label><input id="kvBranch" value="42 Điện Biên Phủ" autocomplete="off" style="width:100%">' +
       '<label>Client ID</label><input id="kvClientId" type="password" autocomplete="off" style="width:100%">' +
@@ -982,6 +982,30 @@ export const INDEX_HTML = `<!doctype html>
       }).catch(function (e) { $("#kvMsg", c).textContent = e.message; })
         .finally(function () { $("#kvSave", c).disabled = false; });
     };
+    var draftsCard = card(m);
+    draftsCard.innerHTML = '<div id="kvProduct" class="muted">Đang kiểm tra mã hàng SP00016...</div>' +
+      '<div class="row" style="justify-content:space-between;margin-top:12px"><h3 style="margin:0">Phiếu nháp từ Inbox</h3><button id="kvRefresh" class="sm">Làm mới</button></div><div id="kvDrafts" class="muted" style="margin-top:10px">Đang tải...</div>';
+    api("/v1/kiotviet/product-check").then(function (j) {
+      $("#kvProduct", draftsCard).textContent = "Mã hàng đã kiểm tra: " + j.product.code + " · " + j.product.name + " (ID " + j.product.id + ").";
+    }).catch(function (e) { $("#kvProduct", draftsCard).textContent = "Chưa kiểm tra được SP00016: " + e.message; });
+    function loadDrafts() {
+      var host = $("#kvDrafts", draftsCard);
+      host.textContent = "Đang tải...";
+      api("/v1/kiotviet/drafts").then(function (j) {
+        host.textContent = "";
+        if (!j.drafts.length) { host.textContent = "Chưa có phiếu nháp do PenAI tạo."; return; }
+        j.drafts.forEach(function (d) {
+          var line = document.createElement("div");
+          line.style.cssText = "padding:9px 0;border-bottom:1px solid var(--border)";
+          var label = d.status === "sent" ? "Đã tạo " + d.kiotOrderCode : d.status === "failed" ? "Cần kiểm tra" : "Đang xử lý";
+          line.textContent = label + " · " + d.channelName + " · " + new Date(d.createdAt).toLocaleString("vi-VN") +
+            (d.error ? " · " + d.error : "");
+          host.appendChild(line);
+        });
+      }).catch(function (e) { host.textContent = e.message; });
+    }
+    $("#kvRefresh", draftsCard).onclick = loadDrafts;
+    loadDrafts();
   };
 
   // ---- Providers: danh sách gộp (subscription CLI + API key DB) kiểu card gọn.
