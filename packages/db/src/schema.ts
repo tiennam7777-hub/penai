@@ -69,6 +69,17 @@ export const workspaces = pgTable("workspaces", {
     .defaultNow(),
 });
 
+/** KiotViet Retail API connection. Secret fields are encrypted by the server. */
+export const kiotvietCredentials = pgTable("kiotviet_credentials", {
+  workspaceId: uuid("workspace_id").primaryKey().references(() => workspaces.id, { onDelete: "cascade" }),
+  retailer: text("retailer").notNull(),
+  branchName: text("branch_name").notNull(),
+  branchId: bigint("branch_id", { mode: "number" }),
+  clientIdEncrypted: text("client_id_encrypted").notNull(),
+  clientSecretEncrypted: text("client_secret_encrypted").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // ===== Workspace-scoped (RLS bắt buộc — xem migrations/0001_init.sql) =====
 
 export const workspaceMembers = pgTable(

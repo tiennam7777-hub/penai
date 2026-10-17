@@ -363,6 +363,7 @@ export const INDEX_HTML = `<!doctype html>
     { grp: "Cấu hình" },
     { id: "agents", icon: "🤖", label: "Agents" },
     { id: "providers", icon: "🔌", label: "Providers" },
+    { id: "kiotviet", icon: "🧾", label: "KiotViet", admin: true },
     { id: "channels", icon: "📡", label: "Channels" },
     { id: "cron", icon: "⏰", label: "Cron & lịch hẹn" },
     { id: "users", icon: "👤", label: "Người dùng", admin: true },
@@ -945,6 +946,42 @@ export const INDEX_HTML = `<!doctype html>
       });
     }
     load();
+  };
+
+  PAGES.kiotviet = function () {
+    var m = page("KiotViet", "Lưu kết nối Bán buôn/Bán lẻ cho gian hàng Orchids World");
+    var c = card(m);
+    c.innerHTML = '<div id="kvStatus" class="muted">Đang kiểm tra kết nối đã lưu...</div>' +
+      '<p class="muted">Client ID và Mã bảo mật chỉ được gửi tới máy chủ PenAI để xác minh với KiotViet, rồi lưu mã hóa. PenAI chưa tự tạo đơn khi mới lưu kết nối.</p>' +
+      '<label>Gian hàng (Retailer)</label><input id="kvRetailer" value="orchidsworld42" autocomplete="off" style="width:100%">' +
+      '<label>Chi nhánh nhận đơn</label><input id="kvBranch" value="42 Điện Biên Phủ" autocomplete="off" style="width:100%">' +
+      '<label>Client ID</label><input id="kvClientId" type="password" autocomplete="off" style="width:100%">' +
+      '<label>Mã bảo mật</label><input id="kvSecret" type="password" autocomplete="off" style="width:100%">' +
+      '<div class="row" style="margin-top:12px"><button id="kvSave">Xác minh và lưu kết nối</button><span id="kvMsg" class="muted"></span></div>';
+    api("/v1/kiotviet").then(function (j) {
+      var x = j.connection;
+      $("#kvStatus", c).textContent = x ? "Đã lưu kết nối " + x.retailer + ", chi nhánh " + x.branchName + " (ID " + x.branchId + ")." : "Chưa lưu kết nối KiotViet.";
+      if (x) { $("#kvRetailer", c).value = x.retailer; $("#kvBranch", c).value = x.branchName; }
+    }).catch(function (e) { $("#kvStatus", c).textContent = e.message; });
+    $("#kvSave", c).onclick = function () {
+      var b = {
+        retailer: $("#kvRetailer", c).value.trim(),
+        branchName: $("#kvBranch", c).value.trim(),
+        clientId: $("#kvClientId", c).value.trim(),
+        clientSecret: $("#kvSecret", c).value.trim(),
+      };
+      if (!b.retailer || !b.branchName || !b.clientId || !b.clientSecret) {
+        $("#kvMsg", c).textContent = "Cần điền đủ bốn trường."; return;
+      }
+      $("#kvSave", c).disabled = true;
+      $("#kvMsg", c).textContent = "Đang xác minh với KiotViet...";
+      api("/v1/kiotviet", { method: "PUT", body: b }).then(function (j) {
+        $("#kvClientId", c).value = ""; $("#kvSecret", c).value = "";
+        $("#kvStatus", c).textContent = "Đã lưu kết nối " + j.connection.retailer + ", chi nhánh " + j.connection.branchName + " (ID " + j.connection.branchId + ").";
+        $("#kvMsg", c).textContent = "Đã xác minh và lưu mã hóa.";
+      }).catch(function (e) { $("#kvMsg", c).textContent = e.message; })
+        .finally(function () { $("#kvSave", c).disabled = false; });
+    };
   };
 
   // ---- Providers: danh sách gộp (subscription CLI + API key DB) kiểu card gọn.

@@ -65,6 +65,8 @@ import {
   listMemoriesForUserKey,
   getPersonRelated,
   type DbHandle,
+  getKiotVietCredentials,
+  saveKiotVietCredentials,
 } from "@penai/db";
 import {
   createCronJob,
@@ -188,6 +190,7 @@ import {
   normalizeSchedule,
 } from "@penai/core";
 import { CRON_MIN_INTERVAL_MS, deliverLabel } from "./cron-tools.js";
+import { verifyKiotVietRetailConnection } from "./kiotviet-api.js";
 import {
   isChannelKindSupported,
   supportedChannelKinds,
@@ -1182,6 +1185,51 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const ok = await deleteAgent(db, req.authCtx, id);
     if (!ok) return reply.code(404).send({ error: "Agent không tồn tại" });
     return { deleted: true };
+  });
+
+  // ===== KiotViet Retail API: admin-only credential storage; no order creation yet =====
+  app.get("/v1/kiotviet", async (req, reply) => {
+    if (!requireRole(req, reply, "ws_admin")) return;
+    const row = await getKiotVietCredentials(db, req.authCtx);
+    return { connection: row ? {
+      retailer: row.retailer,
+      branchName: row.branchName,
+      branchId: row.branchId,
+      updatedAt: row.updatedAt,
+      hasCredentials: true,
+    } : null };
+  });
+
+  app.put("/v1/kiotviet", async (req, reply) => {
+    if (!requireRole(req, reply, "ws_admin")) return;
+    const parsed = z.object({
+      retailer: z.string().trim().regex(/^[a-z0-9-]{2,100}$/i),
+      branchName: z.string().trim().min(2).max(150),
+      clientId: z.string().trim().min(10).max(200),
+      clientSecret: z.string().trim().min(10).max(300),
+    }).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "Thiếu hoặc sai thông tin kết nối KiotViet" });
+    const b = parsed.data;
+    let verified: { branchId: number; branchName: string };
+    try {
+      verified = await verifyKiotVietRetailConnection(b);
+    } catch (err) {
+      return reply.code(400).send({ error: err instanceof Error ? err.message : "Không xác minh được KiotViet" });
+    }
+    const row = await saveKiotVietCredentials(db, req.authCtx, {
+      retailer: b.retailer,
+      branchName: verified.branchName,
+      branchId: verified.branchId,
+      clientIdEncrypted: encryptSecret(b.clientId),
+      clientSecretEncrypted: encryptSecret(b.clientSecret),
+    });
+    return { connection: {
+      retailer: row.retailer,
+      branchName: row.branchName,
+      branchId: row.branchId,
+      updatedAt: row.updatedAt,
+      hasCredentials: true,
+    } };
   });
 
   // ===== Providers & models & tools (cho UI) =====
