@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { addDirectPhotos, directPhotoCommand, removeDirectPhotos } from "../src/orchid-photo-direct-commands.js";
+import { addDirectPhotos, directPhotoCommand } from "../src/orchid-photo-direct-commands.js";
 
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a3WQAAAAASUVORK5CYII=", "base64");
 const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(128)]);
@@ -24,10 +24,10 @@ function input(f: Awaited<ReturnType<typeof fixture>>, command: "-sa" | "-bs", e
 }
 
 describe("Hot 4 photo commands", () => {
-  it("recognizes only the three standalone commands", () => {
+  it("recognizes -sa and -bs, but never treats -het as a deletion command", () => {
     expect(directPhotoCommand(" -SA ")).toBe("-sa");
     expect(directPhotoCommand("-bs")).toBe("-bs");
-    expect(directPhotoCommand(" -het ")).toBe("-het");
+    expect(directPhotoCommand(" -het ")).toBeNull();
     expect(directPhotoCommand("-sa xóa")).toBeNull();
   });
 
@@ -60,24 +60,4 @@ describe("Hot 4 photo commands", () => {
     expect((await readdir(f.target)).some((name) => name.endsWith(".png"))).toBe(true);
   });
 
-  it("-het removes only the matching photo and keeps a backup", async () => {
-    const f = await fixture();
-    await writeFile(join(f.pendingDir, "new.png"), png);
-    const added = await addDirectPhotos(input(f, "-bs", {
-      async generateImage() { return { data: jpeg, mime: "image/jpeg" }; },
-    }));
-    await mkdir(f.pendingDir, { recursive: true });
-    await writeFile(join(f.pendingDir, "same.png"), png);
-    const removed = await removeDirectPhotos(f);
-    expect(removed.count).toBe(1);
-    expect(await readdir(f.target)).toContain("old.jpg");
-    expect(await readdir(removed.backupDir)).toContain(added.files[0]!.split(/[\\/]/).at(-1));
-  });
-
-  it("-het refuses an unknown image without deleting anything", async () => {
-    const f = await fixture();
-    await writeFile(join(f.pendingDir, "different.png"), png);
-    await expect(removeDirectPhotos(f)).rejects.toThrow();
-    expect(await readFile(join(f.target, "old.jpg"), "utf8")).toBe("old-photo");
-  });
 });

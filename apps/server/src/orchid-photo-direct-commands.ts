@@ -1,32 +1,21 @@
 import { createHash, randomBytes } from "node:crypto";
-import { mkdir, readdir, readFile, readlink, rename, rm, stat, writeFile } from "node:fs/promises";
-import { extname, join, resolve, sep } from "node:path";
-import { photoDifferenceHash } from "./orchid-photo-count.js";
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { extname, join } from "node:path";
 import { editOrchidPhotoWithOpenAI, type OrchidPhotoEditor } from "./orchid-photo-openai.js";
 
-export type PhotoCommand = "-sa" | "-bs" | "-het";
+export type PhotoCommand = "-sa" | "-bs";
 export function directPhotoCommand(text: string): PhotoCommand | null {
   const value = text.trim().toLowerCase();
-  return value === "-sa" || value === "-bs" || value === "-het" ? value : null;
+  return value === "-sa" || value === "-bs" ? value : null;
 }
 
 const TARGET = "hinh-hoa-dang-co-42dbp";
 const INDEX = ".photo-sources.json";
 const IMAGE = /\.(?:jpe?g|png|webp)$/i;
-type IndexedPhoto = { name: string; originalSha: string; originalHash?: string };
+type IndexedPhoto = { name: string; originalSha: string };
 type Queued = { bytes: Buffer; record: IndexedPhoto; path: string };
 
 function digest(value: Buffer): string { return createHash("sha256").update(value).digest("hex"); }
-async function hash(value: Buffer): Promise<string | undefined> {
-  try { return (await photoDifferenceHash(value)).toString(16).padStart(16, "0"); }
-  catch { return undefined; }
-}
-function distance(a: string, b: string): number {
-  let bits = BigInt(`0x${a}`) ^ BigInt(`0x${b}`);
-  let count = 0;
-  while (bits) { bits &= bits - 1n; count++; }
-  return count;
-}
 async function photosIn(dir: string): Promise<string[]> {
   const entries = await readdir(dir, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") return [];
@@ -57,8 +46,7 @@ async function queued(pendingDir: string): Promise<Queued[]> {
   return Promise.all((await photosIn(pendingDir)).map(async (name) => {
     const path = join(pendingDir, name);
     const bytes = await readFile(path);
-    const originalHash = await hash(bytes);
-    return { bytes, path, record: { name: "", originalSha: digest(bytes), ...(originalHash ? { originalHash } : {}) } };
+    return { bytes, path, record: { name: "", originalSha: digest(bytes) } };
   }));
 }
 
@@ -132,53 +120,4 @@ export async function addDirectPhotos(input: {
     } catch { files.push(original); }
   }
   return { count: photos.length, edited, files, ...(backup ? { backupDir: backup } : {}) };
-}
-
-/** Match by exact bytes/source first, then by a uniquely close perceptual hash. */
-export async function removeDirectPhotos(input: { pendingDir: string; workspaceDir: string }): Promise<{ count: number; backupDir: string }> {
-  const incoming = await queued(input.pendingDir);
-  if (!incoming.length) throw new Error("Chưa có ảnh nào được gửi trước lệnh -het");
-  const target = join(input.workspaceDir, "shared", TARGET);
-  const index = await readIndex(target);
-  const live = await Promise.all((await photosIn(target)).map(async (name) => {
-    const bytes = await readFile(join(target, name));
-    return { name, sha: digest(bytes), imageHash: await hash(bytes), source: index.find((row) => row.name === name) };
-  }));
-  const chosen = new Set<string>();
-  for (const photo of incoming) {
-    const exact = live.filter((row) => !chosen.has(row.name) &&
-      (row.sha === photo.record.originalSha || row.source?.originalSha === photo.record.originalSha));
-    if (exact.length > 1) throw new Error("Có nhiều ảnh giống nhau; chưa xóa để tránh nhầm");
-    if (exact.length === 1) { chosen.add(exact[0]!.name); continue; }
-    if (!photo.record.originalHash) throw new Error("Không nhận diện được ảnh cần xóa");
-    const ranked = live.filter((row) => !chosen.has(row.name)).map((row) => ({
-      name: row.name,
-      score: Math.min(row.source?.originalHash ? distance(photo.record.originalHash!, row.source.originalHash) : 65,
-        row.imageHash ? distance(photo.record.originalHash!, row.imageHash) : 65),
-    })).sort((a, b) => a.score - b.score);
-    if (!ranked[0] || ranked[0].score > 5 || (ranked[1] && ranked[1].score - ranked[0].score < 4)) {
-      throw new Error("Chưa nhận diện chắc chắn ảnh trong thư mục; chưa xóa ảnh nào");
-    }
-    chosen.add(ranked[0].name);
-  }
-  const backup = backupDir(input.workspaceDir);
-  await mkdir(backup, { recursive: true });
-  const moved: string[] = [];
-  try {
-    for (const name of chosen) { await rename(join(target, name), join(backup, name)); moved.push(name); }
-    // Older batches may contain compatibility symlinks to the photo being removed.
-    for (const entry of await readdir(target, { withFileTypes: true })) {
-      if (!entry.isSymbolicLink()) continue;
-      const destination = resolve(target, await readlink(join(target, entry.name)));
-      if (!destination.startsWith(`${target}${sep}`) || !chosen.has(destination.slice(target.length + 1))) continue;
-      await rename(join(target, entry.name), join(backup, entry.name));
-      moved.push(entry.name);
-    }
-    await writeIndex(target, index.filter((row) => !chosen.has(row.name)));
-  } catch (error) {
-    for (const name of moved) await rename(join(backup, name), join(target, name));
-    throw error;
-  }
-  await rm(input.pendingDir, { recursive: true, force: true }).catch(() => {});
-  return { count: chosen.size, backupDir: backup };
 }

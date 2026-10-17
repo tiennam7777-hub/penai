@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 import { decryptSecret, encryptSecret, logger } from "@penai/shared";
 import { confineMediaPath } from "@penai/tools";
@@ -55,7 +55,7 @@ import { isFreshCustomerRequest } from "./recall-policy.js";
 import { orchidHandoffContext } from "./orchid-handoff-context.js";
 import { editOrchidPhotoWithOpenAI } from "./orchid-photo-openai.js";
 import { directPhotoPendingDir, isAuthorizedDirectPhotoSender, withDirectPhotoLock } from "./orchid-photo-direct-batch.js";
-import { addDirectPhotos, directPhotoCommand, removeDirectPhotos } from "./orchid-photo-direct-commands.js";
+import { addDirectPhotos, directPhotoCommand } from "./orchid-photo-direct-commands.js";
 import { prepareZaloPhotoPaths } from "./outbound-photo-path.js";
 import {
   classifyConfirmedOrchidOrder, classifyOrchidOrderCancellation, formatOrchidOrderCancellation,
@@ -701,14 +701,21 @@ export function makeInboundHandler(
       sessionId = s.id;
     }
 
-    // Hot 4 gửi ảnh riêng, rồi -sa thay bộ, -bs bổ sung, hoặc -het xóa ảnh khớp.
+    // Hot 4 gửi ảnh riêng, rồi -sa thay bộ hoặc -bs bổ sung. -het đã ngừng dùng.
     const photoCommand = directPhotoCommand(msg.text);
-    if (photoEditDirect && (hasPhoto || photoCommand)) {
+    const retiredPhotoCommand = msg.text.trim().toLowerCase() === "-het";
+    if (photoEditDirect && (hasPhoto || photoCommand || retiredPhotoCommand)) {
       const userKey = `${channel.kind}-${msg.senderId}`;
       const userDir = resolve(join(rt.config.dataDir, ctx.workspaceId, "users", sanitizeUserKey(userKey)));
       const pendingDir = directPhotoPendingDir(userDir);
       return withDirectPhotoLock(`${channel.id}:${msg.senderId}`, async () => {
         try {
+          if (retiredPhotoCommand) {
+            // Discard photos queued for this retired command, so a later -sa/-bs
+            // cannot accidentally add a color the staff intended to remove.
+            await rm(pendingDir, { recursive: true, force: true });
+            return { kind: "reply", text: "Lệnh -het đã tắt. Anh xóa ảnh hết màu thủ công trong shared/hinh-hoa-dang-co-42dbp nhé." };
+          }
           const photos = (msg.media ?? []).filter((m) => m.kind === "photo" && m.dataUrl);
           if (photos.length) {
             const saved = await saveInboundImages(pendingDir, photos, msg.text);
@@ -717,13 +724,6 @@ export function makeInboundHandler(
           }
           if (!photoCommand) return { kind: "ignore" };
           const workspaceDir = join(rt.config.dataDir, ctx.workspaceId);
-          if (photoCommand === "-het") {
-            const removed = await removeDirectPhotos({ pendingDir, workspaceDir });
-            await appendMessage(db, ctx, sessionId!, {
-              role: "user", content: { kind: "text", text: `[-het: xóa ${removed.count} ảnh trong shared/hinh-hoa-dang-co-42dbp]` },
-            }).catch(() => {});
-            return { kind: "reply", text: `Đã xóa ${removed.count} ảnh màu khỏi thư mục đang có. Ảnh đã xóa được lưu trong bản sao lưu.` };
-          }
           const agent = await getAgentById(db, ctx, channel.agentId);
           const provider = agent ? rt.providers.get(agent.provider, ctx.workspaceId) : null;
           const editor = provider instanceof CodexProvider ? provider : {
