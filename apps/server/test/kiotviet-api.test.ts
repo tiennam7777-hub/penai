@@ -69,7 +69,7 @@ describe("KiotViet orchid order draft", () => {
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 42, code: "DH12345" }) });
     vi.stubGlobal("fetch", fetchMock);
     const result = await createKiotVietOrchidDraft({
-      ...input, branchId: 55291, cashierUserId: 77, customer: "Chị Mai", zaloUid: "12345", channelName: "Hot 4",
+      ...input, branchId: 55291, cashierUserId: 77, customer: "Chị Mai", channelName: "Hot 4",
       stems: 5, color: "vàng", pot: "chậu lan", price: "1.000.000đ", delivery: "10:00 18/10/2026",
     });
     expect(result).toMatchObject({ orderId: 42, code: "DH12345", customerName: "Chị Mai" });
@@ -80,14 +80,14 @@ describe("KiotViet orchid order draft", () => {
     const body = JSON.parse(options.body);
     expect(body).toMatchObject({ branchId: 55291, cashierId: 77, totalPayment: 0, makeInvoice: false,
       customer: { id: 22, code: "KH22", name: "Chị Mai" }, orderDelivery: { partnerDeliveryId: 107020 } });
-    expect(body.description).toContain("Khách chat: Chị Mai; nguồn Hot 4 / Zalo UID 12345");
+    expect(body.description).toContain("Khách chat: Chị Mai; nguồn Hot 4 / Zalo.");
     expect(body).not.toHaveProperty("soldById");
     expect(body.orderDetails).toEqual([expect.objectContaining({
       productId: 916, productCode: "SP00016", quantity: 5, price: 200_000,
       orderDetailTaxs: [{ taxId: 1 }],
     })]);
     expect(body.description).toContain("Chị Mai");
-    expect(body.description).toContain("Zalo UID 12345");
+    expect(body.description).not.toMatch(/\b(?:UID|ID)\s+\d+/i);
   });
 
   it("uses zero price and calls out missing price in a draft", async () => {
@@ -98,7 +98,7 @@ describe("KiotViet orchid order draft", () => {
       .mockResolvedValueOnce({ ok: true, json: async () => ({ data: { id: 42, code: "DH12345" } }) });
     vi.stubGlobal("fetch", fetchMock);
     await createKiotVietOrchidDraft({
-      ...input, branchId: 55291, customer: "Chị Mai", zaloUid: "12345", channelName: "Hot 4",
+      ...input, branchId: 55291, customer: "Chị Mai", channelName: "Hot 4",
       stems: 5, color: "vàng", pot: "chậu lan", price: null, delivery: "10:00 18/10/2026",
     });
     const body = JSON.parse(fetchMock.mock.calls[3]![1].body);
@@ -113,7 +113,7 @@ describe("KiotViet orchid order draft", () => {
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 916, code: "OTHER" }) });
     vi.stubGlobal("fetch", fetchMock);
     await expect(createKiotVietOrchidDraft({
-      ...input, branchId: 55291, customer: "Chị Mai", zaloUid: "12345", channelName: "Hot 4",
+      ...input, branchId: 55291, customer: "Chị Mai", channelName: "Hot 4",
       stems: 5, color: "vàng", pot: "chậu lan", price: null, delivery: "10:00 18/10/2026",
     })).rejects.toThrow("SP00016");
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -127,7 +127,7 @@ describe("KiotViet orchid order draft", () => {
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 42, code: "DH12345" }) });
     vi.stubGlobal("fetch", fetchMock);
     await createKiotVietOrchidDraft({
-      ...input, branchId: 55291, customer: "Chị Mai", zaloUid: "12345", channelName: "Hot 4",
+      ...input, branchId: 55291, customer: "Chị Mai", channelName: "Hot 4",
       stems: 5, color: "vàng", pot: "chậu lan", price: "1.000.000đ", delivery: "10:00 18/10/2026",
     });
     const body = JSON.parse(fetchMock.mock.calls[3]![1].body);
@@ -146,7 +146,7 @@ describe("KiotViet orchid order draft", () => {
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 50, code: "DH50" }) });
     vi.stubGlobal("fetch", fetchMock);
     await createKiotVietOrchidDraft({ ...input, branchId: 55291, customer: "Anh Nam 0901234567",
-      zaloUid: "12345", channelName: "Hot 1", stems: 5, color: "vàng", pot: "chậu sứ",
+      channelName: "Hot 1", stems: 5, color: "vàng", pot: "chậu sứ",
       price: "1.000.000đ", delivery: "09:00 19/10/2026", address: "12 Lê Lợi, TP.HCM",
       shippingFee: "50k", vatFee: "100k", companyInvoice: true, cardText: "Chúc mừng",
       instructions: "Gửi lễ tân", recipientPhone: "0911111111" });
@@ -175,7 +175,7 @@ describe("KiotViet orchid order draft", () => {
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 50, code: "DH50" }) });
     vi.stubGlobal("fetch", fetchMock);
     await createKiotVietOrchidDraft({ ...input, branchId: 55291, customer: "Khách lạ",
-      zaloUid: "12345", channelName: "Hot 1", stems: 5, color: "vàng", pot: "chậu sứ",
+      channelName: "Hot 1", stems: 5, color: "vàng", pot: "chậu sứ",
       price: "1.000.000đ", delivery: null, companyInvoice: false, vatFee: "100k" });
     const body = JSON.parse(fetchMock.mock.calls[4]![1].body);
     expect(body.customer.id).toBe(30509890);
@@ -208,12 +208,12 @@ describe("KiotViet orchid order draft", () => {
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 42, code: "DH42", status: 1,
         branchId: 55291, totalPayment: 0, purchaseDate: "2026-10-18T00:53:37",
         customerId: 99, customerCode: "KH99", customerName: "Khách nhân viên đã chọn", soldById: 66,
-        description: "Chậu: 10 cành. Màu: vàng. Giao: 09:00 19/10/2026. Địa chỉ: 495 La Xuan Oai. Giá hoa: chưa chốt. Cần bổ sung: giá bán.",
+        description: "Chậu: 10 cành. Màu: vàng. Giao: 09:00 19/10/2026. Địa chỉ: 495 La Xuan Oai. Giá hoa: chưa chốt. Cần bổ sung: giá bán. Khách chat: Chị Mai; nguồn Hot 1 / Zalo UID 12345.",
         orderDetails: [{ productId: 916, productCode: "SP00016", quantity: 10, price: 0 }],
         orderDelivery: { expectedDelivery: "2026-10-19T09:00:00", address: "495 La Xuan Oai" } }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 42, code: "DH42" }) });
     vi.stubGlobal("fetch", fetchMock);
-    await createKiotVietOrchidDraft({ ...input, branchId: 55291, cashierUserId: 77, customer: "Chị Mai", zaloUid: "12345",
+    await createKiotVietOrchidDraft({ ...input, branchId: 55291, cashierUserId: 77, customer: "Chị Mai",
       channelName: "Hot 1", stems: 10, color: "vàng", pot: "chậu thấp", price: "1.600.000đ",
       shippingFee: "135.000đ", delivery: "09:00 26/10/2026", address: "495 La Xuan Oai",
       existing: { orderId: 42, code: "DH42", fillMissing: true } });
@@ -231,6 +231,7 @@ describe("KiotViet orchid order draft", () => {
     expect(body.cashierId).toBe(77);
     expect(body.soldById).toBe(66);
     expect(body.orderDetails[0].price).toBe(160000);
-    expect(body.description).toContain("Khách chat: Chị Mai; nguồn Hot 1 / Zalo UID 12345");
+    expect(body.description).toContain("Khách chat: Chị Mai; nguồn Hot 1 / Zalo.");
+    expect(body.description).not.toContain("UID 12345");
   });
 });

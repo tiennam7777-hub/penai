@@ -63,7 +63,6 @@ export async function createKiotVietOrchidDraft(input: {
   cashierUserId?: number;
   customer: string;
   customerPhone?: string | null;
-  zaloUid: string;
   channelName: string;
   stems: number;
   color: string;
@@ -106,7 +105,7 @@ export async function createKiotVietOrchidDraft(input: {
     ...(input.instructions ? [`Lưu ý: ${clean(input.instructions)}.`] : []),
     `Giá hoa: ${clean(input.price ?? "chưa chốt")}.`,
     ...(missing.length ? [`Cần bổ sung: ${missing.join(", ")}.`] : []),
-    `Khách chat: ${clean(input.customer)}; nguồn ${clean(input.channelName)} / Zalo UID ${clean(input.zaloUid)}.`,
+    `Khách chat: ${clean(input.customer)}; nguồn ${clean(input.channelName)} / Zalo.`,
   ].join(" ");
   const details = [{
     productId: Number(product.id), productCode: "SP00016",
@@ -177,7 +176,10 @@ export async function createKiotVietOrchidDraft(input: {
     for (const newLine of details.slice(1)) {
       if (!mergedLines.some((line) => line.productCode === newLine.productCode)) mergedLines.push(newLine);
     }
-    let oldNote = String(current.description ?? "").replace(/\s*Cần bổ sung:[^.]*\./i, "").trim();
+    let oldNote = String(current.description ?? "")
+      .replace(/\s*Cần bổ sung:[^.]*\./i, "")
+      .replace(/\s+\/\s+(Zalo|Facebook|WhatsApp)\s+(?:UID|ID)\s+[\w-]+/gi, " / $1")
+      .trim();
     if (input.delivery) oldNote = oldNote.replace(/Giao: khách báo sau\./i, `Giao: ${clean(input.delivery)}.`);
     if (input.address) oldNote = oldNote.replace(/Địa chỉ: khách báo sau\./i, `Địa chỉ: ${clean(input.address)}.`);
     if (input.price) oldNote = oldNote.replace(/Giá hoa: chưa chốt\./i, `Giá hoa: ${clean(input.price)}.`);
@@ -186,7 +188,7 @@ export async function createKiotVietOrchidDraft(input: {
       ["Lưu ý", input.instructions]] as const) {
       if (value && !new RegExp(`${label}:`, "i").test(oldNote)) additions.push(`${label}: ${clean(value)}.`);
     }
-    if (!/Khách chat:/i.test(oldNote)) additions.push(`Khách chat: ${clean(input.customer)}; nguồn ${clean(input.channelName)} / Zalo UID ${clean(input.zaloUid)}.`);
+    if (!/Khách chat:/i.test(oldNote)) additions.push(`Khách chat: ${clean(input.customer)}; nguồn ${clean(input.channelName)} / Zalo.`);
     const mergedDelivery = { ...oldDelivery };
     if (!mergedDelivery.type) mergedDelivery.type = 1;
     if (!mergedDelivery.partnerDeliveryId) mergedDelivery.partnerDeliveryId = 107020;
