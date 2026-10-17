@@ -22,6 +22,7 @@ import {
   listInboxMessages,
   getInboxThread,
   claimOrchidOrderDispatch,
+  claimOrchidOrderReport,
   finishOrchidOrderDispatch,
   claimKiotVietOrderDraft,
   hasKiotVietOrderSince,
@@ -67,7 +68,7 @@ import { prepareZaloPhotoPaths } from "./outbound-photo-path.js";
 import {
   classifyConfirmedOrchidOrder, classifyOrchidOrderCancellation, formatOrchidOrderCancellation,
   formatOrchidOrderDispatch, mayCancelOrchidOrder, mayConfirmOrchidOrder,
-  orchidCancellationFingerprint, orchidOrderFingerprint, orchidOrderSessionFingerprint, orchidOrderPayloadFingerprint,
+  orchidCancellationFingerprint, orchidOrderSessionFingerprint, orchidOrderPayloadFingerprint,
 } from "./orchid-order-dispatch.js";
 import { stemCountForPhoto } from "./orchid-photo-count.js";
 import { knownOrchidShippingHint, orchidShippingHintContext, completeOrchidShippingReply, orchidDeliveryPriorityContext } from "./orchid-shipping-reply.js";
@@ -1239,13 +1240,16 @@ export function makeInboundHandler(
           const dispatchText = cancellation
             ? formatOrchidOrderCancellation(cancellation, customer)
             : formatOrchidOrderDispatch(order!, customer);
-          const fingerprint = cancellation
-            ? orchidCancellationFingerprint(msg.messageId ?? "", msg.text, now)
-            : orchidOrderFingerprint(order!);
-          const claimId = await claimOrchidOrderDispatch(db, ctx, {
-            channelId: channel.id, threadId: sourceThreadId,
-            fingerprint, targetThreadId: orderGroupId, message: dispatchText,
-          });
+          const claimId = cancellation
+            ? await claimOrchidOrderDispatch(db, ctx, {
+              channelId: channel.id, threadId: sourceThreadId,
+              fingerprint: orchidCancellationFingerprint(msg.messageId ?? "", msg.text, now),
+              targetThreadId: orderGroupId, message: dispatchText,
+            })
+            : await claimOrchidOrderReport(db, ctx, {
+              channelId: channel.id, threadId: sourceThreadId,
+              targetThreadId: orderGroupId, message: dispatchText,
+            });
           if (claimId) {
             const runtime = channelHandlers.get(channel.id)?.channel;
             try {
