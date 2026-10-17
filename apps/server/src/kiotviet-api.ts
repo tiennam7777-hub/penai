@@ -60,6 +60,7 @@ export async function createKiotVietOrchidDraft(input: {
   clientId: string;
   clientSecret: string;
   branchId: number;
+  cashierUserId?: number;
   customer: string;
   zaloUid: string;
   channelName: string;
@@ -88,6 +89,7 @@ export async function createKiotVietOrchidDraft(input: {
   const body = {
     purchaseDate: new Date().toISOString(),
     branchId: input.branchId,
+    ...(input.cashierUserId ? { cashierId: input.cashierUserId } : {}),
     description,
     totalPayment: 0,
     makeInvoice: false,
@@ -113,6 +115,35 @@ export async function createKiotVietOrchidDraft(input: {
     throw new Error("KiotViet có thể đã tạo đơn nhưng không trả mã đơn; cần đối chiếu thủ công");
   }
   return { orderId: Number(order.id), code: order.code };
+}
+
+/** Resolve a login name to KiotViet's numeric user ID; never use the account password. */
+export async function findKiotVietUser(input: {
+  retailer: string; clientId: string; clientSecret: string; username: string;
+}): Promise<{ id: number; username: string; name: string }> {
+  const signal = AbortSignal.timeout(20_000);
+  const token = await accessToken(input.clientId, input.clientSecret, signal);
+  const headers = { Retailer: input.retailer, Authorization: `Bearer ${token}` };
+  const key = (s: string) => s.trim().toLocaleLowerCase("vi-VN");
+  const target = key(input.username);
+  for (let currentItem = 0; currentItem < 1_000; currentItem += 100) {
+    const response = await fetch(`https://public.kiotapi.com/users?pageSize=100&currentItem=${currentItem}`, { headers, signal });
+    if (!response.ok) throw new Error(`Không đọc được danh sách người dùng KiotViet (HTTP ${response.status})`);
+    const payload = await response.json() as { data?: unknown; total?: unknown };
+    const users = Array.isArray(payload.data) ? payload.data : [];
+    const matches = users.filter((user): user is { id: number; userName: string; givenName?: string } =>
+      !!user && typeof user === "object" &&
+      Number.isSafeInteger((user as { id?: unknown }).id) &&
+      typeof (user as { userName?: unknown }).userName === "string" &&
+      key((user as { userName: string }).userName) === target);
+    if (matches.length > 1) throw new Error(`Có nhiều tài khoản KiotViet tên ${input.username}`);
+    if (matches.length === 1) {
+      const user = matches[0]!;
+      return { id: user.id, username: user.userName, name: user.givenName ?? user.userName };
+    }
+    if (users.length < 100 || (typeof payload.total === "number" && currentItem + 100 >= payload.total)) break;
+  }
+  throw new Error(`Không tìm thấy tài khoản KiotViet ${input.username} qua API`);
 }
 
 export async function checkKiotVietOrchidProduct(input: {

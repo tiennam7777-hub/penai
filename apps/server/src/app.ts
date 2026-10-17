@@ -67,6 +67,7 @@ import {
   type DbHandle,
   getKiotVietCredentials,
   saveKiotVietCredentials,
+  setKiotVietCashier,
   listKiotVietOrderDrafts,
 } from "@penai/db";
 import {
@@ -191,7 +192,7 @@ import {
   normalizeSchedule,
 } from "@penai/core";
 import { CRON_MIN_INTERVAL_MS, deliverLabel } from "./cron-tools.js";
-import { checkKiotVietOrchidProduct, verifyKiotVietRetailConnection } from "./kiotviet-api.js";
+import { checkKiotVietOrchidProduct, findKiotVietUser, verifyKiotVietRetailConnection } from "./kiotviet-api.js";
 import {
   isChannelKindSupported,
   supportedChannelKinds,
@@ -1196,6 +1197,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       retailer: row.retailer,
       branchName: row.branchName,
       branchId: row.branchId,
+      cashierUserId: row.cashierUserId,
+      cashierUsername: row.cashierUsername,
       updatedAt: row.updatedAt,
       hasCredentials: true,
     } : null };
@@ -1218,6 +1221,26 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       }) };
     } catch (error) {
       return reply.code(502).send({ error: error instanceof Error ? error.message : "Không kiểm tra được mã hàng" });
+    }
+  });
+
+  app.put("/v1/kiotviet/cashier", async (req, reply) => {
+    if (!requireRole(req, reply, "ws_admin")) return;
+    const parsed = z.object({ username: z.string().trim().min(2).max(100) }).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "Cần tên đăng nhập KiotViet hợp lệ" });
+    const credentials = await getKiotVietCredentials(db, req.authCtx);
+    if (!credentials) return reply.code(404).send({ error: "Chưa lưu kết nối KiotViet" });
+    try {
+      const user = await findKiotVietUser({
+        retailer: credentials.retailer,
+        clientId: decryptSecret(credentials.clientIdEncrypted),
+        clientSecret: decryptSecret(credentials.clientSecretEncrypted),
+        username: parsed.data.username,
+      });
+      await setKiotVietCashier(db, req.authCtx, user.id, user.username);
+      return { cashier: user };
+    } catch (error) {
+      return reply.code(502).send({ error: error instanceof Error ? error.message : "Không xác minh được người dùng KiotViet" });
     }
   });
 
@@ -1248,6 +1271,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       retailer: row.retailer,
       branchName: row.branchName,
       branchId: row.branchId,
+      cashierUserId: row.cashierUserId,
+      cashierUsername: row.cashierUsername,
       updatedAt: row.updatedAt,
       hasCredentials: true,
     } };

@@ -982,6 +982,31 @@ export const INDEX_HTML = `<!doctype html>
       }).catch(function (e) { $("#kvMsg", c).textContent = e.message; })
         .finally(function () { $("#kvSave", c).disabled = false; });
     };
+    var cashierCard = card(m);
+    cashierCard.innerHTML = '<h3 style="margin:0 0 8px">Người tạo phiếu KiotViet</h3>' +
+      '<div id="kvCashierStatus" class="muted">Đang kiểm tra...</div>' +
+      '<label>Tên đăng nhập KiotViet</label><input id="kvCashierUsername" autocomplete="off" style="width:100%" placeholder="Ví dụ: Trolyanam">' +
+      '<div class="row" style="margin-top:10px"><button id="kvCashierSave">Xác minh và gắn người tạo</button><span id="kvCashierMsg" class="muted"></span></div>' +
+      '<p class="muted">PenAI chỉ dùng ID người này cho trường người tạo phiếu; không cần mật khẩu. Người bán vẫn được theo dõi riêng.</p>';
+    api("/v1/kiotviet").then(function (j) {
+      var x = j.connection;
+      $("#kvCashierStatus", cashierCard).textContent = x && x.cashierUserId
+        ? "Đã gắn " + x.cashierUsername + " (ID " + x.cashierUserId + ") làm người tạo phiếu."
+        : "Chưa gắn người tạo; KiotViet sẽ ghi Admin theo mặc định.";
+      if (x && x.cashierUsername) $("#kvCashierUsername", cashierCard).value = x.cashierUsername;
+    }).catch(function (e) { $("#kvCashierStatus", cashierCard).textContent = e.message; });
+    $("#kvCashierSave", cashierCard).onclick = function () {
+      var username = $("#kvCashierUsername", cashierCard).value.trim();
+      if (!username) { $("#kvCashierMsg", cashierCard).textContent = "Cần tên đăng nhập."; return; }
+      $("#kvCashierSave", cashierCard).disabled = true;
+      $("#kvCashierMsg", cashierCard).textContent = "Đang xác minh qua KiotViet...";
+      api("/v1/kiotviet/cashier", { method: "PUT", body: { username: username } }).then(function (j) {
+        $("#kvCashierUsername", cashierCard).value = j.cashier.username;
+        $("#kvCashierStatus", cashierCard).textContent = "Đã gắn " + j.cashier.username + " (ID " + j.cashier.id + ") làm người tạo phiếu.";
+        $("#kvCashierMsg", cashierCard).textContent = "Đã lưu.";
+      }).catch(function (e) { $("#kvCashierMsg", cashierCard).textContent = e.message; })
+        .finally(function () { $("#kvCashierSave", cashierCard).disabled = false; });
+    };
     var draftsCard = card(m);
     draftsCard.innerHTML = '<div id="kvProduct" class="muted">Đang kiểm tra mã hàng SP00016...</div>' +
       '<div class="row" style="justify-content:space-between;margin-top:12px"><h3 style="margin:0">Phiếu nháp từ Inbox</h3><button id="kvRefresh" class="sm">Làm mới</button></div><div id="kvDrafts" class="muted" style="margin-top:10px">Đang tải...</div>';

@@ -28,3 +28,12 @@ export async function saveKiotVietCredentials(
   );
   return rows[0]!;
 }
+
+export async function setKiotVietCashier(
+  db: Db, ctx: WorkspaceContext, userId: number, username: string,
+): Promise<KiotVietCredentialsRow | null> {
+  const rows = await withWorkspace(db, ctx, (tx) => tx.update(kiotvietCredentials)
+    .set({ cashierUserId: userId, cashierUsername: username, updatedAt: new Date() })
+    .where(eq(kiotvietCredentials.workspaceId, ctx.workspaceId)).returning());
+  return rows[0] ?? null;
+}

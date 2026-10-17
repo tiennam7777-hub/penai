@@ -1201,6 +1201,7 @@ export function makeInboundHandler(
                       clientId: decryptSecret(credentials.clientIdEncrypted),
                       clientSecret: decryptSecret(credentials.clientSecretEncrypted),
                       branchId: credentials.branchId,
+                      ...(credentials.cashierUserId ? { cashierUserId: credentials.cashierUserId } : {}),
                       customer, zaloUid: msg.senderId, channelName: channel.name,
                       stems: order.stems, color: order.color, pot: order.pot,
                       price: order.price, delivery: order.delivery,

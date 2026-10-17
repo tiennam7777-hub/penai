@@ -75,6 +75,8 @@ export const kiotvietCredentials = pgTable("kiotviet_credentials", {
   retailer: text("retailer").notNull(),
   branchName: text("branch_name").notNull(),
   branchId: bigint("branch_id", { mode: "number" }),
+  cashierUserId: bigint("cashier_user_id", { mode: "number" }),
+  cashierUsername: text("cashier_username"),
   clientIdEncrypted: text("client_id_encrypted").notNull(),
   clientSecretEncrypted: text("client_secret_encrypted").notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

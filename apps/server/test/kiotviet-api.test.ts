@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createKiotVietOrchidDraft, parseKiotVietPrice, verifyKiotVietRetailConnection } from "../src/kiotviet-api.js";
+import { createKiotVietOrchidDraft, findKiotVietUser, parseKiotVietPrice, verifyKiotVietRetailConnection } from "../src/kiotviet-api.js";
 
 const input = {
   retailer: "orchidsworld42",
@@ -35,6 +35,21 @@ describe("KiotViet credential verification", () => {
 });
 
 describe("KiotViet orchid order draft", () => {
+  it("resolves a cashier by exact login over the KiotViet API", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ access_token: "test-token" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [
+        { id: 9, userName: "someone", givenName: "Other" },
+        { id: 77, userName: "Trolyanam", givenName: "Trợ Lý" },
+      ], total: 2 }) });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(findKiotVietUser({
+      retailer: input.retailer, clientId: input.clientId, clientSecret: input.clientSecret,
+      username: "Trolyanam",
+    })).resolves.toEqual({ id: 77, username: "Trolyanam", name: "Trợ Lý" });
+    expect(fetchMock.mock.calls[1]![0]).toBe("https://public.kiotapi.com/users?pageSize=100&currentItem=0");
+  });
+
   it("parses only clear total prices", () => {
     expect(parseKiotVietPrice("1.000.000đ")).toBe(1_000_000);
     expect(parseKiotVietPrice("1,5tr")).toBe(1_500_000);
@@ -52,7 +67,7 @@ describe("KiotViet orchid order draft", () => {
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 42, code: "DH12345" }) });
     vi.stubGlobal("fetch", fetchMock);
     const result = await createKiotVietOrchidDraft({
-      ...input, branchId: 55291, customer: "Chị Mai", zaloUid: "12345", channelName: "Hot 4",
+      ...input, branchId: 55291, cashierUserId: 77, customer: "Chị Mai", zaloUid: "12345", channelName: "Hot 4",
       stems: 5, color: "vàng", pot: "chậu lan", price: "1.000.000đ", delivery: "10:00 18/10/2026",
     });
     expect(result).toEqual({ orderId: 42, code: "DH12345" });
@@ -61,7 +76,8 @@ describe("KiotViet orchid order draft", () => {
     const [url, options] = fetchMock.mock.calls[2]!;
     expect(url).toBe("https://public.kiotapi.com/orders");
     const body = JSON.parse(options.body);
-    expect(body).toMatchObject({ branchId: 55291, totalPayment: 0, makeInvoice: false });
+    expect(body).toMatchObject({ branchId: 55291, cashierId: 77, totalPayment: 0, makeInvoice: false });
+    expect(body).not.toHaveProperty("soldById");
     expect(body.orderDetails).toEqual([expect.objectContaining({
       productId: 916, productCode: "SP00016", quantity: 5, price: 200_000,
     })]);
