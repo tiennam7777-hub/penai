@@ -41,11 +41,18 @@ describe("moderator capability boundary", () => {
         ["GET", "tags"], ["POST", "tags"],
         ["PUT", `tags/${tag}/color`], ["DELETE", `tags/${tag}`],
         ["PUT", "threads/12345/tags"], ["PUT", "threads/12345/visibility"],
+        ["PUT", "threads/12345/note"],
+        ["GET", "threads/12345/explore"], ["GET", "threads/12345/senders"],
+        ["GET", "threads/12345/messages/42/context"],
+        ["GET", "threads/12345/messages/by-msg-id/42"],
+        ["POST", "threads/12345/delegate"],
         ["POST", "threads/12345/messages/42/state"],
         ["POST", "sync-contacts"], ["PUT", "settings"],
       ]) expect(moderatorAllowed(method!, `${base}/${channel}/${suffix}`)).toBe(true);
-      expect(moderatorAllowed("DELETE", `${base}/${channel}/settings`)).toBe(false);
-      expect(moderatorAllowed("POST", `${base}/${channel}/not-an-inbox-action`)).toBe(false);
+      expect(moderatorAllowed("GET", `${base}/channels`)).toBe(true);
+      expect(moderatorAllowed("GET", `${base}/events`)).toBe(true);
+      expect(moderatorAllowed("POST", `${base}/${channel}-other/threads/12345/send`)).toBe(false);
+      expect(moderatorAllowed("POST", `${base}/not-an-inbox-channel/threads/12345/send`)).toBe(false);
     }
   });
 
@@ -61,7 +68,7 @@ describe("moderator capability boundary", () => {
         expect(moderatorAllowed(method!, `${base}/${channel}/${suffix}`)).toBe(true);
       }
       expect(memberAllowed("POST", `${base}/${channel}/settings`)).toBe(false);
-      expect(moderatorAllowed("POST", `${base}/${channel}/not-an-inbox-action`)).toBe(false);
+      expect(moderatorAllowed("POST", `${base}/not-an-inbox-channel/quick-replies`)).toBe(false);
     }
   });
 });
