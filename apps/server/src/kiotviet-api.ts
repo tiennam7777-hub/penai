@@ -62,51 +62,85 @@ export async function createKiotVietOrchidDraft(input: {
   branchId: number;
   cashierUserId?: number;
   customer: string;
+  customerPhone?: string | null;
   zaloUid: string;
   channelName: string;
   stems: number;
   color: string;
   pot: string;
   price: string | null;
-  delivery: string;
-}): Promise<{ orderId: number; code: string }> {
+  delivery: string | null;
+  address?: string | null;
+  recipientPhone?: string | null;
+  cardText?: string | null;
+  instructions?: string | null;
+  shippingFee?: string | null;
+  vatFee?: string | null;
+  companyInvoice?: boolean;
+}): Promise<{ orderId: number; code: string; customerName: string; description: string }> {
   const signal = AbortSignal.timeout(20_000);
   const token = await accessToken(input.clientId, input.clientSecret, signal);
   const headers = { Retailer: input.retailer, Authorization: `Bearer ${token}` };
   const product = await orchidProduct(headers, signal);
-  const saleTax = product.saleTax as { taxId?: unknown } | null | undefined;
-  const saleTaxId = saleTax?.taxId;
-  if (!Number.isSafeInteger(saleTaxId) || Number(saleTaxId) <= 0) {
-    throw new Error("Mã SP00016 chưa có mức thuế bán hàng hợp lệ trong KiotViet");
-  }
+  const customer = await findOrderCustomer(headers, input.customer, signal, input.customerPhone);
   const totalPrice = parseKiotVietPrice(input.price);
+  const shipping = parseKiotVietPrice(input.shippingFee ?? null);
+  const vat = input.companyInvoice ? parseKiotVietPrice(input.vatFee ?? null) : null;
+  if (input.shippingFee && shipping === null) throw new Error("Phí ship đã báo khách chưa rõ số tiền");
+  if (input.companyInvoice && input.vatFee && vat === null) throw new Error("Tiền Thuế GTGT đã báo khách chưa rõ số tiền");
   const missing = [
     ...(totalPrice === null ? ["giá bán"] : []),
-    "số điện thoại và địa chỉ nhận (nhân viên kiểm tra)",
+    ...(!input.address ? ["địa chỉ giao"] : []),
+    ...(!input.delivery ? ["thời gian giao"] : []),
+    ...(!input.recipientPhone ? ["số điện thoại người nhận"] : []),
   ];
-  const clean = (s: string) => s.replace(/[\r\n\t]+/g, " ").trim().slice(0, 250);
+  const clean = (s: string) => s.replace(/[\r\n\t]+/g, " ").trim().slice(0, 500);
   const description = [
-    `PenAI - đơn nháp chờ kiểm tra; nguồn ${clean(input.channelName)} / Zalo UID ${clean(input.zaloUid)}.`,
-    `Khách: ${clean(input.customer)}. ${clean(input.pot)} ${input.stems} cành, màu ${clean(input.color)}.`,
-    `Hẹn giao: ${clean(input.delivery)}. Giá trao đổi: ${clean(input.price ?? "chưa chốt")}.`,
-    `Cần bổ sung/kiểm tra: ${missing.join(", ")}. Không phải hóa đơn; chưa ghi nhận thanh toán.`,
+    `Chậu: ${clean(input.pot)} ${input.stems} cành. Màu: ${clean(input.color)}.`,
+    `Giao: ${clean(input.delivery ?? "khách báo sau")}. Địa chỉ: ${clean(input.address ?? "khách báo sau")}.`,
+    ...(input.cardText ? [`Bảng chữ: ${clean(input.cardText)}.`] : []),
+    ...(input.recipientPhone ? [`SĐT người nhận: ${clean(input.recipientPhone)}.`] : []),
+    ...(input.instructions ? [`Lưu ý: ${clean(input.instructions)}.`] : []),
+    `Giá hoa: ${clean(input.price ?? "chưa chốt")}.`,
+    ...(missing.length ? [`Cần bổ sung: ${missing.join(", ")}.`] : []),
+    `Khách chat: ${clean(input.customer)}; nguồn ${clean(input.channelName)} / Zalo UID ${clean(input.zaloUid)}.`,
   ].join(" ");
+  const details = [{
+    productId: Number(product.id), productCode: "SP00016",
+    productName: String(product.fullName ?? product.name ?? "LAN HỒ ĐIỆP (Cây)"),
+    quantity: input.stems,
+    price: totalPrice === null ? 0 : Math.round((totalPrice / input.stems) * 100) / 100,
+    note: `${clean(input.pot)} ${input.stems} cành, màu ${clean(input.color)}`,
+    orderDetailTaxs: [{ taxId: 1 }], // VAT 0%; quoted amount is the final flower price.
+  }];
+  for (const [code, amount] of [["SP00021", shipping], ["SP00022", vat]] as const) {
+    if (amount === null) continue;
+    const extra = await productByCode(headers, code, signal);
+    details.push({ productId: Number(extra.id), productCode: code,
+      productName: String(extra.fullName ?? extra.name ?? code), quantity: 1, price: amount,
+      note: code === "SP00021" ? "Phí ship đã báo khách" : "Thuế GTGT đã báo khách; khách lấy hóa đơn công ty",
+      orderDetailTaxs: [{ taxId: 1 }],
+    });
+  }
+  const expectedDelivery = input.delivery ? parseVietnamDelivery(input.delivery) : null;
+  if (input.delivery && !expectedDelivery) throw new Error("Giờ giao không hợp lệ");
+  if (input.retailer !== "orchidsworld42") throw new Error("Chưa xác minh đối tác Anh Sang cho gian hàng này");
   const body = {
     purchaseDate: new Date().toISOString(),
     branchId: input.branchId,
     ...(input.cashierUserId ? { cashierId: input.cashierUserId } : {}),
     description,
+    customer: { id: customer.id, code: customer.code, name: customer.name },
     totalPayment: 0,
     makeInvoice: false,
-    orderDetails: [{
-      productId: Number(product.id),
-      productCode: "SP00016",
-      productName: String(product.fullName ?? product.name ?? "LAN HỒ ĐIỆP (Cây)"),
-      quantity: input.stems,
-      price: totalPrice === null ? 0 : Math.round((totalPrice / input.stems) * 100) / 100,
-      note: `${clean(input.pot)} ${input.stems} cành, màu ${clean(input.color)}; ${totalPrice === null ? "GIÁ CHƯA CHỐT" : `tổng giá đã trao đổi ${totalPrice}đ`}`,
-      orderDetailTaxs: [{ taxId: Number(saleTaxId) }],
-    }],
+    orderDetails: details,
+    orderDelivery: {
+      partnerDeliveryId: 107020, // DT000001 Anh Sang, confirmed in this retailer's order history.
+      receiver: customer.name,
+      ...(input.recipientPhone ? { contactNumber: input.recipientPhone } : {}),
+      ...(input.address ? { address: input.address } : {}),
+      ...(expectedDelivery ? { expectedDelivery } : {}),
+    },
   };
   // Never retry POST automatically. A timeout can occur after KiotViet accepted the order.
   const response = await fetch("https://public.kiotapi.com/orders", {
@@ -120,7 +154,86 @@ export async function createKiotVietOrchidDraft(input: {
     // A successful HTTP response with an unknown body may still have created an order.
     throw new Error("KiotViet có thể đã tạo đơn nhưng không trả mã đơn; cần đối chiếu thủ công");
   }
-  return { orderId: Number(order.id), code: order.code };
+  return { orderId: Number(order.id), code: order.code, customerName: customer.name, description };
+}
+
+/** Read the saved slip back before publishing its image, so the image reflects KiotViet's actual totals. */
+export async function readKiotVietOrderSlip(input: {
+  retailer: string; clientId: string; clientSecret: string; orderId: number; code: string;
+}): Promise<{
+  code: string; customer: string; description: string; total: number;
+  details: Array<{ code: string; name: string; quantity: number; price: number }>;
+  partner: string; expectedDelivery: string | null;
+}> {
+  const signal = AbortSignal.timeout(20_000);
+  const token = await accessToken(input.clientId, input.clientSecret, signal);
+  const response = await fetch(`https://public.kiotapi.com/orders/${input.orderId}`, {
+    headers: { Retailer: input.retailer, Authorization: `Bearer ${token}` }, signal,
+  });
+  if (!response.ok) throw new Error(`Không đọc lại được phiếu đặt hàng ${input.code} (HTTP ${response.status})`);
+  const payload = await response.json() as Record<string, unknown>;
+  const order = (payload.data && typeof payload.data === "object" ? payload.data : payload) as Record<string, unknown>;
+  if (order.id !== input.orderId || order.code !== input.code || !Number.isFinite(order.total) ||
+      !Array.isArray(order.orderDetails)) throw new Error(`Dữ liệu đọc lại phiếu ${input.code} chưa đầy đủ`);
+  const details = order.orderDetails.map((raw) => {
+    const line = raw as Record<string, unknown>;
+    return { code: String(line.productCode ?? ""), name: String(line.productName ?? ""),
+      quantity: Number(line.quantity ?? 0), price: Number(line.price ?? 0) };
+  });
+  if (!details.some((line) => line.code === "SP00016")) throw new Error(`Phiếu ${input.code} thiếu SP00016`);
+  const delivery = order.orderDelivery && typeof order.orderDelivery === "object"
+    ? order.orderDelivery as Record<string, unknown> : {};
+  const partner = delivery.partnerDelivery && typeof delivery.partnerDelivery === "object"
+    ? delivery.partnerDelivery as Record<string, unknown> : {};
+  if (delivery.partnerDeliveryId !== 107020) throw new Error(`Phiếu ${input.code} chưa gắn đúng đối tác Anh Sang`);
+  return { code: input.code, customer: String(order.customerName ?? ""),
+    description: String(order.description ?? ""), total: Number(order.total), details,
+    partner: String(partner.name ?? "Anh Sang"),
+    expectedDelivery: typeof delivery.expectedDelivery === "string" ? delivery.expectedDelivery : null };
+}
+
+function parseVietnamDelivery(value: string): string | null {
+  const m = /^(\d{2}):(\d{2}) (\d{2})\/(\d{2})\/(\d{4})$/.exec(value);
+  if (!m) return null;
+  const [, hh, mm, dd, mo, yyyy] = m;
+  const hour = Number(hh), minute = Number(mm), day = Number(dd), month = Number(mo), year = Number(yyyy);
+  if (hour > 23 || minute > 59 || month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const utc = Date.UTC(year, month - 1, day, hour - 7, minute);
+  const check = new Date(utc + 7 * 3600_000);
+  if (check.getUTCFullYear() !== year || check.getUTCMonth() !== month - 1 || check.getUTCDate() !== day) return null;
+  return new Date(utc).toISOString();
+}
+
+type KiotCustomer = { id: number; code: string; name: string; contactNumber?: string };
+async function findOrderCustomer(headers: { Retailer: string; Authorization: string }, name: string, signal: AbortSignal, profilePhone?: string | null): Promise<KiotCustomer> {
+  const norm = (s: string) => s.normalize("NFC").toLocaleLowerCase("vi-VN").replace(/\s+/g, " ").trim();
+  const rawPhone = (name.match(/(?:\+?84|0)(?:[ .-]?\d){9,10}/)?.[0] ?? profilePhone ?? "").replace(/\D/g, "");
+  const phone = rawPhone?.startsWith("84") ? `0${rawPhone.slice(2)}` : rawPhone;
+  async function search(param: "name" | "contactNumber", term: string): Promise<KiotCustomer[]> {
+    const results: KiotCustomer[] = [];
+    for (let offset = 0; offset < 1_000; offset += 100) {
+      const response = await fetch(`https://public.kiotapi.com/customers?pageSize=100&currentItem=${offset}&${param}=${encodeURIComponent(term)}`, { headers, signal });
+      if (!response.ok) throw new Error(`Không tra được khách hàng KiotViet (HTTP ${response.status})`);
+      const payload = await response.json() as { data?: unknown; total?: unknown };
+      const page = Array.isArray(payload.data) ? payload.data as KiotCustomer[] : [];
+      results.push(...page);
+      if (page.length < 100 || (typeof payload.total === "number" && offset + 100 >= payload.total)) break;
+    }
+    return results;
+  }
+  if (phone) {
+    const matches = (await search("contactNumber", phone)).filter((x) => {
+      const number = x.contactNumber?.replace(/\D/g, "");
+      return (number?.startsWith("84") ? `0${number.slice(2)}` : number) === phone;
+    });
+    if (matches.length === 1) return matches[0]!;
+  }
+  const customerName = rawPhone ? name.replace(name.match(/(?:\+?84|0)(?:[ .-]?\d){9,10}/)?.[0] ?? "", "").trim() : name;
+  const byName = (await search("name", customerName)).filter((x) => norm(x.name) === norm(customerName));
+  if (byName.length === 1) return byName[0]!;
+  const fallback = (await search("name", "Chưa tìm ra tên")).filter((x) => norm(x.name) === norm("Chưa tìm ra tên"));
+  if (fallback.length !== 1) throw new Error("Không xác định được khách dự phòng Chưa tìm ra tên");
+  return fallback[0]!;
 }
 
 /** Resolve a login name to KiotViet's numeric user ID; never use the account password. */
@@ -162,14 +275,18 @@ export async function checkKiotVietOrchidProduct(input: {
 }
 
 async function orchidProduct(headers: { Retailer: string; Authorization: string }, signal: AbortSignal): Promise<Record<string, unknown>> {
-  const productResponse = await fetch("https://public.kiotapi.com/products/code/SP00016", { headers, signal });
-  if (!productResponse.ok) throw new Error("Không đọc được mã hàng SP00016 từ KiotViet");
+  return productByCode(headers, "SP00016", signal);
+}
+
+async function productByCode(headers: { Retailer: string; Authorization: string }, code: string, signal: AbortSignal): Promise<Record<string, unknown>> {
+  const productResponse = await fetch(`https://public.kiotapi.com/products/code/${code}`, { headers, signal });
+  if (!productResponse.ok) throw new Error(`Không đọc được mã hàng ${code} từ KiotViet`);
   const productPayload = await productResponse.json() as Record<string, unknown>;
   const product = (productPayload.data && typeof productPayload.data === "object"
     ? productPayload.data : productPayload) as Record<string, unknown>;
-  if (product.code !== "SP00016" || !Number.isSafeInteger(product.id) || Number(product.id) <= 0 ||
+  if (product.code !== code || !Number.isSafeInteger(product.id) || Number(product.id) <= 0 ||
       product.isActive === false || product.allowsSale === false) {
-    throw new Error("Mã SP00016 không còn là hàng bán hợp lệ; cần kiểm tra KiotViet");
+    throw new Error(`Mã ${code} không còn là hàng bán hợp lệ; cần kiểm tra KiotViet`);
   }
   return product;
 }

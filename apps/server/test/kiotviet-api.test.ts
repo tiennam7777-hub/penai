@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createKiotVietOrchidDraft, findKiotVietUser, parseKiotVietPrice, verifyKiotVietRetailConnection } from "../src/kiotviet-api.js";
+import { createKiotVietOrchidDraft, findKiotVietUser, parseKiotVietPrice, readKiotVietOrderSlip, verifyKiotVietRetailConnection } from "../src/kiotviet-api.js";
 
 const input = {
   retailer: "orchidsworld42",
@@ -65,23 +65,25 @@ describe("KiotViet orchid order draft", () => {
         id: 916, code: "SP00016", fullName: "LAN HỒ ĐIỆP (Cây)", isActive: true, allowsSale: true,
         saleTax: { taxId: 2, value: 5 },
       } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [{ id: 22, code: "KH22", name: "Chị Mai" }] }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 42, code: "DH12345" }) });
     vi.stubGlobal("fetch", fetchMock);
     const result = await createKiotVietOrchidDraft({
       ...input, branchId: 55291, cashierUserId: 77, customer: "Chị Mai", zaloUid: "12345", channelName: "Hot 4",
       stems: 5, color: "vàng", pot: "chậu lan", price: "1.000.000đ", delivery: "10:00 18/10/2026",
     });
-    expect(result).toEqual({ orderId: 42, code: "DH12345" });
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(result).toMatchObject({ orderId: 42, code: "DH12345", customerName: "Chị Mai" });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(fetchMock.mock.calls[1]![0]).toBe("https://public.kiotapi.com/products/code/SP00016");
-    const [url, options] = fetchMock.mock.calls[2]!;
+    const [url, options] = fetchMock.mock.calls[3]!;
     expect(url).toBe("https://public.kiotapi.com/orders");
     const body = JSON.parse(options.body);
-    expect(body).toMatchObject({ branchId: 55291, cashierId: 77, totalPayment: 0, makeInvoice: false });
+    expect(body).toMatchObject({ branchId: 55291, cashierId: 77, totalPayment: 0, makeInvoice: false,
+      customer: { id: 22, code: "KH22", name: "Chị Mai" }, orderDelivery: { partnerDeliveryId: 107020 } });
     expect(body).not.toHaveProperty("soldById");
     expect(body.orderDetails).toEqual([expect.objectContaining({
       productId: 916, productCode: "SP00016", quantity: 5, price: 200_000,
-      orderDetailTaxs: [{ taxId: 2 }],
+      orderDetailTaxs: [{ taxId: 1 }],
     })]);
     expect(body.description).toContain("Chị Mai");
     expect(body.description).toContain("Zalo UID 12345");
@@ -91,16 +93,17 @@ describe("KiotViet orchid order draft", () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ access_token: "test-token" }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 916, code: "SP00016", saleTax: { taxId: 2 } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [{ id: 22, code: "KH22", name: "Chị Mai" }] }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ data: { id: 42, code: "DH12345" } }) });
     vi.stubGlobal("fetch", fetchMock);
     await createKiotVietOrchidDraft({
       ...input, branchId: 55291, customer: "Chị Mai", zaloUid: "12345", channelName: "Hot 4",
       stems: 5, color: "vàng", pot: "chậu lan", price: null, delivery: "10:00 18/10/2026",
     });
-    const body = JSON.parse(fetchMock.mock.calls[2]![1].body);
+    const body = JSON.parse(fetchMock.mock.calls[3]![1].body);
     expect(body.orderDetails[0].price).toBe(0);
     expect(body.description).toContain("giá bán");
-    expect(body.orderDetails[0].note).toContain("GIÁ CHƯA CHỐT");
+    expect(body.description).toContain("Giá hoa: chưa chốt");
   });
 
   it("never posts if the product code differs", async () => {
@@ -115,15 +118,84 @@ describe("KiotViet orchid order draft", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("never posts if SP00016 has no sales VAT configured", async () => {
+  it("uses 0% VAT even if SP00016 has 5% configured", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ access_token: "test-token" }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 916, code: "SP00016" }) });
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 916, code: "SP00016", saleTax: { taxId: 2 } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [{ id: 22, code: "KH22", name: "Chị Mai" }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 42, code: "DH12345" }) });
     vi.stubGlobal("fetch", fetchMock);
-    await expect(createKiotVietOrchidDraft({
+    await createKiotVietOrchidDraft({
       ...input, branchId: 55291, customer: "Chị Mai", zaloUid: "12345", channelName: "Hot 4",
       stems: 5, color: "vàng", pot: "chậu lan", price: "1.000.000đ", delivery: "10:00 18/10/2026",
-    })).rejects.toThrow("mức thuế");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+    const body = JSON.parse(fetchMock.mock.calls[3]![1].body);
+    expect(body.orderDetails[0].orderDetailTaxs).toEqual([{ taxId: 1 }]);
+    expect(body.orderDetails).toHaveLength(1);
+    expect(body.makeInvoice).toBe(false);
+  });
+
+  it("matches the phone, adds quoted shipping and company VAT, and records delivery", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ access_token: "token" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 916, code: "SP00016" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [{ id: 123, code: "KH123", name: "Anh Nam", contactNumber: "0901234567" }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 921, code: "SP00021" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 922, code: "SP00022" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 50, code: "DH50" }) });
+    vi.stubGlobal("fetch", fetchMock);
+    await createKiotVietOrchidDraft({ ...input, branchId: 55291, customer: "Anh Nam 0901234567",
+      zaloUid: "12345", channelName: "Hot 1", stems: 5, color: "vàng", pot: "chậu sứ",
+      price: "1.000.000đ", delivery: "09:00 19/10/2026", address: "12 Lê Lợi, TP.HCM",
+      shippingFee: "50k", vatFee: "100k", companyInvoice: true, cardText: "Chúc mừng",
+      instructions: "Gửi lễ tân", recipientPhone: "0911111111" });
+    expect(fetchMock.mock.calls[2]![0]).toContain("contactNumber=0901234567");
+    const body = JSON.parse(fetchMock.mock.calls[5]![1].body);
+    expect(body.customer.id).toBe(123);
+    expect(body.orderDetails.map((x: { productCode: string; quantity: number; price: number }) =>
+      [x.productCode, x.quantity, x.price])).toEqual([
+      ["SP00016", 5, 200_000], ["SP00021", 1, 50_000], ["SP00022", 1, 100_000],
+    ]);
+    expect(body.orderDetails.every((x: { orderDetailTaxs: unknown[] }) => JSON.stringify(x.orderDetailTaxs) === '[{"taxId":1}]')).toBe(true);
+    expect(body.orderDelivery).toMatchObject({ partnerDeliveryId: 107020,
+      address: "12 Lê Lợi, TP.HCM", contactNumber: "0911111111",
+      expectedDelivery: "2026-10-19T02:00:00.000Z" });
+    expect(body.description).toContain("Bảng chữ: Chúc mừng");
+    expect(body.description).toContain("Lưu ý: Gửi lễ tân");
+    expect(body.makeInvoice).toBe(false);
+  });
+
+  it("uses the named fallback customer and leaves delivery time open when promised later", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ access_token: "token" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 916, code: "SP00016" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [{ id: 30509890, code: "KH011293", name: "Chưa tìm ra tên" }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 50, code: "DH50" }) });
+    vi.stubGlobal("fetch", fetchMock);
+    await createKiotVietOrchidDraft({ ...input, branchId: 55291, customer: "Khách lạ",
+      zaloUid: "12345", channelName: "Hot 1", stems: 5, color: "vàng", pot: "chậu sứ",
+      price: "1.000.000đ", delivery: null, companyInvoice: false, vatFee: "100k" });
+    const body = JSON.parse(fetchMock.mock.calls[4]![1].body);
+    expect(body.customer.id).toBe(30509890);
+    expect(body.orderDetails).toHaveLength(1);
+    expect(body.orderDelivery).not.toHaveProperty("expectedDelivery");
+    expect(body.description).toContain("Giao: khách báo sau");
+  });
+
+  it("reads the saved Kiot order before publishing its image", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ access_token: "token" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 50, code: "DH50", total: 1_000_000,
+        customerName: "Chị Mai", description: "Chậu 5 cành, màu vàng", orderDetails: [
+          { productCode: "SP00016", productName: "LAN HỒ ĐIỆP", quantity: 5, price: 200_000 },
+        ], orderDelivery: { partnerDeliveryId: 107020, expectedDelivery: "2026-10-19T09:00:00",
+          partnerDelivery: { name: "Anh Sang" } } }) });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(readKiotVietOrderSlip({ ...input, orderId: 50, code: "DH50" })).resolves.toMatchObject({
+      total: 1_000_000, customer: "Chị Mai", partner: "Anh Sang",
+      details: [{ code: "SP00016", quantity: 5, price: 200_000 }],
+    });
+    expect(fetchMock.mock.calls[1]![0]).toBe("https://public.kiotapi.com/orders/50");
   });
 });

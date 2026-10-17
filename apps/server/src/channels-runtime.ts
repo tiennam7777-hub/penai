@@ -25,6 +25,7 @@ import {
   finishOrchidOrderDispatch,
   claimKiotVietOrderDraft,
   finishKiotVietOrderDraft,
+  finishKiotVietBillImage,
   getKiotVietCredentials,
   getPersonContextData,
   loadMessages,
@@ -69,7 +70,8 @@ import { stemCountForPhoto } from "./orchid-photo-count.js";
 import { knownOrchidShippingHint, orchidShippingHintContext, completeOrchidShippingReply, orchidDeliveryPriorityContext } from "./orchid-shipping-reply.js";
 import { orchidCompanyPaymentContext } from "./orchid-payment-context.js";
 import { classifyOrchidFlowerComplaint, formatOrchidFlowerComplaintDispatch, orchidFlowerComplaintFingerprint } from "./orchid-flower-complaint.js";
-import { createKiotVietOrchidDraft } from "./kiotviet-api.js";
+import { createKiotVietOrchidDraft, readKiotVietOrderSlip } from "./kiotviet-api.js";
+import { withKiotVietSlipImage } from "./kiotviet-slip-image.js";
 import { requestedOrchidYellowSamples, orchidYellowSamplePath } from "./orchid-yellow-samples.js";
 
 /** Handler + channel theo channelId — cho webhook route (WhatsApp, Teams) dùng. */
@@ -1149,7 +1151,7 @@ export function makeInboundHandler(
           ? await classifyConfirmedOrchidOrder(limited, agent.model, handoffMessages, current, now) : null;
         if (cancellation || order) {
           const thread = await getInboxThread(db, ctx, channel.id, sourceThreadId);
-          const customer = thread?.profileName || thread?.contactAlias || thread?.name || msg.senderName || msg.senderId;
+          const customer = thread?.contactAlias || thread?.profileName || thread?.name || msg.senderName || msg.senderId;
           const dispatchText = cancellation
             ? formatOrchidOrderCancellation(cancellation, customer)
             : formatOrchidOrderDispatch(order!, customer);
@@ -1202,13 +1204,42 @@ export function makeInboundHandler(
                       clientSecret: decryptSecret(credentials.clientSecretEncrypted),
                       branchId: credentials.branchId,
                       ...(credentials.cashierUserId ? { cashierUserId: credentials.cashierUserId } : {}),
-                      customer, zaloUid: msg.senderId, channelName: channel.name,
+                      customer, customerPhone: thread?.phone, zaloUid: msg.senderId, channelName: channel.name,
                       stems: order.stems, color: order.color, pot: order.pot,
                       price: order.price, delivery: order.delivery,
+                      address: order.address, recipientPhone: order.recipientPhone,
+                      cardText: order.cardText, instructions: order.instructions,
+                      shippingFee: order.shippingFee, vatFee: order.vatFee,
+                      companyInvoice: order.companyInvoice,
                     });
                     await finishKiotVietOrderDraft(db, ctx, kiotClaimId, {
                       orderId: saved.orderId, code: saved.code,
                     });
+                    const billGroupId = channel.config["kiotviet_bill_group"];
+                    if (typeof billGroupId === "string" && /^\d{1,30}$/.test(billGroupId)) {
+                      try {
+                        const runtime = channelHandlers.get(channel.id)?.channel;
+                        if (!isPersonalChannel(runtime) || !runtime.isConnected()) throw new Error(`${channel.name} chưa kết nối Zalo`);
+                        const slip = await readKiotVietOrderSlip({
+                          retailer: credentials.retailer,
+                          clientId: decryptSecret(credentials.clientIdEncrypted),
+                          clientSecret: decryptSecret(credentials.clientSecretEncrypted),
+                          orderId: saved.orderId, code: saved.code,
+                        });
+                        const ids = await withKiotVietSlipImage({
+                          ...slip, delivery: order.delivery,
+                        }, (path) => runtime.sendManual({
+                          threadId: billGroupId, peerKind: "group", filePaths: [path],
+                          source: "agent", threadName: "Đã Lên Bill",
+                        }));
+                        if (!ids.length) throw new Error("Zalo không trả mã ảnh đã gửi");
+                        await finishKiotVietBillImage(db, ctx, kiotClaimId, { groupId: billGroupId, msgId: ids[0]! });
+                      } catch (imageError) {
+                        const reason = imageError instanceof Error ? imageError.message : String(imageError);
+                        await finishKiotVietBillImage(db, ctx, kiotClaimId, { error: reason }).catch(() => {});
+                        logger.warn(`Đã lên phiếu ${saved.code} nhưng chưa gửi ảnh nhóm Đã Lên Bill: ${reason}`);
+                      }
+                    }
                     kiotContext = `[HỆ THỐNG: Đã tạo phiếu đặt hàng nháp KiotViet mã ${saved.code}. Nhân viên cần kiểm tra thông tin và hoàn tất đơn. Chưa tạo hóa đơn hoặc ghi nhận thanh toán.]`;
                   } catch (error) {
                     const reason = error instanceof Error ? error.message : "Lỗi không xác định";

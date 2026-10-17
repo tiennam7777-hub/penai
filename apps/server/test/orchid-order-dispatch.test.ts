@@ -18,16 +18,20 @@ describe("orchid order dispatch", () => {
     expect(parseConfirmedOrchidOrder('{"confirmed":true,"stems":15,"color":"vàng","delivery":""}')).toBeNull();
     expect(parseConfirmedOrchidOrder('{"confirmed":true,"stems":0,"color":"vàng","delivery":"08:00 15/10/2026"}')).toBeNull();
     expect(parseConfirmedOrchidOrder("not-json")).toBeNull();
+    expect(parseConfirmedOrchidOrder('{"confirmed":true,"stems":5,"color":"vàng","delivery":null}')).toBeNull();
+    expect(parseConfirmedOrchidOrder('{"confirmed":true,"stems":5,"color":"vàng","delivery":null,"deliveryDeferred":true,"addressDeferred":true}')).toMatchObject({
+      stems: 5, color: "vàng", delivery: null,
+    });
   });
 
   it("forms one usable group message even when the agreed price is absent", () => {
     const order = parseConfirmedOrchidOrder(JSON.stringify({
       confirmed: true, customer: "Anh Nam", pot: "chậu lan cây cao",
-      stems: 15, color: "vàng", price: null, delivery: "08:00 15/10/2026",
+      stems: 15, color: "vàng", price: null, delivery: "08:00 15/10/2026", addressDeferred: true,
     }));
     expect(order).not.toBeNull();
     expect(formatOrchidOrderDispatch(order!, "Tiến Nam")).toBe(
-      "- Khách hàng: Tiến Nam\n- chậu lan cây cao 15 cành màu vàng; giá: chưa chốt; thời gian giao: 08:00 15/10/2026",
+      "- Khách hàng: Tiến Nam\n- chậu lan cây cao 15 cành màu vàng; giá: chưa chốt; thời gian giao: 08:00 15/10/2026; địa chỉ: khách báo sau",
     );
     expect(orchidOrderFingerprint(order!)).toBe(orchidOrderFingerprint({ ...order!, customer: "Tên khác" }));
   });

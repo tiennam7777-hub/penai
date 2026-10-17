@@ -30,6 +30,20 @@ export async function finishKiotVietOrderDraft(
     WHERE id = ${id}`));
 }
 
+export async function finishKiotVietBillImage(
+  db: Db, ctx: WorkspaceContext, id: string,
+  result: { groupId: string; msgId: string } | { error: string },
+): Promise<void> {
+  await withWorkspace(db, ctx, (tx) => tx.execute(sql`
+    UPDATE kiotviet_order_drafts SET
+      bill_image_status = ${"error" in result ? "failed" : "sent"},
+      bill_image_group_id = ${"groupId" in result ? result.groupId : null},
+      bill_image_msg_id = ${"msgId" in result ? result.msgId : null},
+      bill_image_error = ${"error" in result ? result.error.slice(0, 500) : null},
+      updated_at = now()
+    WHERE id = ${id}`));
+}
+
 export async function listKiotVietOrderDrafts(db: Db, ctx: WorkspaceContext): Promise<Array<{
   id: string; channelName: string; sourceThreadId: string; status: string;
   kiotOrderCode: string | null; error: string | null; createdAt: string;
