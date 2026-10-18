@@ -25,19 +25,21 @@ const REQUEST = /(?:xuất|xuat|lấy|lay|làm|lam|lên|len|cần|can).{0,25}(?:
 const NO_INVOICE = /(?:không|ko|k|chẳng|chang).{0,12}(?:(?:lấy|lay|xuất|xuat|cần|can).{0,20})?(?:hóa đơn|hoá đơn|hoa don|xhd)/i;
 
 export function hasRecentCustomerInvoiceRequest(messages: InboxMessageRow[]): boolean {
-  const recent = messages.slice(-20);
+  const recent = messages.slice(-50);
   const reset = recent.findLastIndex((m) => m.direction === "in" && /^\/(?:new|reset)\s*$/i.test(m.text.trim()));
   return recent.slice(reset + 1).some((m) => m.direction === "in" &&
     REQUEST.test(m.text) && !NO_INVOICE.test(m.text));
 }
 
 export function isInvoiceConfirmation(text: string): boolean {
-  return /^(?:ok(?:ay)?|đúng(?: rồi)?|dung(?: roi)?|đồng ý|dong y|xác nhận|xac nhan|được(?: rồi)?|duoc(?: roi)?)[\s.!]*$/i.test(text.trim());
+  return /^(?:ok(?:ay)?|đúng(?: rồi)?|dung(?: roi)?|đồng ý|dong y|xác nhận|xac nhan|được(?: rồi)?|duoc(?: roi)?)(?:\s+(?:anh|chị|em|e))?[\s.!]*$/i.test(text.trim());
 }
 
 export function customerInvoiceTaxCode(text: string): string | null {
   const labeled = text.match(/(?:\bmst\b|mã\s+số\s+thuế|ma\s+so\s+thue)\s*[:：-]?\s*(\d{10}(?:-\d{3})?)(?!\d)/i);
   if (labeled) return labeled[1] ?? null;
+  const ownLine = text.match(/(?:^|\n)\s*(\d{10}(?:-\d{3})?)\s*(?=\n|$)/);
+  if (ownLine) return ownLine[1] ?? null;
   const bare = text.trim().match(/^\d{10}(?:-\d{3})?$/);
   return bare?.[0] ?? null;
 }

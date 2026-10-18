@@ -111,8 +111,10 @@ describe("MISA invoice draft", () => {
     expect(hasRecentCustomerInvoiceRequest([row("req-1", "in", "Xhd cho a"), row("yes", "in", "Ok")])).toBe(true);
     expect(hasRecentCustomerInvoiceRequest([row("req-1", "in", "Xhd cho a"), row("reset", "in", "/new")])).toBe(false);
     expect(isInvoiceConfirmation("Ok")).toBe(true);
+    expect(isInvoiceConfirmation("đúng rồi e")).toBe(true);
     expect(isInvoiceConfirmation("Ok nhưng đổi công ty")).toBe(false);
     expect(customerInvoiceTaxCode("Công ty A, MST: 0312767097")).toBe("0312767097");
+    expect(customerInvoiceTaxCode("Chi nhánh Công ty An Phú\n0300509849-002")).toBe("0300509849-002");
     expect(customerInvoiceTaxCode("Gọi 0938699916 nhé")).toBeNull();
   });
 });
