@@ -61,6 +61,37 @@ export const INDEX_HTML = `<!doctype html>
   .stat { border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; background: var(--card); }
   .stat .n { font-size: 1.8rem; font-weight: 700; }
   .stat .l { opacity: .6; font-size: .82rem; }
+  .stem-report { max-width: 1100px; margin: 0 auto; }
+  .stem-report .stem-toolbar { display:flex; align-items:end; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  .stem-report .stem-toolbar label { margin:0; }
+  .stem-report .stem-toolbar input { display:block; margin-top:5px; }
+  .stem-report .stem-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin:16px 0; }
+  .stem-report .stem-metric { padding:14px; border:1px solid var(--border); border-radius:10px; background:rgba(128,128,128,.055); }
+  .stem-report .stem-metric strong { display:block; font-size:1.55rem; line-height:1.2; font-variant-numeric:tabular-nums; }
+  .stem-report .stem-metric span { display:block; margin-top:5px; font-size:.8rem; opacity:.7; }
+  .stem-report .stem-section { margin-top:22px; }
+  .stem-report .stem-section h3 { margin:0 0 4px; font-size:1rem; }
+  .stem-report .stem-section-note { margin:0 0 10px; }
+  .stem-report .stem-table { table-layout:fixed; }
+  .stem-report .stem-table th, .stem-report .stem-table td { padding:9px 10px; }
+  .stem-report .stem-table .stem-num { text-align:right; width:95px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .stem-report .stem-table .stem-rank { width:38px; opacity:.55; }
+  .stem-report .stem-bar { height:5px; margin-top:5px; border-radius:99px; background:rgba(128,128,128,.13); overflow:hidden; }
+  .stem-report .stem-bar i { display:block; height:100%; background:var(--accent); border-radius:99px; }
+  .stem-report .stem-day { border:1px solid var(--border); border-radius:9px; margin:7px 0; overflow:hidden; }
+  .stem-report .stem-day summary { display:grid; grid-template-columns:minmax(0,1fr) 95px 95px; align-items:center; gap:10px; cursor:pointer; padding:11px 13px; background:rgba(128,128,128,.055); }
+  .stem-report .stem-day summary:hover { background:rgba(128,128,128,.11); }
+  .stem-report .stem-day summary > strong::before { content:'▸'; display:inline-block; width:18px; color:var(--accent2); }
+  .stem-report .stem-day[open] summary > strong::before { content:'▾'; }
+  .stem-report .stem-day summary strong { font-variant-numeric:tabular-nums; }
+  .stem-report .stem-day summary .stem-num { text-align:right; font-variant-numeric:tabular-nums; }
+  .stem-report .stem-day .stem-table { margin:0; }
+  .stem-report .stem-day .stem-table tr:last-child td { border-bottom:0; }
+  .stem-report .stem-detail { margin-top:22px; }
+  .stem-report .stem-detail summary { cursor:pointer; font-weight:600; padding:9px 0; }
+  .stem-report .stem-scroll { overflow-x:auto; }
+  .stem-report .stem-scroll .stem-table { min-width:650px; }
+  @media (max-width:650px) { .stem-report .stem-summary { grid-template-columns:repeat(2,minmax(0,1fr)); } .stem-report .stem-day summary { grid-template-columns:minmax(0,1fr) 65px 75px; gap:5px; font-size:.86rem; } .stem-report .stem-table .stem-num { width:75px; } }
   /* chat */
   #chatWrap { display: flex; flex-direction: column; height: calc(100vh - 130px); }
   #log { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 10px; padding: 4px; }
@@ -951,42 +982,83 @@ export const INDEX_HTML = `<!doctype html>
   };
 
   PAGES["stem-report"] = function () {
-    var m = page("Xem trực tiếp báo cáo cắm hoa", "Nội dung file Excel của nhóm Bao Cao Cam hoa 42 DBP, cập nhật từ tin nhắn trong nhóm");
+    var m = page("Báo cáo cắm hoa", "Tổng hợp số cành theo tháng, ngày và người gửi");
     var c = card(m);
+    c.classList.add("stem-report");
     var today = new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 7);
     var selected = new URLSearchParams(state.routeQuery || "").get("month");
     if (!selected || selected.length !== 7 || selected.charAt(4) !== "-") selected = today;
-    c.innerHTML = '<div class="row"><label>Tháng <input id="stemMonth" type="month" value="' + esc(selected) + '"></label>' +
-      '<button id="stemLoad">Xem báo cáo</button><button id="stemExport" class="ghost">Tải Excel</button></div>' +
-      '<p class="muted">File cố định nằm trong Thư viện file → Chung cả bộ phận → bao-cao-cam-hoa. Báo cáo đọc cùng nhóm từ Trợ Lý và Hot 1/4/6, trùng mã tin Zalo chỉ tính một lần. Tên khách và số cành có thể ở hai tin liền nhau; đối chiếu mục Cần kiểm tra trước khi chốt KPI.</p>' +
-      '<div id="stemSummary">Đang tải...</div><h3>Tổng theo tháng</h3><div id="stemMonthly"></div>' +
-      '<h3>Tổng theo ngày</h3><div id="stemDaily"></div><h3>Chi tiết từng tin</h3><div id="stemDetail"></div>' +
-      '<h3>Tin cần kiểm tra</h3><div id="stemReview"></div>';
+    c.innerHTML = '<div class="stem-toolbar"><label>Tháng báo cáo<input id="stemMonth" type="month" value="' + esc(selected) + '"></label>' +
+      '<div class="row"><button id="stemLoad">Xem báo cáo</button><button id="stemExport" class="ghost">Tải Excel</button></div></div>' +
+      '<div id="stemSummary" aria-live="polite">Đang tải...</div>' +
+      '<section class="stem-section"><h3>Theo người gửi</h3><p class="muted stem-section-note">Xếp theo tổng số cành trong tháng.</p><div id="stemMonthly"></div></section>' +
+      '<section class="stem-section"><h3>Theo ngày</h3><p class="muted stem-section-note">Mỗi ngày có tổng riêng; bấm vào ngày để xem từng người.</p><div id="stemDaily"></div></section>' +
+      '<details class="stem-detail"><summary id="stemDetailTitle">Chi tiết từng tin</summary><div id="stemDetail" class="stem-scroll"></div></details>' +
+      '<details class="stem-detail" id="stemReviewSection"><summary id="stemReviewTitle">Tin cần kiểm tra</summary><p class="muted">Tin này chưa được cộng vào báo cáo. Đối chiếu trước khi chốt số liệu.</p><div id="stemReview" class="stem-scroll"></div></details>' +
+      '<p class="muted">Một lượt là một tin đủ tên khách và số cành (kể cả hai tin liền nhau). Tin Zalo trùng mã chỉ tính một lần. Dữ liệu từ nhóm Bao Cao Cam hoa 42 DBP.</p>';
+    function number(n) { return Number(n || 0).toLocaleString("vi-VN"); }
+    function dayLabel(day) {
+      var parts = day.split("-");
+      return parts.length === 3 ? parts[2] + "/" + parts[1] + "/" + parts[0] : day;
+    }
     function load() {
       var month = $("#stemMonth", c).value;
       $("#stemSummary", c).textContent = "Đang tải...";
       api("/v1/orchid-stem-report?month=" + encodeURIComponent(month)).then(function (r) {
-        var total = r.monthly.reduce(function (n, x) { return n + x.stems; }, 0);
-        var box = $("#stemSummary", c); box.innerHTML = "";
-        box.appendChild(el("p", null, "<b>" + total + " cành</b> · " + r.entries.length + " lượt · " + r.review.length + " tin cần kiểm tra"));
-        var rel = "bao-cao-cam-hoa/bao-cao-cam-hoa-" + r.month + ".xlsx";
-        box.appendChild(el("p", null, 'Đang xem trực tiếp: <code>' + esc(r.libraryPath) + '</code> · <a href="/v1/library/shared/file?path=' + encodeURIComponent(rel) + '&dl=1">Tải Excel</a>'));
+        var monthlyRows = r.monthly.slice().sort(function (a, b) { return b.stems - a.stems || a.senderName.localeCompare(b.senderName, "vi"); });
+        var total = monthlyRows.reduce(function (n, x) { return n + x.stems; }, 0);
+        var days = {};
+        r.daily.forEach(function (x) {
+          if (!days[x.day]) days[x.day] = { day: x.day, jobs: 0, stems: 0, people: [] };
+          days[x.day].jobs += x.jobs; days[x.day].stems += x.stems; days[x.day].people.push(x);
+        });
+        var dayRows = Object.keys(days).sort().reverse().map(function (key) { return days[key]; });
+        var box = $("#stemSummary", c);
+        box.innerHTML = '<div class="stem-summary">' +
+          '<div class="stem-metric"><strong>' + number(total) + '</strong><span>Tổng cành</span></div>' +
+          '<div class="stem-metric"><strong>' + number(r.entries.length) + '</strong><span>Lượt ghi nhận</span></div>' +
+          '<div class="stem-metric"><strong>' + number(dayRows.length) + '</strong><span>Ngày có dữ liệu</span></div>' +
+          '<div class="stem-metric"><strong>' + number(r.review.length) + '</strong><span>Tin cần kiểm tra</span></div></div>';
         var monthly = $("#stemMonthly", c); monthly.innerHTML = "";
-        monthly.appendChild(table(["Người gửi", "Số lượt", "Tổng cành"], r.monthly, function (x) {
-          var tr = el("tr"); tr.innerHTML = "<td>" + esc(x.senderName) + "</td><td>" + x.jobs + "</td><td><b>" + x.stems + "</b></td>"; return tr;
-        }));
+        var mt = table(["", "Người gửi", "Lượt", "Cành"], monthlyRows, function (x) {
+          var tr = el("tr");
+          var rank = monthlyRows.indexOf(x) + 1;
+          var percent = total ? Math.round(x.stems / total * 100) : 0;
+          tr.innerHTML = '<td class="stem-rank">' + rank + '</td><td>' + esc(x.senderName) +
+            '<div class="stem-bar" aria-label="' + percent + '% tổng số cành"><i style="width:' + percent + '%"></i></div></td>' +
+            '<td class="stem-num">' + number(x.jobs) + '</td><td class="stem-num"><strong>' + number(x.stems) + '</strong></td>';
+          return tr;
+        });
+        mt.className = "stem-table";
+        mt.querySelectorAll("th")[2].className = "stem-num";
+        mt.querySelectorAll("th")[3].className = "stem-num";
+        monthly.appendChild(mt);
         var daily = $("#stemDaily", c); daily.innerHTML = "";
-        daily.appendChild(table(["Ngày", "Người gửi", "Số lượt", "Tổng cành"], r.daily, function (x) {
-          var tr = el("tr"); tr.innerHTML = "<td>" + esc(x.day) + "</td><td>" + esc(x.senderName) + "</td><td>" + x.jobs + "</td><td><b>" + x.stems + "</b></td>"; return tr;
-        }));
+        if (!dayRows.length) daily.innerHTML = '<p class="muted">Chưa có dữ liệu trong tháng này.</p>';
+        dayRows.forEach(function (d, i) {
+          var group = el("details", { "class": "stem-day" });
+          if (i === 0) group.open = true;
+          group.innerHTML = '<summary><strong>' + dayLabel(d.day) + '</strong><span class="stem-num">' + number(d.jobs) + ' lượt</span><span class="stem-num"><strong>' + number(d.stems) + ' cành</strong></span></summary>';
+          d.people.sort(function (a, b) { return b.stems - a.stems || a.senderName.localeCompare(b.senderName, "vi"); });
+          var dt = table(["Người gửi", "Lượt", "Cành"], d.people, function (x) {
+            var tr = el("tr"); tr.innerHTML = '<td>' + esc(x.senderName) + '</td><td class="stem-num">' + number(x.jobs) + '</td><td class="stem-num"><strong>' + number(x.stems) + '</strong></td>'; return tr;
+          });
+          dt.className = "stem-table";
+          dt.querySelectorAll("th")[1].className = "stem-num";
+          dt.querySelectorAll("th")[2].className = "stem-num";
+          group.appendChild(dt); daily.appendChild(group);
+        });
         var detail = $("#stemDetail", c); detail.innerHTML = "";
-        detail.appendChild(table(["Ngày", "Người gửi", "Khách", "Cành", "Tin gốc"], r.entries, function (x) {
-          var tr = el("tr"); tr.innerHTML = "<td>" + esc(x.day) + "</td><td>" + esc(x.senderName) + "</td><td>" + esc(x.customerName) + "</td><td>" + x.stems + "</td><td>" + esc(x.text) + "</td>"; return tr;
-        }));
+        $("#stemDetailTitle", c).textContent = "Chi tiết từng tin (" + number(r.entries.length) + ")";
+        var entries = r.entries.slice().sort(function (a, b) { return b.sentAt.localeCompare(a.sentAt); });
+        var et = table(["Ngày", "Người gửi", "Khách", "Cành", "Tin gốc"], entries, function (x) {
+          var tr = el("tr"); tr.innerHTML = '<td>' + dayLabel(x.day) + '</td><td>' + esc(x.senderName) + '</td><td>' + esc(x.customerName) + '</td><td class="stem-num">' + number(x.stems) + '</td><td>' + esc(x.text) + '</td>'; return tr;
+        }); et.className = "stem-table"; detail.appendChild(et);
         var review = $("#stemReview", c); review.innerHTML = "";
-        review.appendChild(table(["Thời điểm", "Người gửi", "Tin chưa cộng"], r.review, function (x) {
+        $("#stemReviewTitle", c).textContent = "Tin cần kiểm tra (" + number(r.review.length) + ")";
+        var rt = table(["Thời điểm", "Người gửi", "Tin chưa cộng"], r.review, function (x) {
           var tr = el("tr"); tr.innerHTML = "<td>" + esc(new Date(x.sentAt).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })) + "</td><td>" + esc(x.senderName) + "</td><td>" + esc(x.text) + "</td>"; return tr;
-        }));
+        }); rt.className = "stem-table"; review.appendChild(rt);
       }).catch(function (e) { $("#stemSummary", c).textContent = e.message; });
     }
     $("#stemLoad", c).onclick = load;
