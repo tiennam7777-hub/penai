@@ -1038,7 +1038,7 @@ export const INDEX_HTML = `<!doctype html>
     var m = page("MISA meInvoice", "Khách yêu cầu xuất hóa đơn hoặc nhân viên dùng -xhd: lưu và gửi bản nháp, không phát hành");
     var c = card(m);
     c.innerHTML = '<div id="misaStatus" class="muted">Đang kiểm tra...</div>' +
-      '<p class="muted">Có hai cách yêu cầu hóa đơn nháp: khách yêu cầu trong chat, hoặc nhân viên dùng -xhd. Mật khẩu MISA được mã hóa trong PenAI và không hiện lại. Giá shop chốt chưa gồm VAT; hàng thường dùng 5%, ghép lũa thực tế dùng 8%. Chỉ lập và gửi bản nháp khi đã báo đúng VAT, khách đồng ý, xác nhận tên công ty và đủ thông tin đơn hàng. Khách duyệt bản nháp không làm hóa đơn phát hành; việc phát hành chỉ được phép sau lệnh nhân viên -xuat. Tạo nháp qua API còn chờ kiểm tra; phát hành chưa bật ký số.</p>' +
+      '<p class="muted">Có hai cách yêu cầu hóa đơn nháp: khách yêu cầu trong chat, hoặc nhân viên dùng -xhd. Mật khẩu MISA được mã hóa trong PenAI và không hiện lại. Giá shop chốt chưa gồm VAT; hàng thường dùng 5%, ghép lũa thực tế dùng 8%. Chỉ lập và gửi bản nháp khi đã báo đúng VAT, khách đồng ý, xác nhận tên công ty và đủ thông tin đơn hàng. Bản xem trước được gửi bằng ảnh để khách dễ đọc. Khách duyệt bản nháp không làm hóa đơn phát hành; -xuat chưa hoạt động đến khi cấu hình ký số hoàn tất.</p>' +
       '<label>Mã số thuế đơn vị bán</label><input id="misaTax" value="0312767097" autocomplete="off" style="width:100%">' +
       '<label>Tài khoản đăng nhập MISA</label><input id="misaUser" autocomplete="username" style="width:100%">' +
       '<label>Mật khẩu MISA</label><input id="misaPass" type="password" autocomplete="new-password" style="width:100%">' +
@@ -1082,7 +1082,7 @@ export const INDEX_HTML = `<!doctype html>
       button.disabled = true;
       $("#misaMsg", c).textContent = "Đang kiểm tra bằng thông tin đã lưu...";
       api("/v1/misa/verify-saved").then(function (j) {
-        $("#misaMsg", c).textContent = j.valid ? "Kết nối đã lưu còn hoạt động với MISA; tạo nháp từ yêu cầu khách hoặc lệnh -xhd vẫn chờ kiểm tra API lưu nháp." :
+        $("#misaMsg", c).textContent = j.valid ? "Kết nối đã lưu còn hoạt động với MISA; chức năng lưu nháp và gửi ảnh xem trước đã được kiểm tra." :
           "Kết nối đã lưu hiện không xác thực được: " + j.error;
       }).catch(function (e) { $("#misaMsg", c).textContent = e.message; })
         .finally(function () { button.disabled = false; });
