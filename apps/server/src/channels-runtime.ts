@@ -40,6 +40,7 @@ import {
   getPersonContextData,
   loadMessages,
   type EnabledChannel,
+  type InboxMessageRow,
   recordTraceSafe,
 } from "@penai/db";
 import { Scheduler, gatedProvider, runAgent } from "@penai/core";
@@ -88,7 +89,7 @@ import { createMisaUnpublishedInvoice, lookupMisaBuyerCompany,
 import { saveMisaPreviewImages } from "./misa-preview-image.js";
 import { extractInvoiceEvidence, hasConfirmedBuyerCompany, hasExplicitVatApproval,
   customerInvoiceTaxCode, hasRecentCustomerInvoiceRequest, isInvoiceConfirmation,
-  isCustomerInvoiceRequestText,
+  isCustomerInvoiceRequestText, isQuotedInvoiceApproval,
   invoiceRequestFingerprint, staffInvoiceFingerprint } from "./misa-invoice-extract.js";
 import { calculateOrchidInvoiceLine } from "./misa-invoice-policy.js";
 import { missingOldInvoiceDetailsRequest, misaAccountingNotice } from "./misa-accounting-policy.js";
@@ -1344,6 +1345,13 @@ export function makeInboundHandler(
           return [];
         })
       : [];
+    const quotedInvoiceOriginal = msg.quoted?.msgId
+      ? handoffMessages.find((m) => m.direction === "out" && m.msgId === msg.quoted?.msgId)
+      : null;
+    const quotedInvoiceApproval = quotedInvoiceOriginal ? isQuotedInvoiceApproval({
+      direction: "in", text: msg.text,
+      meta: { quote: { msgId: quotedInvoiceOriginal.msgId, text: quotedInvoiceOriginal.text } },
+    } as unknown as InboxMessageRow, [quotedInvoiceOriginal]) : false;
     if (agent.key === "nhan-vien-kinh-doanh-orchids-world" && msg.peerKind === "direct" &&
         !staffDelegation && hasRecentCustomerInvoiceRequest(handoffMessages)) {
       const threadId = msg.chatKey.slice(msg.chatKey.indexOf(":") + 1);
@@ -1362,7 +1370,7 @@ export function makeInboundHandler(
             logger.warn(`misa.customer_company_lookup_fail: ${String(error)}`);
           }
         }
-      } else if (isInvoiceConfirmation(msg.text) || isCustomerInvoiceRequestText(msg.text)) {
+      } else if (isInvoiceConfirmation(msg.text) || isCustomerInvoiceRequestText(msg.text) || quotedInvoiceApproval) {
         const credentials = await getMisaCredentials(db, ctx);
         if (credentials?.draftEnabled) {
           // The Zalo Inbox logger persists asynchronously; the current approval must be

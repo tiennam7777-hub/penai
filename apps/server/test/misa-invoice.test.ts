@@ -4,7 +4,7 @@ import { createMisaUnpublishedInvoice, lookupMisaBuyerCompany,
   previewMisaUnpublishedInvoice, verifyMisaWebConnection } from "../src/misa-api.js";
 import { hasConfirmedBuyerCompany, hasExplicitVatApproval, invoiceRequestFingerprint,
   customerInvoiceTaxCode, hasRecentCustomerInvoiceRequest, isInvoiceConfirmation,
-  isCustomerInvoiceRequestText,
+  isCustomerInvoiceRequestText, isQuotedInvoiceApproval,
   parseInvoiceEvidence, staffInvoiceFingerprint } from "../src/misa-invoice-extract.js";
 
 const originalFetch = globalThis.fetch;
@@ -128,5 +128,25 @@ describe("MISA invoice draft", () => {
     expect(customerInvoiceTaxCode("Công ty A, MST: 0312767097")).toBe("0312767097");
     expect(customerInvoiceTaxCode("Chi nhánh Công ty An Phú\n0300509849-002")).toBe("0300509849-002");
     expect(customerInvoiceTaxCode("Gọi 0938699916 nhé")).toBeNull();
+  });
+
+  it("recognizes a customer's correction by its verified invoice quote", () => {
+    const row = (id: string, msgId: string, direction: "in" | "out", text: string,
+      meta: Record<string, unknown> | null = null) => ({ id, msgId, direction, text, meta,
+        sentAt: new Date(), source: direction === "in" ? "zalo" : "agent" }) as unknown as InboxMessageRow;
+    const quote = "Ok em. Em đồng ý tổng hóa đơn 2.236.500đ đã gồm VAT 5% để Anh làm nháp nhé?";
+    const original = row("1", "quoted-1", "out", quote);
+    const inflated = row("2", "request-2", "in", "Xuất cho e 3,5 tr nha");
+    const corrected = row("3", "reply-3", "in", "Vậy xuất đúng số này đi",
+      { quote: { msgId: "quoted-1", text: quote } });
+    const history = [original, inflated, corrected];
+    expect(isQuotedInvoiceApproval(corrected, history)).toBe(true);
+    expect(hasRecentCustomerInvoiceRequest(history)).toBe(true);
+    expect(invoiceRequestFingerprint(history)).not.toBe(invoiceRequestFingerprint(history.slice(0, -1)));
+    expect(hasExplicitVatApproval(history, parseInvoiceEvidence(JSON.stringify({ ...sample,
+      vatQuoteText: quote, vatAcceptanceText: corrected.text }))!, 5)).toBe(true);
+    expect(isQuotedInvoiceApproval(row("4", "reply-4", "in", corrected.text), history)).toBe(false);
+    expect(isQuotedInvoiceApproval(row("5", "reply-5", "in", corrected.text,
+      { quote: { msgId: "quoted-1", text: "Hóa đơn khác 2.236.500đ VAT 5%" } }), history)).toBe(false);
   });
 });
