@@ -13,16 +13,35 @@ export interface OrchidStemEntry extends OrchidStemMessage {
   day: string;
 }
 
-/** Only a customer name followed by one plausible stem quantity is counted. */
+function stemCustomerName(prefix: string): string | null {
+  const name = prefix
+    .replace(/[\s,.:;()\-]+$/g, "")
+    .replace(/(?:\s+|^)(?:cành|canh|cảnh|cây|cay)$/iu, "")
+    .replace(/[\s,.:;()\-]+$/g, "")
+    .replace(/^(?:cành|canh|cảnh|cây|cay)[\s,.:;()\-]+/iu, "")
+    .trim();
+  return /[\p{L}]/u.test(name) && name.length >= 2 && !/\d/.test(name) ? name : null;
+}
+
+/** Count a named pot with one quantity, or multiply its cành and vòi counts. */
 export function parseOrchidStemText(text: string): { customerName: string; stems: number } | null {
   const clean = text.replace(/\s+/g, " ").trim();
   if (!clean || /\b(?:ship|vat|giá|tổng|đồng|vnd|kpi)\b/i.test(clean)) return null;
   // The shop also writes "C Chi (8c) Lộc": a quantity in parentheses, then a short name/note.
   // Keep the original message for audit, but ignore that trailing note when reading the quantity.
-  const annotated = /^(.+?\(\s*\d{1,3}\s*(?:c|f|cành|canh|cảnh|cây|cay|nhánh|nhanh)\s*\))\s+([\p{L}]+(?:\s+[\p{L}]+){0,2})$/iu.exec(clean);
+  const annotated = /^(.+?\(\s*\d{1,3}\s*(?:c|f|cành|canh|cảnh|cây|cay|nhánh|nhanh)(?:\s+(?:[x×]\s*)?[1-9]\s*(?:v|vòi|voi))?\s*\))\s+([\p{L}]+(?:\s+[\p{L}]+){0,2})$/iu.exec(clean);
   const suffix = annotated?.[2] ?? "";
   if (suffix && /^(?:hủy|huỷ|đổi|sửa|xóa|xoá|hoàn|trả)(?:\s|$)/iu.test(suffix)) return null;
   const counted = annotated ? annotated[1]! : clean;
+  // "3c 2v" and "Cảnh 5 2v" mean 3×2 and 5×2 stems, respectively.
+  const multi = /(?<!\d)(\d{1,3})\s*(?:c|f|cành|canh|cảnh|cây|cay)?(?:\s+|\s*[x×]\s*)([1-9])\s*(?:v|vòi|voi)\s*\)?$/iu.exec(counted);
+  if (multi) {
+    const prefix = counted.slice(0, multi.index);
+    if (multi.index > 0 && /[\p{L}]/u.test(counted[multi.index - 1]!)) return null;
+    const customerName = stemCustomerName(prefix);
+    const stems = Number(multi[1]) * Number(multi[2]);
+    return customerName && stems >= 1 && stems <= 200 ? { customerName, stems } : null;
+  }
   const matches = [...counted.matchAll(/(?<!\d)(\d{1,3})(?!\d)/g)];
   if (matches.length !== 1) return null;
   const match = matches[0]!;
@@ -31,12 +50,8 @@ export function parseOrchidStemText(text: string): { customerName: string; stems
   if (match.index! > 0 && /[\p{L}]/u.test(counted[match.index! - 1]!)) return null;
   const after = counted.slice(match.index! + match[0].length).trim();
   if (after && !/^(?:c|f|cành|canh|cảnh|cây|cay|nhánh|nhanh|tầm|tam)?$/iu.test(after.replace(/[.)\s-]/g, ""))) return null;
-  const customerName = counted.slice(0, match.index)
-    .replace(/[\s,.:;()\-]+$/g, "")
-    .replace(/(?:\s+|^)(?:cành|canh|cảnh|cây|cay)$/iu, "")
-    .replace(/^(?:cành|canh|cảnh|cây|cay)[\s,.:;()\-]+/iu, "")
-    .trim();
-  if (!/[\p{L}]/u.test(customerName) || customerName.length < 2) return null;
+  const customerName = stemCustomerName(counted.slice(0, match.index));
+  if (!customerName) return null;
   return { customerName, stems };
 }
 
@@ -96,15 +111,15 @@ export function buildOrchidStemReport(messages: OrchidStemMessage[]) {
 export function orchidStemWorkbook(report: ReturnType<typeof buildOrchidStemReport>): Buffer {
   return buildXlsx([
     { name: "Chi tiết", widths: [20, 25, 24, 30, 12, 48, 22], rows: [
-      ["Ngày", "Người gửi", "UID người gửi", "Tên khách", "Số cành", "Tin gốc", "Mã tin Zalo"],
+      ["Ngày", "Người gửi", "UID người gửi", "Tên khách", "Số cành tính", "Tin gốc", "Mã tin Zalo"],
       ...report.entries.map(e => [e.day, e.senderName, e.senderId, e.customerName, e.stems, e.text, e.msgId]),
     ] },
     { name: "Theo ngày", widths: [20, 25, 24, 16, 16], rows: [
-      ["Ngày", "Người gửi", "UID người gửi", "Số lượt", "Tổng cành"],
+      ["Ngày", "Người gửi", "UID người gửi", "Số lượt", "Tổng cành tính"],
       ...report.daily.map(d => [d.day, d.senderName, d.senderId, d.jobs, d.stems]),
     ] },
     { name: "Theo tháng", widths: [25, 24, 16, 16], rows: [
-      ["Người gửi", "UID người gửi", "Số lượt", "Tổng cành"],
+      ["Người gửi", "UID người gửi", "Số lượt", "Tổng cành tính"],
       ...report.monthly.map(m => [m.senderName, m.senderId, m.jobs, m.stems]),
     ] },
     { name: "Cần kiểm tra", widths: [22, 25, 24, 50, 22], rows: [

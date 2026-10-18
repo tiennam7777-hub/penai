@@ -6,6 +6,9 @@ describe("orchid stem report", () => {
     expect(parseOrchidStemText("C hong (9c)")).toEqual({ customerName: "C hong", stems: 9 });
     expect(parseOrchidStemText("C Chi (8c) Lộc")).toEqual({ customerName: "C Chi", stems: 8 });
     expect(parseOrchidStemText("Chị Lan (12 cành) Toàn")).toEqual({ customerName: "Chị Lan", stems: 12 });
+    expect(parseOrchidStemText("Hà cii(3c 2v)")).toEqual({ customerName: "Hà cii", stems: 6 });
+    expect(parseOrchidStemText("A trung. Cảnh 5 2v")).toEqual({ customerName: "A trung", stems: 10 });
+    expect(parseOrchidStemText("C Chi (3c 2v) Lộc")).toEqual({ customerName: "C Chi", stems: 6 });
     expect(parseOrchidStemText("Hà phượg. 9. Cảnh")).toEqual({ customerName: "Hà phượg", stems: 9 });
     expect(parseOrchidStemText("Nacy 10 tam")).toEqual({ customerName: "Nacy", stems: 10 });
     expect(parseOrchidStemText("Mrr thế guta\n Cảnh 10")).toEqual({ customerName: "Mrr thế guta", stems: 10 });
@@ -15,6 +18,8 @@ describe("orchid stem report", () => {
     expect(parseOrchidStemText("Khách A 10 cành + ship 140000")).toBeNull();
     expect(parseOrchidStemText("C Chi (8c) hủy")).toBeNull();
     expect(parseOrchidStemText("C Chi (8c) Lộc 2")).toBeNull();
+    expect(parseOrchidStemText("C Chi 3c 2v + ship 50000")).toBeNull();
+    expect(parseOrchidStemText("C Chi 150c 2v")).toBeNull();
   });
 
   it("sums by stable sender ID and local day while keeping ambiguous messages for review", () => {
@@ -40,5 +45,19 @@ describe("orchid stem report", () => {
     expect(report.entries.map(x => [x.senderName, x.customerName, x.stems])).toEqual([
       ["Trung Toàn", "c trang", 10], ["Lan Hồ Điệp Orchids World VI", "Nacy", 10],
     ]);
+  });
+
+  it("multiplies cành by vòi in daily and monthly totals instead of sending these captions to review", () => {
+    const at = "2026-10-18T08:00:00.000Z";
+    const report = buildOrchidStemReport([
+      { msgId: "pot-1", senderId: "van", senderName: "Văn Hoàng", text: "Hà cii(3c 2v)", sentAt: at },
+      { msgId: "pot-2", senderId: "hot4", senderName: "Lan Hồ Điệp Orchids World Iv", text: "A trung. Cảnh 5 2v", sentAt: at },
+    ]);
+    expect(report.entries.map(x => [x.msgId, x.customerName, x.stems])).toEqual([
+      ["pot-1", "Hà cii", 6], ["pot-2", "A trung", 10],
+    ]);
+    expect(report.daily.map(x => x.stems)).toEqual([6, 10]);
+    expect(report.monthly.map(x => x.stems)).toEqual([6, 10]);
+    expect(report.review).toEqual([]);
   });
 });

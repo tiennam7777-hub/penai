@@ -992,7 +992,7 @@ export const INDEX_HTML = `<!doctype html>
     if (!selected || selected.length !== 7 || selected.charAt(4) !== "-") selected = today;
     c.innerHTML = '<div class="stem-toolbar"><label>Tháng báo cáo<input id="stemMonth" type="month" value="' + esc(selected) + '"></label>' +
       '<div class="row"><button id="stemLoad">Xem báo cáo</button><button id="stemExport" class="ghost">Tải Excel</button></div></div>' +
-      '<div class="stem-guide"><strong>Cách ghi để được cộng vào báo cáo</strong>Chỉ cần tên khách và số cành; <b>8c nghĩa là 8 cành</b>. Ví dụ <b>C Chi 8c</b> hoặc <b>C Chi (8c) Lộc</b> đều được tính 8 cành cho khách C Chi; chữ sau ngoặc là ghi chú. Có thể gửi tên khách rồi số cành bằng tin tiếp theo trong 5 phút, cùng tài khoản. Tin có nhiều số, giá hoặc phí ship sẽ nằm ở “Tin cần kiểm tra”.</div>' +
+      '<div class="stem-guide"><strong>Cách ghi để được cộng vào báo cáo</strong><b>c = cành, v = vòi.</b> Ví dụ <b>C Chi (8c) Lộc</b> tính 8 cành cho C Chi; chữ sau ngoặc là ghi chú. Với chậu nhiều vòi, lấy số cành nhân số vòi: <b>Hà cii (3c 2v) = 6 cành</b>, <b>A trung. Cảnh 5 2v = 10 cành</b>. Cũng có thể gửi tên khách rồi số cành bằng tin tiếp theo trong 5 phút, cùng tài khoản. Tin có nhiều số nhưng không rõ cành/vòi, giá hoặc phí ship sẽ nằm ở “Tin cần kiểm tra”.</div>' +
       '<div id="stemSummary" aria-live="polite">Đang tải...</div>' +
       '<section class="stem-section"><h3>Theo người gửi</h3><p class="muted stem-section-note">Xếp theo tổng số cành trong tháng.</p><div id="stemMonthly"></div></section>' +
       '<section class="stem-section"><h3>Theo ngày</h3><p class="muted stem-section-note">Mỗi ngày có tổng riêng; bấm vào ngày để xem từng người.</p><div id="stemDaily"></div></section>' +
@@ -1023,7 +1023,7 @@ export const INDEX_HTML = `<!doctype html>
           '<div class="stem-metric"><strong>' + number(dayRows.length) + '</strong><span>Ngày có dữ liệu</span></div>' +
           '<div class="stem-metric"><strong>' + number(r.review.length) + '</strong><span>Tin cần kiểm tra</span></div></div>';
         var monthly = $("#stemMonthly", c); monthly.innerHTML = "";
-        var mt = table(["", "Người gửi", "Lượt", "Cành"], monthlyRows, function (x) {
+        var mt = table(["", "Người gửi", "Lượt", "Cành tính"], monthlyRows, function (x) {
           var tr = el("tr");
           var rank = monthlyRows.indexOf(x) + 1;
           var percent = total ? Math.round(x.stems / total * 100) : 0;
@@ -1043,7 +1043,7 @@ export const INDEX_HTML = `<!doctype html>
           if (i === 0) group.open = true;
           group.innerHTML = '<summary><strong>' + dayLabel(d.day) + '</strong><span class="stem-num">' + number(d.jobs) + ' lượt</span><span class="stem-num"><strong>' + number(d.stems) + ' cành</strong></span></summary>';
           d.people.sort(function (a, b) { return b.stems - a.stems || a.senderName.localeCompare(b.senderName, "vi"); });
-          var dt = table(["Người gửi", "Lượt", "Cành"], d.people, function (x) {
+          var dt = table(["Người gửi", "Lượt", "Cành tính"], d.people, function (x) {
             var tr = el("tr"); tr.innerHTML = '<td>' + esc(x.senderName) + '</td><td class="stem-num">' + number(x.jobs) + '</td><td class="stem-num"><strong>' + number(x.stems) + '</strong></td>'; return tr;
           });
           dt.className = "stem-table";
@@ -1054,7 +1054,7 @@ export const INDEX_HTML = `<!doctype html>
         var detail = $("#stemDetail", c); detail.innerHTML = "";
         $("#stemDetailTitle", c).textContent = "Chi tiết từng tin (" + number(r.entries.length) + ")";
         var entries = r.entries.slice().sort(function (a, b) { return b.sentAt.localeCompare(a.sentAt); });
-        var et = table(["Ngày", "Người gửi", "Khách", "Cành", "Tin gốc"], entries, function (x) {
+        var et = table(["Ngày", "Người gửi", "Khách", "Cành tính", "Tin gốc"], entries, function (x) {
           var tr = el("tr"); tr.innerHTML = '<td>' + dayLabel(x.day) + '</td><td>' + esc(x.senderName) + '</td><td>' + esc(x.customerName) + '</td><td class="stem-num">' + number(x.stems) + '</td><td>' + esc(x.text) + '</td>'; return tr;
         }); et.className = "stem-table"; detail.appendChild(et);
         var review = $("#stemReview", c); review.innerHTML = "";
