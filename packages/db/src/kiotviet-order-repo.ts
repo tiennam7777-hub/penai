@@ -5,13 +5,20 @@ import { withWorkspace } from "./context.js";
 
 export async function claimKiotVietOrderDraft(
   db: Db, ctx: WorkspaceContext,
-  input: { channelId: string; threadId: string; fingerprint: string; payloadFingerprint: string },
+  input: { channelId: string; threadId: string; fingerprint: string; payloadFingerprint: string;
+    allowRejectedRetry?: boolean },
 ): Promise<string | null> {
   const result = await withWorkspace(db, ctx, (tx) => tx.execute(sql`
     INSERT INTO kiotviet_order_drafts
       (workspace_id, source_channel_id, source_thread_id, order_fingerprint, last_payload_fingerprint)
     VALUES (${ctx.workspaceId}, ${input.channelId}, ${input.threadId}, ${input.fingerprint}, ${input.payloadFingerprint})
-    ON CONFLICT (source_channel_id, source_thread_id, order_fingerprint) DO NOTHING
+    ON CONFLICT (source_channel_id, source_thread_id, order_fingerprint) DO UPDATE SET
+      status = 'sending', error = NULL, updated_at = now(),
+      last_payload_fingerprint = EXCLUDED.last_payload_fingerprint
+    WHERE ${input.allowRejectedRetry === true}
+      AND kiotviet_order_drafts.status = 'failed'
+      AND kiotviet_order_drafts.kiot_order_id IS NULL
+      AND kiotviet_order_drafts.error LIKE 'KiotViet từ chối tạo phiếu đặt hàng (HTTP 420)%'
     RETURNING id`));
   return result.rows[0]?.id ? String(result.rows[0].id) : null;
 }

@@ -790,7 +790,8 @@ export function makeInboundHandler(
       const fingerprint = orchidOrderSessionFingerprint(history, order, now);
       const payloadFingerprint = orchidOrderPayloadFingerprint(order);
       const claim = command === "-lb"
-        ? await claimKiotVietOrderDraft(db, ctx, { channelId: channel.id, threadId, fingerprint, payloadFingerprint })
+        ? await claimKiotVietOrderDraft(db, ctx, { channelId: channel.id, threadId, fingerprint,
+          payloadFingerprint, allowRejectedRetry: true })
         : await claimLatestKiotVietOrderForStaffUpdate(db, ctx, channel.id, threadId);
       if (!claim) throw new Error(command === "-lb" ? "Đơn này đã có phiếu hoặc đang xử lý; dùng -cn để bổ sung"
         : "Chưa có phiếu đặt hàng để cập nhật");
