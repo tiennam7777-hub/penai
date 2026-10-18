@@ -147,7 +147,7 @@ export interface ChannelDeps {
    */
   onMessageLog?: (entry: ChannelMessageLog) => void;
   /** Lệnh nội bộ từ điện thoại: chỉ xử lý sau khi Zalo xác nhận thu hồi tin. */
-  onSelfCommand?: (threadId: string, command: "-ld" | "-lb" | "-cn" | "-xhd") => Promise<void>;
+  onSelfCommand?: (threadId: string, command: "-ld" | "-lb" | "-cn" | "-xhd" | "-xuat") => Promise<void>;
   /** Zalo: bất kỳ người gửi nào thu hồi tin; trả true nếu đó là tin Agent đã gửi. */
   onMessageUndo?: (event: { threadId: string; peerKind: "direct" | "group"; targetMsgId: string; isSelf: boolean }) => Promise<boolean>;
   /** Zalo Personal — danh bạ (bạn bè + nhóm) vừa đồng bộ xong. */

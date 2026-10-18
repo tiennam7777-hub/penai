@@ -241,14 +241,14 @@ export function inboxHooks(
     saveInboxFile: async (buf: Buffer, ext: string) =>
       saveOutboundImage(dataDir, ch.workspaceId, ch.id, { buf, ext: ext.replace(/[^a-z0-9]/gi, "").slice(0, 8) || "bin" }),
     ...(ORCHID_SALES_CHANNEL_IDS.has(ch.id) ? {
-      onSelfCommand: async (threadId: string, command: "-ld" | "-lb" | "-cn" | "-xhd") => {
+      onSelfCommand: async (threadId: string, command: "-ld" | "-lb" | "-cn" | "-xhd" | "-xuat") => {
         try {
           if (command === "-ld") {
             // Tin hứa gửi từ điện thoại được listener lưu chậm hơn bản dội Zalo một chút.
             await new Promise((resolve) => setTimeout(resolve, 1_700));
             await delegateOrchidStaffPromise(db, ctx, dataDir, ch.id, threadId);
-          } else if (command === "-xhd") {
-            await runOrchidMisaStaffCommand(ch.id, threadId);
+          } else if (command === "-xhd" || command === "-xuat") {
+            await runOrchidMisaStaffCommand(ch.id, threadId, command);
           } else {
             await runOrchidKiotStaffCommand(ch.id, threadId, command);
           }
@@ -1108,7 +1108,7 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
     const parsed = SendBody.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" });
     const staffCommand = parsed.data.text?.trim().toLowerCase();
-    if (staffCommand === "-lb" || staffCommand === "-cn" || staffCommand === "-ld" || staffCommand === "-xhd") {
+    if (staffCommand === "-lb" || staffCommand === "-cn" || staffCommand === "-ld" || staffCommand === "-xhd" || staffCommand === "-xuat") {
       if (!ORCHID_SALES_CHANNEL_IDS.has(channelId) || parsed.data.image || parsed.data.images?.length || parsed.data.file || parsed.data.replyToId) {
         return reply.code(400).send({ error: "Lệnh nội bộ chỉ dùng riêng trong DM Hot 1/4/6, không kèm ảnh hoặc trích dẫn" });
       }
@@ -1117,8 +1117,8 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
           await delegateOrchidStaffPromise(db, req.authCtx, dataDir, channelId, threadId);
           return { sent: false, notice: "AI đã thực hiện lời nhắn vừa rồi" };
         }
-        const notice = staffCommand === "-xhd"
-          ? await runOrchidMisaStaffCommand(channelId, threadId)
+        const notice = staffCommand === "-xhd" || staffCommand === "-xuat"
+          ? await runOrchidMisaStaffCommand(channelId, threadId, staffCommand)
           : await runOrchidKiotStaffCommand(channelId, threadId, staffCommand);
         return { sent: false, notice };
       } catch (err) { return sendError(reply, err, channelId); }
@@ -1179,7 +1179,7 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
     if (!(await guard(req, reply, channelId))) return;
     const parsed = NewMessageBody.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" });
-    if (/^-(?:ld|lb|cn|xhd)$/i.test(parsed.data.text?.trim() ?? "")) {
+    if (/^-(?:ld|lb|cn|xhd|xuat)$/i.test(parsed.data.text?.trim() ?? "")) {
       return reply.code(400).send({ error: "Lệnh nội bộ chỉ dùng trong hội thoại khách hàng đã có" });
     }
     const rt = inboxRuntime(channelId);

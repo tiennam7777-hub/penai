@@ -16,10 +16,33 @@ export interface MisaDraftInput {
   buyerEmail: string;
   buyerContact: string;
   itemName: string;
+  itemCode: string;
+  unitName: string;
   quantity: number;
   unitPrice: number;
   vatRate: number;
   series: string;
+}
+
+/** MISA returns the registered legal name without the UI's visual truncation. */
+export async function lookupMisaBuyerCompany(login: MisaLogin, buyerTaxCode: string): Promise<{
+  name: string; address: string;
+}> {
+  if (!/^\d{10}(?:-\d{3})?$/.test(buyerTaxCode)) throw new Error("Mã số thuế người mua không hợp lệ");
+  const { token } = await misaWebToken(login);
+  const response = await fetch(`${BASE}/v2/Other/GetCompanyInfoByTaxCodeV3?taxCode=${encodeURIComponent(buyerTaxCode)}`, {
+    headers: { Authorization: `Bearer ${token}`, TaxCode: login.taxCode },
+    signal: AbortSignal.timeout(15_000),
+  });
+  const body = await readPayload(response);
+  const outer = payloadObject(body.data);
+  const company = payloadObject(outer.Data ?? outer.data);
+  const name = String(company.companyName ?? company.CompanyName ?? "").trim();
+  const address = String(company.address ?? company.Address ?? "").trim();
+  if (!response.ok || body.success !== true || outer.Success === false || !name || !address) {
+    throw new Error("MISA chưa tra được đầy đủ tên và địa chỉ công ty theo mã số thuế; chưa lập nháp");
+  }
+  return { name, address };
 }
 
 function payloadObject(value: unknown): Record<string, unknown> {
@@ -75,7 +98,8 @@ export async function createMisaUnpublishedInvoice(login: MisaLogin, input: Misa
   const vat = Math.round(amount * input.vatRate / 100);
   const total = amount + vat;
   const detail = [{
-    RefDetailID: detailId, RefID: refId, InventoryItemName: input.itemName,
+    RefDetailID: detailId, RefID: refId, InventoryItemCode: input.itemCode,
+    InventoryItemName: input.itemName, UnitName: input.unitName,
     Description: input.itemName, InventoryItemType: 0, Quantity: input.quantity,
     UnitPrice: input.unitPrice, AmountOC: amount, Amount: amount,
     DiscountRate: 0, DiscountAmountOC: 0, DiscountAmount: 0,
@@ -111,7 +135,7 @@ export async function createMisaUnpublishedInvoice(login: MisaLogin, input: Misa
   if (!response.ok || body.success === false || body.Success === false || body.error || body.ErrorCode) {
     throw new Error("MISA từ chối lưu hóa đơn nháp; cần kiểm tra phản hồi trong hệ thống MISA");
   }
-  const read = await fetch(`${BASE}/v2/SAInvoice/Get?id=${encodeURIComponent(refId)}`, {
+  const read = await fetch(`${BASE}/v2/SAInvoice/Get/${encodeURIComponent(refId)}`, {
     headers: { Authorization: `Bearer ${token}`, TaxCode: login.taxCode }, signal: AbortSignal.timeout(15_000),
   });
   const got = await readPayload(read);

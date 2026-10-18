@@ -1038,7 +1038,7 @@ export const INDEX_HTML = `<!doctype html>
     var m = page("MISA meInvoice", "Kết nối API để lệnh -xhd lưu hóa đơn nháp, không ký hoặc phát hành");
     var c = card(m);
     c.innerHTML = '<div id="misaStatus" class="muted">Đang kiểm tra...</div>' +
-      '<p class="muted">Chỉ lưu sau khi MISA xác thực đúng mã số thuế. Mật khẩu được mã hóa trong PenAI và không hiện lại. Giá shop chốt chưa gồm VAT 5%; -xhd chỉ chạy khi nhân viên đã báo VAT 5% và khách đồng ý trong hội thoại, đủ thông tin xuất hóa đơn. Lệnh không gửi cho khách và vẫn chờ kiểm tra lưu nháp trước khi bật.</p>' +
+      '<p class="muted">Chỉ lưu sau khi MISA xác thực đúng mã số thuế. Mật khẩu được mã hóa trong PenAI và không hiện lại. Giá shop chốt chưa gồm VAT; hàng thường dùng 5%, ghép lũa thực tế dùng 8%. Chỉ lập nháp khi đã báo đúng VAT, khách đồng ý, xác nhận tên công ty và đủ thông tin đơn hàng. -xhd còn chờ thử lưu nháp; -xuat chưa bật ký số/phát hành.</p>' +
       '<label>Mã số thuế đơn vị bán</label><input id="misaTax" value="0312767097" autocomplete="off" style="width:100%">' +
       '<label>Tài khoản đăng nhập MISA</label><input id="misaUser" autocomplete="username" style="width:100%">' +
       '<label>Mật khẩu MISA</label><input id="misaPass" type="password" autocomplete="new-password" style="width:100%">' +
@@ -4077,7 +4077,7 @@ export const INDEX_HTML = `<!doctype html>
     var wrap = el("div", { "class": "ibx" });
     wrap.innerHTML = '<div class="ibx-list"><div class="row" style="padding:8px"><input id="ibxQ" placeholder="Tìm tên, uid, SĐT…"><select id="ibxKind" style="flex:0 0 auto;min-width:0"><option value="">Tất cả</option><option value="direct">Cá nhân</option><option value="group">Nhóm</option><option value="unread">Chưa đọc</option></select></div><div class="row" style="padding:0 8px 8px;gap:6px"><select id="ibxTag" style="flex:1;min-width:0"><option value="">Mọi nhãn Inbox</option></select><select id="ibxHidden" style="flex:0 0 auto;min-width:0" title="Xem hội thoại đang hiện hoặc đã ẩn"><option value="0">Đang hiện</option><option value="1">Đã ẩn</option></select></div><div id="ibxThreads" class="ibx-threads"></div></div>' +
       '<div class="ibx-chat"><div id="ibxHead" class="ibx-head muted">Chọn một hội thoại bên trái.</div><div class="ibx-main"><div id="ibxMsgs" class="ibx-msgs"></div><aside id="ibxDetails" class="ibx-details" style="display:none"><div class="ibx-details-top"><b>Thông tin hội thoại</b><button type="button" class="ghost sm" id="ibxDetailsClose" aria-label="Đóng thông tin">✕</button></div><div class="ibx-details-tabs"><button type="button" class="ghost sm" id="ibxInfoTab">Ảnh & tệp</button><button type="button" class="ghost sm" id="ibxSearchTab">🔎 Tìm tin</button></div><div id="ibxDetailsBody" class="ibx-details-body"></div></aside></div>' +
-      '<div class="ibx-compose" id="ibxCompose" style="display:none"><div id="ibxReply"></div><div id="ibxImg"></div><div id="ibxQuickSuggestions" class="ibx-quick-suggestions"></div><div class="row" style="align-items:flex-end"><textarea id="ibxText" rows="2" placeholder="Nhập tin nhắn… (-ld: AI làm giúp; -lb: lên bill; -cn: bổ sung bill; -xhd: hóa đơn nháp MISA; Enter để gửi)"></textarea><input type="file" id="ibxFile" multiple accept="image/png,image/jpeg,image/gif,image/webp,.pdf,.doc,.docx,.xls,.xlsx" hidden><button class="ghost" id="ibxAttach" title="Chọn tối đa 6 ảnh hoặc một file Word, Excel, PDF">📎</button><button class="ghost" id="ibxDelegate" style="display:none" title="Lệnh nội bộ, không gửi -ld cho khách">AI làm giúp</button><button id="ibxSend">Gửi</button></div></div></div>';
+      '<div class="ibx-compose" id="ibxCompose" style="display:none"><div id="ibxReply"></div><div id="ibxImg"></div><div id="ibxQuickSuggestions" class="ibx-quick-suggestions"></div><div class="row" style="align-items:flex-end"><textarea id="ibxText" rows="2" placeholder="Nhập tin nhắn… (-ld: AI làm giúp; -lb: lên bill; -cn: bổ sung bill; -xhd: hóa đơn nháp MISA; -xuat: chưa bật; Enter để gửi)"></textarea><input type="file" id="ibxFile" multiple accept="image/png,image/jpeg,image/gif,image/webp,.pdf,.doc,.docx,.xls,.xlsx" hidden><button class="ghost" id="ibxAttach" title="Chọn tối đa 6 ảnh hoặc một file Word, Excel, PDF">📎</button><button class="ghost" id="ibxDelegate" style="display:none" title="Lệnh nội bộ, không gửi -ld cho khách">AI làm giúp</button><button id="ibxSend">Gửi</button></div></div></div>';
     m.appendChild(wrap);
 
     function stopEs() { if (S.es) { try { S.es.close(); } catch (e) {} S.es = null; } }
@@ -4105,7 +4105,7 @@ export const INDEX_HTML = `<!doctype html>
     function orchidStaffCommand() {
       var command = $("#ibxText").value.trim().toLowerCase();
       return ["cdf2a276-fa3d-4fe3-a46b-3ce1162a7678", "657116ed-7570-4f2e-8550-a3d323618724", "6bc2dc02-3d10-4737-931d-a37532bcabb2"].indexOf(S.ch) >= 0 &&
-        ["-ld", "-lb", "-cn", "-xhd"].indexOf(command) >= 0 ? command : "";
+        ["-ld", "-lb", "-cn", "-xhd", "-xuat"].indexOf(command) >= 0 ? command : "";
     }
     function chooseQuickReply(item) {
       var input = $("#ibxText"), token = S.quickToken;
