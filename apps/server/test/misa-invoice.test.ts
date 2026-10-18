@@ -56,5 +56,7 @@ describe("MISA invoice draft", () => {
     expect(invoiceRequestFingerprint(messages)).toBe(invoiceRequestFingerprint([...messages, row("cmd-2", "out", "-xhd")]));
     expect(invoiceRequestFingerprint([...messages, row("req-2", "in", "xuất hóa đơn đơn mới")]))
       .not.toBe(invoiceRequestFingerprint(messages));
+    expect(invoiceRequestFingerprint([row("no", "in", "không lấy hóa đơn đâu")])).toBeNull();
+    expect(invoiceRequestFingerprint([row("old", "in", "thông tin XHD như cũ nhé")])).not.toBeNull();
   });
 });

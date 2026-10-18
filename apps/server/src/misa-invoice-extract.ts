@@ -12,7 +12,7 @@ export interface InvoiceEvidence {
   totalPrice: number;
 }
 
-const REQUEST = /(?:xuất|xuat|lấy|lay|làm|lam|lên|len|cần|can).{0,25}(?:hóa đơn|hoá đơn|hoa don|hđ|hd|xhd)|(?:thông tin|thong tin).{0,20}xhd/i;
+const REQUEST = /(?:xuất|xuat|lấy|lay|làm|lam|lên|len|cần|can).{0,25}(?:hóa đơn|hoá đơn|hoa don|hđ|hd|xhd)|(?:thông tin|thong tin).{0,20}xhd|(?:hóa đơn|hoá đơn|hoa don|xhd).{0,15}(?:như cũ|nhu cu)/i;
 const NO_INVOICE = /(?:không|ko|k|chẳng|chang).{0,12}(?:lấy|lay|xuất|xuat|cần|can).{0,20}(?:hóa đơn|hoá đơn|hoa don|xhd)/i;
 
 /** One customer invoice request anchors exactly one external draft, even if staff repeats -xhd. */
