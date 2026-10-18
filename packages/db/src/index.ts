@@ -22,6 +22,7 @@ export * from "./seed.js";
 export * from "./api-repo.js";
 export * from "./inbox-repo.js";
 export * from "./orchid-order-repo.js";
+export * from "./orchid-stem-report-repo.js";
 export * from "./mcp-oauth-repo.js";
 export * from "./browser-repo.js";
 export * from "./kiotviet-repo.js";
