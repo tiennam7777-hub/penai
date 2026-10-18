@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildOrchidStemReport, filterOrchidStemReport, orchidStemDateBounds, parseOrchidStemText } from "../src/orchid-stem-report.js";
+import { INDEX_HTML } from "../src/ui.js";
 
 describe("orchid stem report", () => {
   it("reads the actual group caption formats", () => {
@@ -81,5 +82,11 @@ describe("orchid stem report", () => {
     expect(selected.monthly.map(x => x.stems)).toEqual([6]);
     expect(selected.daily.map(x => x.stems)).toEqual([6]);
     expect(selected.review.map(x => x.msgId)).toEqual(["c"]);
+  });
+
+  it("keeps the date patterns intact in the browser script", () => {
+    // ui.ts is a template literal: a single backslash would disappear before the browser sees it.
+    expect(INDEX_HTML).toContain("/^\\d{4}-\\d{2}-\\d{2}$/");
+    expect(INDEX_HTML).toContain("/^20\\d{2}-(0[1-9]|1[0-2])$/");
   });
 });

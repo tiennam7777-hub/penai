@@ -62,9 +62,10 @@ export const INDEX_HTML = `<!doctype html>
   .stat .n { font-size: 1.8rem; font-weight: 700; }
   .stat .l { opacity: .6; font-size: .82rem; }
   .stem-report { max-width: 1100px; margin: 0 auto; }
-  .stem-report .stem-toolbar { display:grid; grid-template-columns:minmax(145px,1fr) minmax(145px,1fr) minmax(200px,1.4fr) auto; align-items:end; gap:10px; }
-  .stem-report .stem-toolbar label { margin:0; }
-  .stem-report .stem-toolbar input, .stem-report .stem-toolbar select { display:block; margin-top:5px; width:100%; box-sizing:border-box; }
+  .stem-report .stem-monthbar { display:flex; align-items:end; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  .stem-report .stem-monthbar label, .stem-report .stem-toolbar label { margin:0; }
+  .stem-report .stem-monthbar input, .stem-report .stem-toolbar input, .stem-report .stem-toolbar select { display:block; margin-top:5px; width:100%; box-sizing:border-box; }
+  .stem-report .stem-toolbar { display:grid; grid-template-columns:minmax(145px,1fr) minmax(145px,1fr) minmax(200px,1.4fr) auto; align-items:end; gap:10px; margin-top:12px; padding-top:12px; border-top:1px solid var(--border); }
   .stem-report .stem-toolbar .row { white-space:nowrap; }
   .stem-report .stem-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin:16px 0; }
   .stem-report .stem-metric { padding:14px; border:1px solid var(--border); border-radius:10px; background:rgba(128,128,128,.055); }
@@ -992,15 +993,17 @@ export const INDEX_HTML = `<!doctype html>
     var today = new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 10);
     var params = new URLSearchParams(state.routeQuery || "");
     var month = params.get("month") || "";
-    var monthValid = /^20\d{2}-(0[1-9]|1[0-2])$/.test(month);
+    var monthValid = /^20\\d{2}-(0[1-9]|1[0-2])$/.test(month);
     var monthEnd = monthValid ? new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).toISOString().slice(0, 10) : today;
     var selectedFrom = params.get("from") || (monthValid ? month + "-01" : today.slice(0, 7) + "-01");
     var selectedTo = params.get("to") || monthEnd;
     var selectedSender = params.get("sender") || "";
-    c.innerHTML = '<div class="stem-toolbar"><label>Từ ngày<input id="stemFrom" type="date" value="' + esc(selectedFrom) + '"></label>' +
+    c.innerHTML = '<div class="stem-monthbar"><label>Tháng báo cáo<input id="stemMonth" type="month" value="' + esc(monthValid ? month : selectedFrom.slice(0, 7)) + '"></label>' +
+      '<div class="row"><button id="stemMonthLoad">Xem báo cáo</button><button id="stemExport" class="ghost">Tải Excel</button></div></div>' +
+      '<div class="stem-toolbar"><label>Từ ngày<input id="stemFrom" type="date" value="' + esc(selectedFrom) + '"></label>' +
       '<label>Đến ngày<input id="stemTo" type="date" value="' + esc(selectedTo) + '"></label>' +
       '<label>Nhân viên<select id="stemSender"><option value="">Tất cả nhân viên</option></select></label>' +
-      '<div class="row"><button id="stemLoad">Áp dụng</button><button id="stemExport" class="ghost">Tải Excel</button></div></div>' +
+      '<div class="row"><button id="stemLoad">Áp dụng lọc</button></div></div>' +
       '<p class="muted" style="margin:7px 0 0">File Excel dùng đúng khoảng ngày và nhân viên đang chọn.</p>' +
       '<div class="stem-guide"><strong>Cách ghi để được cộng vào báo cáo</strong><b>c = cành, v = vòi.</b> Ví dụ <b>C Chi (8c) Lộc</b> tính 8 cành cho C Chi; chữ sau ngoặc là ghi chú. Với chậu nhiều vòi, lấy số cành nhân số vòi: <b>Hà cii (3c 2v) = 6 cành</b>, <b>A trung. Cảnh 5 2v = 10 cành</b>. Cũng có thể gửi tên khách rồi số cành bằng tin tiếp theo trong 5 phút, cùng tài khoản. Tin có nhiều số nhưng không rõ cành/vòi, giá hoặc phí ship sẽ nằm ở “Tin cần kiểm tra”.</div>' +
       '<div id="stemSummary" aria-live="polite">Đang tải...</div>' +
@@ -1021,7 +1024,7 @@ export const INDEX_HTML = `<!doctype html>
     }
     function filterQuery() {
       var from = $("#stemFrom", c).value, to = $("#stemTo", c).value;
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) {
+      if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(from) || !/^\\d{4}-\\d{2}-\\d{2}$/.test(to) || from > to) {
         $("#stemSummary", c).textContent = "Chọn Từ ngày trước hoặc bằng Đến ngày.";
         return null;
       }
@@ -1105,6 +1108,16 @@ export const INDEX_HTML = `<!doctype html>
         return query;
       }).catch(function (e) { if (current === loadId) $("#stemSummary", c).textContent = e.message; return null; });
     }
+    $("#stemMonthLoad", c).onclick = function () {
+      var selectedMonth = $("#stemMonth", c).value;
+      if (!/^20\\d{2}-(0[1-9]|1[0-2])$/.test(selectedMonth)) {
+        $("#stemSummary", c).textContent = "Chọn tháng báo cáo hợp lệ."; return;
+      }
+      $("#stemFrom", c).value = selectedMonth + "-01";
+      $("#stemTo", c).value = new Date(Date.UTC(Number(selectedMonth.slice(0, 4)), Number(selectedMonth.slice(5, 7)), 0)).toISOString().slice(0, 10);
+      $("#stemSender", c).value = "";
+      load();
+    };
     $("#stemLoad", c).onclick = load;
     $("#stemExport", c).onclick = function () {
       load().then(function (query) { if (query) window.location.href = "/v1/orchid-stem-report.xlsx?" + query; });
