@@ -90,22 +90,10 @@ export async function verifyMisaWebConnection(login: MisaLogin): Promise<void> {
 }
 
 /** Admin-only, read-only diagnostics for a RefID already recorded by PenAI. */
-export async function inspectMisaInvoiceReadback(login: MisaLogin, refId: string): Promise<Record<string, {
-  httpStatus: number; success: unknown; topKeys: string[]; dataKind: string;
-  dataKeys: string[]; nestedKeys: string[]; refId: unknown; publishStatus: unknown;
-  errorCode: unknown; error: string; content: string;
-  invoiceType: unknown; sourceType: unknown; templateNo: unknown; templateId: unknown;
-  detailsCount: number; detailKeys: string[];
-}>> {
+export async function inspectMisaInvoiceReadback(login: MisaLogin, refId: string): Promise<Record<string, unknown>> {
   if (!/^[0-9a-f-]{36}$/i.test(refId)) throw new Error("Mã hóa đơn MISA không hợp lệ");
   const { token } = await misaWebToken(login);
-  const output: Record<string, {
-    httpStatus: number; success: unknown; topKeys: string[]; dataKind: string;
-    dataKeys: string[]; nestedKeys: string[]; refId: unknown; publishStatus: unknown;
-    errorCode: unknown; error: string; content: string;
-    invoiceType: unknown; sourceType: unknown; templateNo: unknown; templateId: unknown;
-    detailsCount: number; detailKeys: string[];
-  }> = {};
+  const output: Record<string, unknown> = {};
   for (const [variant, path] of [["legacy", "SAInvoice/Get"], ["v3", "code/v3sainvoice"]]) {
     const response = await fetch(`${BASE}/v2/${path}/${encodeURIComponent(refId)}`, {
       headers: { Authorization: `Bearer ${token}`, TaxCode: login.taxCode },
@@ -130,6 +118,33 @@ export async function inspectMisaInvoiceReadback(login: MisaLogin, refId: string
       detailKeys: Object.keys(payloadObject(details[0])).slice(0, 50),
     };
   }
+  const templateResponse = await fetch(`${BASE}/v2/code/v3common/template`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, TaxCode: login.taxCode, "Content-Type": "application/json" },
+    body: JSON.stringify({ TypeInvoice: 1, TaxCode: login.taxCode,
+      UserName: login.username, Password: login.password }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  const templateBody = await readPayload(templateResponse);
+  let templateData: unknown = templateBody.data;
+  if (typeof templateData === "string") {
+    try { templateData = JSON.parse(templateData); } catch { templateData = null; }
+  }
+  const list = Array.isArray(templateData) ? templateData :
+    (Array.isArray(payloadObject(templateData).Data) ? payloadObject(templateData).Data as unknown[] : []);
+  output.templateList = {
+    httpStatus: templateResponse.status, success: templateBody.success,
+    errorCode: templateBody.errorCode ?? null,
+    error: String(templateBody.error ?? "").slice(0, 200),
+    dataKind: Array.isArray(templateData) ? "array" : typeof templateData,
+    dataKeys: Object.keys(payloadObject(templateData)).slice(0, 30),
+    count: list.length,
+    samples: list.slice(0, 5).map((item) => {
+      const t = payloadObject(item);
+      return { keys: Object.keys(t).slice(0, 30), series: t.InvSeries ?? t.invSeries ?? null,
+        templateNo: t.InvTemplateNo ?? null, templateId: t.InvoiceTemplateID ?? null };
+    }),
+  };
   return output;
 }
 
