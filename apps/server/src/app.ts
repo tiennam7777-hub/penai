@@ -293,7 +293,7 @@ import {
 import { registerLibraryRoutes } from "./library.js";
 import { registerInboxRoutes } from "./inbox.js";
 import { buildXlsx, type XlsxCell } from "./xlsx.js";
-import { buildOrchidStemReport, orchidStemWorkbook, refreshOrchidStemFile } from "./orchid-stem-report.js";
+import { buildOrchidStemReport, filterOrchidStemReport, orchidStemDateBounds, orchidStemWorkbook, refreshOrchidStemFile } from "./orchid-stem-report.js";
 import { isMcpPublicPath, registerMcpServerRoutes } from "./mcp-server.js";
 import { registerBrowserRoutes } from "./browser-runtime.js";
 
@@ -1201,23 +1201,44 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // ===== KiotViet Retail API: admin-only credentials and order draft status =====
   async function orchidStemReport(req: FastifyRequest, reply: FastifyReply) {
     if (!requireModeratorOrRole(req, reply, "ws_admin")) return null;
-    const month = String((req.query as { month?: string }).month ?? "");
-    if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(month)) {
-      reply.code(400).send({ error: "Tháng phải có dạng YYYY-MM" }); return null;
+    const query = req.query as { month?: string; from?: string; to?: string; sender?: string };
+    const month = String(query.month ?? "");
+    const hasRange = query.from !== undefined || query.to !== undefined;
+    let from: string;
+    let to: string;
+    if (hasRange) {
+      from = String(query.from ?? ""); to = String(query.to ?? "");
+    } else {
+      if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(month)) {
+        reply.code(400).send({ error: "Chọn Từ ngày và Đến ngày hợp lệ" }); return null;
+      }
+      const [year, mon] = month.split("-").map(Number);
+      from = `${month}-01`;
+      to = new Date(Date.UTC(year!, mon!, 0)).toISOString().slice(0, 10);
     }
+    const bounds = orchidStemDateBounds(from, to);
+    if (!bounds) { reply.code(400).send({ error: "Khoảng ngày không hợp lệ: Từ ngày phải trước hoặc bằng Đến ngày" }); return null; }
+    const sender = String(query.sender ?? "").trim();
+    if (sender.length > 100) { reply.code(400).send({ error: "Tên nhân viên quá dài" }); return null; }
     const channels = await listChannels(db, req.authCtx);
     const channel = channels.find(c => c.kind === "zalo_personal" &&
       typeof (c.config as Record<string, unknown>)["orchid_stem_report_group"] === "string");
     if (!channel) { reply.code(404).send({ error: "Chưa cấu hình nhóm báo cáo cắm hoa" }); return null; }
     const group = String((channel.config as Record<string, unknown>)["orchid_stem_report_group"]);
     if (!/^group:\d+$/.test(group)) { reply.code(500).send({ error: "ID nhóm báo cáo không hợp lệ" }); return null; }
-    const [year, mon] = month.split("-").map(Number);
-    const start = new Date(Date.UTC(year!, mon! - 1, 1) - 7 * 3600_000);
-    const end = new Date(Date.UTC(year!, mon!, 1) - 7 * 3600_000);
-    const messages = await listOrchidStemMessages(db, req.authCtx, channel.id, group.slice(6), start, end);
-    await refreshOrchidStemFile(db, req.authCtx, channel.id, group.slice(6), month, deps.config.dataDir);
-    return { month, channelName: channel.name, groupId: group.slice(6),
-      libraryPath: `shared/bao-cao-cam-hoa/bao-cao-cam-hoa-${month}.xlsx`, ...buildOrchidStemReport(messages) };
+    const messages = await listOrchidStemMessages(db, req.authCtx, channel.id, group.slice(6), bounds.start, bounds.end);
+    if (from.slice(0, 7) === to.slice(0, 7)) {
+      await refreshOrchidStemFile(db, req.authCtx, channel.id, group.slice(6), from.slice(0, 7), deps.config.dataDir);
+    }
+    const all = buildOrchidStemReport(messages);
+    const senders = [...new Set([...all.monthly.map(x => x.senderName), ...all.review.map(x => x.senderName)])]
+      .sort((a, b) => a.localeCompare(b, "vi"));
+    const filtered = filterOrchidStemReport(all, sender);
+    return { month: month || from.slice(0, 7), from, to, sender, senders,
+      channelName: channel.name, groupId: group.slice(6),
+      libraryPath: from.slice(0, 7) === to.slice(0, 7)
+        ? `shared/bao-cao-cam-hoa/bao-cao-cam-hoa-${from.slice(0, 7)}.xlsx` : null,
+      ...filtered };
   }
 
   app.get("/v1/orchid-stem-report", async (req, reply) => {
@@ -1227,9 +1248,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.get("/v1/orchid-stem-report.xlsx", async (req, reply) => {
     const report = await orchidStemReport(req, reply);
     if (!report) return;
-    const buf = orchidStemWorkbook(report);
+    const buf = orchidStemWorkbook(report, { from: report.from, to: report.to, sender: report.sender });
+    const filename = `bao-cao-cam-hoa-${report.from}-${report.to}${report.sender ? "-nhan-vien" : ""}.xlsx`;
     return reply.header("cache-control", "no-store")
-      .header("content-disposition", `attachment; filename="bao-cao-cam-hoa-${report.month}.xlsx"`)
+      .header("content-disposition", `attachment; filename="${filename}"`)
       .type("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet").send(buf);
   });
 

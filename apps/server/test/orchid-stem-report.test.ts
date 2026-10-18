@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildOrchidStemReport, parseOrchidStemText } from "../src/orchid-stem-report.js";
+import { buildOrchidStemReport, filterOrchidStemReport, orchidStemDateBounds, parseOrchidStemText } from "../src/orchid-stem-report.js";
 
 describe("orchid stem report", () => {
   it("reads the actual group caption formats", () => {
@@ -59,5 +59,27 @@ describe("orchid stem report", () => {
     expect(report.daily.map(x => x.stems)).toEqual([6, 10]);
     expect(report.monthly.map(x => x.stems)).toEqual([6, 10]);
     expect(report.review).toEqual([]);
+  });
+
+  it("uses inclusive Vietnam dates across months and rejects invalid ranges", () => {
+    const bounds = orchidStemDateBounds("2026-10-18", "2026-11-02");
+    expect(bounds?.start.toISOString()).toBe("2026-10-17T17:00:00.000Z");
+    expect(bounds?.end.toISOString()).toBe("2026-11-02T17:00:00.000Z");
+    expect(orchidStemDateBounds("2026-02-30", "2026-03-01")).toBeNull();
+    expect(orchidStemDateBounds("2026-11-02", "2026-10-18")).toBeNull();
+  });
+
+  it("filters all totals, details and review items to one employee", () => {
+    const sentAt = "2026-10-18T08:00:00.000Z";
+    const report = buildOrchidStemReport([
+      { msgId: "a", senderId: "one", senderName: "Văn Hoàng", text: "Hà cii(3c 2v)", sentAt },
+      { msgId: "b", senderId: "two", senderName: "Trung Toàn", text: "Chị Lan 8c", sentAt },
+      { msgId: "c", senderId: "one", senderName: "Văn Hoàng", text: "Khách 8 9", sentAt },
+    ]);
+    const selected = filterOrchidStemReport(report, "Văn Hoàng");
+    expect(selected.entries.map(x => x.msgId)).toEqual(["a"]);
+    expect(selected.monthly.map(x => x.stems)).toEqual([6]);
+    expect(selected.daily.map(x => x.stems)).toEqual([6]);
+    expect(selected.review.map(x => x.msgId)).toEqual(["c"]);
   });
 });

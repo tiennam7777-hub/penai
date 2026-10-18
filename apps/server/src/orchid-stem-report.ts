@@ -71,6 +71,22 @@ export function orchidStemDay(iso: string): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Ho_Chi_Minh", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
 }
 
+/** Inclusive local calendar dates, converted to a half-open UTC interval. */
+export function orchidStemDateBounds(from: string, to: string): { start: Date; end: Date } | null {
+  const valid = (value: string) => {
+    if (!/^20\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(value)) return false;
+    const [year, month, day] = value.split("-").map(Number);
+    return new Date(Date.UTC(year!, month! - 1, day!)).toISOString().slice(0, 10) === value;
+  };
+  if (!valid(from) || !valid(to) || from > to) return null;
+  const [fy, fm, fd] = from.split("-").map(Number);
+  const [ty, tm, td] = to.split("-").map(Number);
+  return {
+    start: new Date(Date.UTC(fy!, fm! - 1, fd!) - 7 * 3600_000),
+    end: new Date(Date.UTC(ty!, tm! - 1, td! + 1) - 7 * 3600_000),
+  };
+}
+
 export function buildOrchidStemReport(messages: OrchidStemMessage[]) {
   const entries: OrchidStemEntry[] = [];
   const review: OrchidStemMessage[] = [];
@@ -108,8 +124,23 @@ export function buildOrchidStemReport(messages: OrchidStemMessage[]) {
   return { entries, review, daily: [...daily.values()], monthly: [...monthly.values()] };
 }
 
-export function orchidStemWorkbook(report: ReturnType<typeof buildOrchidStemReport>): Buffer {
+export function filterOrchidStemReport(report: ReturnType<typeof buildOrchidStemReport>, sender: string) {
+  if (!sender) return report;
+  return {
+    entries: report.entries.filter(x => x.senderName === sender),
+    review: report.review.filter(x => x.senderName === sender),
+    daily: report.daily.filter(x => x.senderName === sender),
+    monthly: report.monthly.filter(x => x.senderName === sender),
+  };
+}
+
+export function orchidStemWorkbook(report: ReturnType<typeof buildOrchidStemReport>,
+  filter?: { from: string; to: string; sender: string }): Buffer {
   return buildXlsx([
+    ...(filter ? [{ name: "Bộ lọc", widths: [24, 36], rows: [
+      ["Điều kiện", "Giá trị"], ["Từ ngày", filter.from], ["Đến ngày", filter.to],
+      ["Nhân viên", filter.sender || "Tất cả"],
+    ] }] : []),
     { name: "Chi tiết", widths: [20, 25, 24, 30, 12, 48, 22], rows: [
       ["Ngày", "Người gửi", "UID người gửi", "Tên khách", "Số cành tính", "Tin gốc", "Mã tin Zalo"],
       ...report.entries.map(e => [e.day, e.senderName, e.senderId, e.customerName, e.stems, e.text, e.msgId]),
@@ -118,7 +149,7 @@ export function orchidStemWorkbook(report: ReturnType<typeof buildOrchidStemRepo
       ["Ngày", "Người gửi", "UID người gửi", "Số lượt", "Tổng cành tính"],
       ...report.daily.map(d => [d.day, d.senderName, d.senderId, d.jobs, d.stems]),
     ] },
-    { name: "Theo tháng", widths: [25, 24, 16, 16], rows: [
+    { name: "Theo nhân viên", widths: [25, 24, 16, 16], rows: [
       ["Người gửi", "UID người gửi", "Số lượt", "Tổng cành tính"],
       ...report.monthly.map(m => [m.senderName, m.senderId, m.jobs, m.stems]),
     ] },

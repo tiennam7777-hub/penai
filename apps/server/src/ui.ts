@@ -62,9 +62,10 @@ export const INDEX_HTML = `<!doctype html>
   .stat .n { font-size: 1.8rem; font-weight: 700; }
   .stat .l { opacity: .6; font-size: .82rem; }
   .stem-report { max-width: 1100px; margin: 0 auto; }
-  .stem-report .stem-toolbar { display:flex; align-items:end; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  .stem-report .stem-toolbar { display:grid; grid-template-columns:minmax(145px,1fr) minmax(145px,1fr) minmax(200px,1.4fr) auto; align-items:end; gap:10px; }
   .stem-report .stem-toolbar label { margin:0; }
-  .stem-report .stem-toolbar input { display:block; margin-top:5px; }
+  .stem-report .stem-toolbar input, .stem-report .stem-toolbar select { display:block; margin-top:5px; width:100%; box-sizing:border-box; }
+  .stem-report .stem-toolbar .row { white-space:nowrap; }
   .stem-report .stem-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin:16px 0; }
   .stem-report .stem-metric { padding:14px; border:1px solid var(--border); border-radius:10px; background:rgba(128,128,128,.055); }
   .stem-report .stem-metric strong { display:block; font-size:1.55rem; line-height:1.2; font-variant-numeric:tabular-nums; }
@@ -93,6 +94,7 @@ export const INDEX_HTML = `<!doctype html>
   .stem-report .stem-detail summary { cursor:pointer; font-weight:600; padding:9px 0; }
   .stem-report .stem-scroll { overflow-x:auto; }
   .stem-report .stem-scroll .stem-table { min-width:650px; }
+  @media (max-width:850px) { .stem-report .stem-toolbar { grid-template-columns:repeat(2,minmax(0,1fr)); } }
   @media (max-width:650px) { .stem-report .stem-summary { grid-template-columns:repeat(2,minmax(0,1fr)); } .stem-report .stem-day summary { grid-template-columns:minmax(0,1fr) 65px 75px; gap:5px; font-size:.86rem; } .stem-report .stem-table .stem-num { width:75px; } }
   /* chat */
   #chatWrap { display: flex; flex-direction: column; height: calc(100vh - 130px); }
@@ -984,17 +986,25 @@ export const INDEX_HTML = `<!doctype html>
   };
 
   PAGES["stem-report"] = function () {
-    var m = page("Báo cáo cắm hoa", "Tổng hợp số cành theo tháng, ngày và người gửi");
+    var m = page("Báo cáo cắm hoa", "Lọc số cành theo khoảng ngày và nhân viên");
     var c = card(m);
     c.classList.add("stem-report");
-    var today = new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 7);
-    var selected = new URLSearchParams(state.routeQuery || "").get("month");
-    if (!selected || selected.length !== 7 || selected.charAt(4) !== "-") selected = today;
-    c.innerHTML = '<div class="stem-toolbar"><label>Tháng báo cáo<input id="stemMonth" type="month" value="' + esc(selected) + '"></label>' +
-      '<div class="row"><button id="stemLoad">Xem báo cáo</button><button id="stemExport" class="ghost">Tải Excel</button></div></div>' +
+    var today = new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 10);
+    var params = new URLSearchParams(state.routeQuery || "");
+    var month = params.get("month") || "";
+    var monthValid = /^20\d{2}-(0[1-9]|1[0-2])$/.test(month);
+    var monthEnd = monthValid ? new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).toISOString().slice(0, 10) : today;
+    var selectedFrom = params.get("from") || (monthValid ? month + "-01" : today.slice(0, 7) + "-01");
+    var selectedTo = params.get("to") || monthEnd;
+    var selectedSender = params.get("sender") || "";
+    c.innerHTML = '<div class="stem-toolbar"><label>Từ ngày<input id="stemFrom" type="date" value="' + esc(selectedFrom) + '"></label>' +
+      '<label>Đến ngày<input id="stemTo" type="date" value="' + esc(selectedTo) + '"></label>' +
+      '<label>Nhân viên<select id="stemSender"><option value="">Tất cả nhân viên</option></select></label>' +
+      '<div class="row"><button id="stemLoad">Áp dụng</button><button id="stemExport" class="ghost">Tải Excel</button></div></div>' +
+      '<p class="muted" style="margin:7px 0 0">File Excel dùng đúng khoảng ngày và nhân viên đang chọn.</p>' +
       '<div class="stem-guide"><strong>Cách ghi để được cộng vào báo cáo</strong><b>c = cành, v = vòi.</b> Ví dụ <b>C Chi (8c) Lộc</b> tính 8 cành cho C Chi; chữ sau ngoặc là ghi chú. Với chậu nhiều vòi, lấy số cành nhân số vòi: <b>Hà cii (3c 2v) = 6 cành</b>, <b>A trung. Cảnh 5 2v = 10 cành</b>. Cũng có thể gửi tên khách rồi số cành bằng tin tiếp theo trong 5 phút, cùng tài khoản. Tin có nhiều số nhưng không rõ cành/vòi, giá hoặc phí ship sẽ nằm ở “Tin cần kiểm tra”.</div>' +
       '<div id="stemSummary" aria-live="polite">Đang tải...</div>' +
-      '<section class="stem-section"><h3>Theo người gửi</h3><p class="muted stem-section-note">Xếp theo tổng số cành trong tháng.</p><div id="stemMonthly"></div></section>' +
+      '<section class="stem-section"><h3>Theo người gửi</h3><p class="muted stem-section-note">Xếp theo tổng số cành trong khoảng ngày đã chọn.</p><div id="stemMonthly"></div></section>' +
       '<section class="stem-section"><h3>Theo ngày</h3><p class="muted stem-section-note">Mỗi ngày có tổng riêng; bấm vào ngày để xem từng người.</p><div id="stemDaily"></div></section>' +
       '<details class="stem-detail"><summary id="stemDetailTitle">Chi tiết từng tin</summary><div id="stemDetail" class="stem-scroll"></div></details>' +
       '<details class="stem-detail" id="stemReviewSection"><summary id="stemReviewTitle">Tin cần kiểm tra</summary><p class="muted">Tin này chưa được cộng vào báo cáo. Đối chiếu trước khi chốt số liệu.</p><div id="stemReview" class="stem-scroll"></div></details>' +
@@ -1004,10 +1014,40 @@ export const INDEX_HTML = `<!doctype html>
       var parts = day.split("-");
       return parts.length === 3 ? parts[2] + "/" + parts[1] + "/" + parts[0] : day;
     }
+    if (selectedSender) {
+      var initialOption = document.createElement("option");
+      initialOption.value = selectedSender; initialOption.textContent = selectedSender;
+      $("#stemSender", c).appendChild(initialOption); $("#stemSender", c).value = selectedSender;
+    }
+    function filterQuery() {
+      var from = $("#stemFrom", c).value, to = $("#stemTo", c).value;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) {
+        $("#stemSummary", c).textContent = "Chọn Từ ngày trước hoặc bằng Đến ngày.";
+        return null;
+      }
+      var q = new URLSearchParams({ from: from, to: to });
+      var sender = $("#stemSender", c).value;
+      if (sender) q.set("sender", sender);
+      return q.toString();
+    }
+    var loadId = 0;
     function load() {
-      var month = $("#stemMonth", c).value;
+      var query = filterQuery();
+      if (!query) return Promise.resolve(null);
+      var current = ++loadId;
       $("#stemSummary", c).textContent = "Đang tải...";
-      api("/v1/orchid-stem-report?month=" + encodeURIComponent(month)).then(function (r) {
+      return api("/v1/orchid-stem-report?" + query).then(function (r) {
+        if (current !== loadId) return null;
+        var select = $("#stemSender", c), chosen = select.value;
+        select.innerHTML = '<option value="">Tất cả nhân viên</option>';
+        (r.senders || []).forEach(function (name) {
+          var option = document.createElement("option"); option.value = name; option.textContent = name; select.appendChild(option);
+        });
+        if (chosen && (r.senders || []).indexOf(chosen) < 0) {
+          var missing = document.createElement("option"); missing.value = chosen; missing.textContent = chosen + " (không có dữ liệu)"; select.appendChild(missing);
+        }
+        select.value = chosen;
+        history.replaceState(null, "", "#/stem-report?" + query);
         var monthlyRows = r.monthly.slice().sort(function (a, b) { return b.stems - a.stems || a.senderName.localeCompare(b.senderName, "vi"); });
         var total = monthlyRows.reduce(function (n, x) { return n + x.stems; }, 0);
         var days = {};
@@ -1017,7 +1057,7 @@ export const INDEX_HTML = `<!doctype html>
         });
         var dayRows = Object.keys(days).sort().reverse().map(function (key) { return days[key]; });
         var box = $("#stemSummary", c);
-        box.innerHTML = '<div class="stem-summary">' +
+        box.innerHTML = '<p class="muted" style="margin:11px 0 0">Đang xem: ' + dayLabel(r.from) + ' – ' + dayLabel(r.to) + ' · ' + esc(r.sender || "Tất cả nhân viên") + '</p><div class="stem-summary">' +
           '<div class="stem-metric"><strong>' + number(total) + '</strong><span>Tổng cành</span></div>' +
           '<div class="stem-metric"><strong>' + number(r.entries.length) + '</strong><span>Lượt ghi nhận</span></div>' +
           '<div class="stem-metric"><strong>' + number(dayRows.length) + '</strong><span>Ngày có dữ liệu</span></div>' +
@@ -1037,7 +1077,7 @@ export const INDEX_HTML = `<!doctype html>
         mt.querySelectorAll("th")[3].className = "stem-num";
         monthly.appendChild(mt);
         var daily = $("#stemDaily", c); daily.innerHTML = "";
-        if (!dayRows.length) daily.innerHTML = '<p class="muted">Chưa có dữ liệu trong tháng này.</p>';
+        if (!dayRows.length) daily.innerHTML = '<p class="muted">Chưa có dữ liệu theo bộ lọc này.</p>';
         dayRows.forEach(function (d, i) {
           var group = el("details", { "class": "stem-day" });
           if (i === 0) group.open = true;
@@ -1062,10 +1102,13 @@ export const INDEX_HTML = `<!doctype html>
         var rt = table(["Thời điểm", "Người gửi", "Tin chưa cộng"], r.review, function (x) {
           var tr = el("tr"); tr.innerHTML = "<td>" + esc(new Date(x.sentAt).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })) + "</td><td>" + esc(x.senderName) + "</td><td>" + esc(x.text) + "</td>"; return tr;
         }); rt.className = "stem-table"; review.appendChild(rt);
-      }).catch(function (e) { $("#stemSummary", c).textContent = e.message; });
+        return query;
+      }).catch(function (e) { if (current === loadId) $("#stemSummary", c).textContent = e.message; return null; });
     }
     $("#stemLoad", c).onclick = load;
-    $("#stemExport", c).onclick = function () { window.location.href = "/v1/orchid-stem-report.xlsx?month=" + encodeURIComponent($("#stemMonth", c).value); };
+    $("#stemExport", c).onclick = function () {
+      load().then(function (query) { if (query) window.location.href = "/v1/orchid-stem-report.xlsx?" + query; });
+    };
     load();
   };
 
