@@ -89,6 +89,29 @@ export async function verifyMisaWebConnection(login: MisaLogin): Promise<void> {
   await misaWebToken(login, AbortSignal.timeout(20_000));
 }
 
+/** Admin-only, read-only diagnostics for a RefID already recorded by PenAI. */
+export async function inspectMisaInvoiceReadback(login: MisaLogin, refId: string): Promise<{
+  httpStatus: number; success: unknown; topKeys: string[]; dataKind: string;
+  dataKeys: string[]; nestedKeys: string[]; refId: unknown; publishStatus: unknown;
+}> {
+  if (!/^[0-9a-f-]{36}$/i.test(refId)) throw new Error("Mã hóa đơn MISA không hợp lệ");
+  const { token } = await misaWebToken(login);
+  const response = await fetch(`${BASE}/v2/SAInvoice/Get/${encodeURIComponent(refId)}`, {
+    headers: { Authorization: `Bearer ${token}`, TaxCode: login.taxCode },
+    signal: AbortSignal.timeout(15_000),
+  });
+  const body = await readPayload(response);
+  const data = payloadObject(body.data ?? body.Data);
+  const nested = payloadObject(data.master ?? data.Master ?? data.invoice ?? data.Invoice);
+  return {
+    httpStatus: response.status, success: body.success, topKeys: Object.keys(body).slice(0, 30),
+    dataKind: Array.isArray(body.data) ? "array" : typeof body.data,
+    dataKeys: Object.keys(data).slice(0, 30), nestedKeys: Object.keys(nested).slice(0, 30),
+    refId: nested.RefID ?? data.RefID ?? null,
+    publishStatus: nested.PublishStatus ?? data.PublishStatus ?? null,
+  };
+}
+
 /** Fetch the preview only for a saved draft. Reject HTML/JSON errors and oversized files. */
 export async function previewMisaUnpublishedInvoice(login: MisaLogin, refId: string): Promise<Buffer> {
   if (!/^[0-9a-f-]{36}$/i.test(refId)) throw new Error("Mã hóa đơn nháp MISA không hợp lệ");
@@ -108,10 +131,10 @@ export async function previewMisaUnpublishedInvoice(login: MisaLogin, refId: str
 }
 
 /** Result is accepted only after MISA GET confirms the same RefID remains unpublished. */
-export async function createMisaUnpublishedInvoice(login: MisaLogin, input: MisaDraftInput): Promise<{ refId: string }> {
+export async function createMisaUnpublishedInvoice(login: MisaLogin, input: MisaDraftInput,
+  refId = randomUUID()): Promise<{ refId: string }> {
   const signal = AbortSignal.timeout(25_000);
   const { token, companyId } = await misaWebToken(login, signal);
-  const refId = randomUUID();
   const detailId = randomUUID();
   const amount = input.amountBeforeVat;
   if (!Number.isSafeInteger(amount) || amount < 1 ||
@@ -152,10 +175,12 @@ export async function createMisaUnpublishedInvoice(login: MisaLogin, input: Misa
   const response = await fetch(`${BASE}/v2/SAInvoice/Insert`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, TaxCode: login.taxCode, "Content-Type": "application/json" },
-    body: JSON.stringify({ detail: JSON.stringify(detail), data: JSON.stringify(data) }), signal,
+    body: JSON.stringify({ detail: JSON.stringify(detail), data: JSON.stringify(data), EntityState: 1 }), signal,
   });
   const body = await readPayload(response);
-  if (!response.ok || body.success === false || body.Success === false || body.error || body.ErrorCode) {
+  const errorCodes = body.errorCode ?? body.ErrorCode;
+  if (!response.ok || body.success !== true || body.error ||
+      (Array.isArray(errorCodes) ? errorCodes.length > 0 : !!errorCodes)) {
     throw new Error("MISA từ chối lưu hóa đơn nháp; cần kiểm tra phản hồi trong hệ thống MISA");
   }
   const read = await fetch(`${BASE}/v2/SAInvoice/Get/${encodeURIComponent(refId)}`, {

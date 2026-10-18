@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 import { decryptSecret, encryptSecret, logger } from "@penai/shared";
@@ -673,9 +673,10 @@ export function makeInboundHandler(
         throw new Error(`Cần hỏi khách xác nhận đúng công ty ${buyer.name} và chờ khách đồng ý trước khi lập nháp`);
       }
       const fingerprint = invoiceRequestFingerprint(history) ?? staffInvoiceFingerprint(evidence);
+      const refId = randomUUID();
       const claimId = await claimMisaInvoiceDraft(db, ctx, {
         channelId: channel.id, threadId, fingerprint,
-        buyerName: buyer.name, totalAmount: line.totalAfterVat,
+        buyerName: buyer.name, totalAmount: line.totalAfterVat, refId,
       });
       if (!claimId) throw new Error("Yêu cầu này đã có hóa đơn nháp hoặc đang cần kiểm tra trên MISA; không tạo trùng");
       try {
@@ -687,7 +688,7 @@ export function makeInboundHandler(
           quantity: line.quantity, unitPrice: line.unitPrice,
           amountBeforeVat: line.amountBeforeVat, vatRate: line.vatRate,
           series: credentials.invoiceSeries,
-        });
+        }, refId);
         await finishMisaInvoiceDraft(db, ctx, claimId, { refId: saved.refId });
         const accountingGroupId = channel.config["orchid_invoice_accounting_group"];
         let accountingNotice = "";

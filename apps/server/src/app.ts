@@ -196,7 +196,7 @@ import {
 } from "@penai/core";
 import { CRON_MIN_INTERVAL_MS, deliverLabel } from "./cron-tools.js";
 import { checkKiotVietOrchidProduct, findKiotVietUser, verifyKiotVietRetailConnection } from "./kiotviet-api.js";
-import { verifyMisaWebConnection } from "./misa-api.js";
+import { inspectMisaInvoiceReadback, verifyMisaWebConnection } from "./misa-api.js";
 import {
   isChannelKindSupported,
   supportedChannelKinds,
@@ -1296,6 +1296,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.get("/v1/misa/drafts", async (req, reply) => {
     if (!requireRole(req, reply, "ws_admin")) return;
     return { drafts: await listMisaInvoiceDrafts(db, req.authCtx) };
+  });
+
+  app.get("/v1/misa/drafts/:refId/readback", async (req, reply) => {
+    if (!requireRole(req, reply, "ws_admin")) return;
+    const refId = String((req.params as { refId?: string }).refId ?? "");
+    const drafts = await listMisaInvoiceDrafts(db, req.authCtx);
+    if (!drafts.some((draft) => draft.refId === refId)) {
+      return reply.code(404).send({ error: "Không có hóa đơn này trong sổ PenAI" });
+    }
+    const row = await getMisaCredentials(db, req.authCtx);
+    if (!row) return reply.code(404).send({ error: "Chưa lưu kết nối MISA" });
+    return { readback: await inspectMisaInvoiceReadback({ taxCode: row.taxCode,
+      username: row.username, password: decryptSecret(row.passwordEncrypted) }, refId) };
   });
 
   app.get("/v1/misa/verify-saved", async (req, reply) => {

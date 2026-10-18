@@ -25,7 +25,7 @@ describe("MISA invoice draft", () => {
   it("only inserts an unpublished invoice and confirms its saved state", async () => {
     const calls = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith("/v2/oauth")) return new Response(JSON.stringify({ access_token: "a".repeat(30), TaxCode: login.taxCode, CompanyID: 9480 }));
-      if (url.endsWith("/SAInvoice/Insert")) return new Response(JSON.stringify({ success: true }));
+      if (url.endsWith("/SAInvoice/Insert")) return new Response(JSON.stringify({ success: true, errorCode: [] }));
       const refId = url.split("/").at(-1);
       return new Response(JSON.stringify({ data: { RefID: refId, PublishStatus: 0 } }));
     });
@@ -40,6 +40,7 @@ describe("MISA invoice draft", () => {
     expect(saved.refId).toMatch(/^[0-9a-f-]{36}$/);
     const insert = calls.mock.calls.find((call) => String(call[0]).endsWith("/SAInvoice/Insert"))!;
     const body = JSON.parse(String(insert[1]?.body));
+    expect(body.EntityState).toBe(1);
     expect(JSON.parse(body.data).PublishStatus).toBe(0);
     expect(JSON.parse(body.data).InvNo).toBe("<Chưa cấp số>");
     expect(JSON.parse(body.data).ReceiverName).toBe("");

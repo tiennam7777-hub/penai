@@ -24,12 +24,13 @@ export async function saveMisaCredentials(db: Db, ctx: WorkspaceContext,
 /** Claim before any external POST. Never automatically retry a failed or timed-out request. */
 export async function claimMisaInvoiceDraft(db: Db, ctx: WorkspaceContext, input: {
   channelId: string; threadId: string; fingerprint: string; buyerName: string; totalAmount: number;
+  refId: string;
 }): Promise<string | null> {
   const result = await withWorkspace(db, ctx, (tx) => tx.execute(sql`
     INSERT INTO misa_invoice_drafts
-      (workspace_id, source_channel_id, source_thread_id, request_fingerprint, status, buyer_name, total_amount)
+      (workspace_id, source_channel_id, source_thread_id, request_fingerprint, status, buyer_name, total_amount, misa_ref_id)
     VALUES (${ctx.workspaceId}, ${input.channelId}, ${input.threadId}, ${input.fingerprint},
-      'processing', ${input.buyerName}, ${input.totalAmount})
+      'processing', ${input.buyerName}, ${input.totalAmount}, ${input.refId})
     ON CONFLICT (workspace_id, source_channel_id, source_thread_id, request_fingerprint) DO NOTHING
     RETURNING id`));
   return result.rows[0]?.id ? String(result.rows[0].id) : null;
@@ -40,7 +41,7 @@ export async function finishMisaInvoiceDraft(db: Db, ctx: WorkspaceContext, id: 
   await withWorkspace(db, ctx, (tx) => tx.execute(sql`
     UPDATE misa_invoice_drafts SET
       status = ${"refId" in result ? "saved" : result.uncertain ? "uncertain" : "failed"},
-      misa_ref_id = ${"refId" in result ? result.refId : null},
+      misa_ref_id = COALESCE(${"refId" in result ? result.refId : null}, misa_ref_id),
       error = ${"error" in result ? result.error.slice(0, 500) : null}, updated_at = now()
     WHERE id = ${id} AND workspace_id = ${ctx.workspaceId}`));
 }
