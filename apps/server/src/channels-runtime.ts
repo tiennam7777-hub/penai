@@ -85,6 +85,7 @@ import { withKiotVietSlipImage } from "./kiotviet-slip-image.js";
 import { kiotVietBillNotice } from "./kiotviet-bill-notice.js";
 import { createMisaUnpublishedInvoice, lookupMisaBuyerCompany,
   previewMisaUnpublishedInvoice } from "./misa-api.js";
+import { saveMisaPreviewImages } from "./misa-preview-image.js";
 import { extractInvoiceEvidence, hasConfirmedBuyerCompany, hasExplicitVatApproval,
   customerInvoiceTaxCode, hasRecentCustomerInvoiceRequest, isInvoiceConfirmation,
   isCustomerInvoiceRequestText,
@@ -724,17 +725,15 @@ export function makeInboundHandler(
         try {
           const bytes = await previewMisaUnpublishedInvoice(login, saved.refId);
           const dir = join(rt.config.dataDir, channel.workspaceId, "misa-previews");
-          await mkdir(dir, { recursive: true, mode: 0o700 });
-          const previewPath = join(dir, `${saved.refId}.pdf`);
-          await writeFile(previewPath, bytes, { mode: 0o600 });
+          const previewPaths = await saveMisaPreviewImages(bytes, dir, saved.refId);
           const runtime = channelHandlers.get(channel.id)?.channel;
           if (!isPersonalChannel(runtime) || !runtime.isConnected()) throw new Error("Zalo chưa kết nối");
           const ids = await runtime.sendManual({ threadId, peerKind: "direct", source: "agent",
-            filePaths: [previewPath], threadName: thread.name });
-          if (!ids.length) throw new Error("Zalo không xác nhận gửi PDF nháp");
+            filePaths: previewPaths, threadName: thread.name });
+          if (ids.length !== previewPaths.length) throw new Error("Zalo chưa xác nhận đủ ảnh hóa đơn nháp");
           previewSent = true;
           await runtime.sendManual({ threadId, peerKind: "direct", source: "agent",
-            text: `Em gửi anh/chị bản xem trước hóa đơn nháp cho ${buyer.name}. Hóa đơn chưa phát hành; anh/chị vui lòng kiểm tra thông tin giúp em.`,
+            text: `Em gửi anh/chị ảnh xem trước hóa đơn nháp cho ${buyer.name}. Hóa đơn chưa phát hành; anh/chị vui lòng kiểm tra thông tin giúp em.`,
             threadName: thread.name });
         } catch (error) {
           logger.warn(`misa.preview_send_fail: ${String(error)}`);

@@ -1100,6 +1100,20 @@ export const INDEX_HTML = `<!doctype html>
           line.textContent = (x.status === "saved" ? "Đã lưu nháp" : "Cần kiểm tra") + " · " +
             x.channelName + " · " + (x.buyerName || "") + " · " + new Date(x.createdAt).toLocaleString("vi-VN") +
             (x.error ? " · " + x.error : "");
+          if (x.status === "saved" && x.refId) {
+            var sendImage = document.createElement("button");
+            sendImage.className = "sm";
+            sendImage.textContent = "Gửi lại ảnh nháp";
+            sendImage.style.marginLeft = "10px";
+            sendImage.onclick = function () {
+              sendImage.disabled = true;
+              sendImage.textContent = "Đang gửi ảnh...";
+              api("/v1/misa/drafts/" + encodeURIComponent(x.refId) + "/send-preview-image", { method: "POST" })
+                .then(function (r) { sendImage.textContent = "Đã gửi " + r.pages + " ảnh"; })
+                .catch(function (e) { sendImage.textContent = "Cần kiểm tra cuộc chat trước khi gửi lại"; toast(e.message); });
+            };
+            line.appendChild(sendImage);
+          }
           host.appendChild(line);
         });
       }).catch(function (e) { host.textContent = e.message; });

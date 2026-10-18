@@ -65,3 +65,15 @@ export async function listMisaInvoiceDrafts(db: Db, ctx: WorkspaceContext): Prom
     createdAt: new Date(String(r.created_at)).toISOString(),
   }));
 }
+
+export async function getSavedMisaDraftSource(db: Db, ctx: WorkspaceContext, refId: string): Promise<{
+  channelId: string; threadId: string; buyerName: string;
+} | null> {
+  const result = await withWorkspace(db, ctx, (tx) => tx.execute(sql`
+    SELECT source_channel_id, source_thread_id, buyer_name FROM misa_invoice_drafts
+    WHERE workspace_id = ${ctx.workspaceId} AND misa_ref_id = ${refId} AND status = 'saved'
+    LIMIT 1`));
+  const row = result.rows[0];
+  return row ? { channelId: String(row.source_channel_id), threadId: String(row.source_thread_id),
+    buyerName: String(row.buyer_name ?? "") } : null;
+}

@@ -72,6 +72,7 @@ import {
   getMisaCredentials,
   saveMisaCredentials,
   listMisaInvoiceDrafts,
+  getSavedMisaDraftSource,
 } from "@penai/db";
 import {
   createCronJob,
@@ -196,7 +197,9 @@ import {
 } from "@penai/core";
 import { CRON_MIN_INTERVAL_MS, deliverLabel } from "./cron-tools.js";
 import { checkKiotVietOrchidProduct, findKiotVietUser, verifyKiotVietRetailConnection } from "./kiotviet-api.js";
-import { inspectMisaInvoiceReadback, verifyMisaWebConnection } from "./misa-api.js";
+import { assertMisaInvoiceUnpublished, inspectMisaInvoiceReadback,
+  previewMisaUnpublishedInvoice, verifyMisaWebConnection } from "./misa-api.js";
+import { saveMisaPreviewImages } from "./misa-preview-image.js";
 import {
   isChannelKindSupported,
   supportedChannelKinds,
@@ -1309,6 +1312,35 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (!row) return reply.code(404).send({ error: "Chưa lưu kết nối MISA" });
     return { readback: await inspectMisaInvoiceReadback({ taxCode: row.taxCode,
       username: row.username, password: decryptSecret(row.passwordEncrypted) }, refId) };
+  });
+
+  app.post("/v1/misa/drafts/:refId/send-preview-image", async (req, reply) => {
+    if (!requireRole(req, reply, "ws_admin")) return;
+    const refId = String((req.params as { refId?: string }).refId ?? "");
+    const source = await getSavedMisaDraftSource(db, req.authCtx, refId);
+    if (!source) return reply.code(404).send({ error: "Không có hóa đơn nháp đã lưu này trong PenAI" });
+    const row = await getMisaCredentials(db, req.authCtx);
+    if (!row) return reply.code(404).send({ error: "Chưa lưu kết nối MISA" });
+    const runtime = channelHandlers.get(source.channelId)?.channel;
+    if (!isPersonalChannel(runtime) || !runtime.isConnected()) {
+      return reply.code(409).send({ error: "Kênh Zalo gửi hóa đơn chưa kết nối" });
+    }
+    const login = { taxCode: row.taxCode, username: row.username,
+      password: decryptSecret(row.passwordEncrypted) };
+    try {
+      await assertMisaInvoiceUnpublished(login, refId);
+      const pdf = await previewMisaUnpublishedInvoice(login, refId);
+      const paths = await saveMisaPreviewImages(pdf,
+        join(deps.config.dataDir, req.authCtx.workspaceId, "misa-previews"), refId);
+      const ids = await runtime.sendManual({ threadId: source.threadId, peerKind: "direct",
+        source: "agent", filePaths: paths });
+      if (ids.length !== paths.length) throw new Error("Zalo chưa xác nhận đủ ảnh; kiểm tra cuộc chat trước khi gửi lại");
+      await recordAudit(db, req.authCtx, "misa.draft_preview_image.sent", { refId, pages: paths.length });
+      return { sent: true, pages: paths.length };
+    } catch (error) {
+      logger.warn(`misa.preview_image_resend_fail: ${String(error)}`);
+      return reply.code(409).send({ error: error instanceof Error ? error.message : "Chưa gửi được ảnh hóa đơn nháp" });
+    }
   });
 
   app.get("/v1/misa/verify-saved", async (req, reply) => {

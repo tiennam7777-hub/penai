@@ -174,6 +174,22 @@ export async function previewMisaUnpublishedInvoice(login: MisaLogin, refId: str
   return bytes;
 }
 
+/** Recheck an existing draft immediately before manually sending its preview again. */
+export async function assertMisaInvoiceUnpublished(login: MisaLogin, refId: string): Promise<void> {
+  if (!/^[0-9a-f-]{36}$/i.test(refId)) throw new Error("Mã hóa đơn MISA không hợp lệ");
+  const { token } = await misaWebToken(login);
+  const response = await fetch(`${BASE}/v2/code/v3sainvoice/${encodeURIComponent(refId)}`, {
+    headers: { Authorization: `Bearer ${token}`, TaxCode: login.taxCode },
+    signal: AbortSignal.timeout(15_000),
+  });
+  const body = await readPayload(response);
+  const invoice = payloadObject(body.data ?? body.Data ?? body);
+  if (!response.ok || body.success !== true || String(invoice.RefID ?? "") !== refId ||
+      Number(invoice.PublishStatus) !== 0) {
+    throw new Error("Hóa đơn trên MISA không còn ở trạng thái nháp; chưa gửi ảnh");
+  }
+}
+
 async function misaV3Template(login: MisaLogin, token: string, series: string): Promise<{
   templateId: string; templateNo: string;
 }> {
