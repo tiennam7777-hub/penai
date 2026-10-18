@@ -87,6 +87,7 @@ import { createMisaUnpublishedInvoice, lookupMisaBuyerCompany,
   previewMisaUnpublishedInvoice } from "./misa-api.js";
 import { extractInvoiceEvidence, hasConfirmedBuyerCompany, hasExplicitVatApproval,
   customerInvoiceTaxCode, hasRecentCustomerInvoiceRequest, isInvoiceConfirmation,
+  isCustomerInvoiceRequestText,
   invoiceRequestFingerprint, staffInvoiceFingerprint } from "./misa-invoice-extract.js";
 import { calculateOrchidInvoiceLine } from "./misa-invoice-policy.js";
 import { missingOldInvoiceDetailsRequest, misaAccountingNotice } from "./misa-accounting-policy.js";
@@ -726,19 +727,15 @@ export function makeInboundHandler(
           await mkdir(dir, { recursive: true, mode: 0o700 });
           const previewPath = join(dir, `${saved.refId}.pdf`);
           await writeFile(previewPath, bytes, { mode: 0o600 });
-          try {
-            const runtime = channelHandlers.get(channel.id)?.channel;
-            if (!isPersonalChannel(runtime) || !runtime.isConnected()) throw new Error("Zalo chưa kết nối");
-            const ids = await runtime.sendManual({ threadId, peerKind: "direct", source: "agent",
-              filePaths: [previewPath], threadName: thread.name });
-            if (!ids.length) throw new Error("Zalo không xác nhận gửi PDF nháp");
-            previewSent = true;
-            await runtime.sendManual({ threadId, peerKind: "direct", source: "agent",
-              text: `Em gửi anh/chị bản xem trước hóa đơn nháp cho ${buyer.name}. Hóa đơn chưa phát hành; anh/chị vui lòng kiểm tra thông tin giúp em.`,
-              threadName: thread.name });
-          } finally {
-            await rm(previewPath, { force: true }).catch(() => {});
-          }
+          const runtime = channelHandlers.get(channel.id)?.channel;
+          if (!isPersonalChannel(runtime) || !runtime.isConnected()) throw new Error("Zalo chưa kết nối");
+          const ids = await runtime.sendManual({ threadId, peerKind: "direct", source: "agent",
+            filePaths: [previewPath], threadName: thread.name });
+          if (!ids.length) throw new Error("Zalo không xác nhận gửi PDF nháp");
+          previewSent = true;
+          await runtime.sendManual({ threadId, peerKind: "direct", source: "agent",
+            text: `Em gửi anh/chị bản xem trước hóa đơn nháp cho ${buyer.name}. Hóa đơn chưa phát hành; anh/chị vui lòng kiểm tra thông tin giúp em.`,
+            threadName: thread.name });
         } catch (error) {
           logger.warn(`misa.preview_send_fail: ${String(error)}`);
         }
@@ -1366,7 +1363,7 @@ export function makeInboundHandler(
             logger.warn(`misa.customer_company_lookup_fail: ${String(error)}`);
           }
         }
-      } else if (isInvoiceConfirmation(msg.text)) {
+      } else if (isInvoiceConfirmation(msg.text) || isCustomerInvoiceRequestText(msg.text)) {
         const credentials = await getMisaCredentials(db, ctx);
         if (credentials?.draftEnabled) {
           // The Zalo Inbox logger persists asynchronously; the current approval must be

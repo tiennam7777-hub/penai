@@ -24,15 +24,18 @@ export interface InvoiceEvidence {
 const REQUEST = /(?:xuất|xuat|lấy|lay|làm|lam|lên|len|cần|can).{0,25}(?:hóa đơn|hoá đơn|hoa don|hđ|hd|xhd)|(?:thông tin|thong tin).{0,20}xhd|(?:hóa đơn|hoá đơn|hoa don|xhd).{0,15}(?:như cũ|nhu cu)|\bxhd\b/i;
 const NO_INVOICE = /(?:không|ko|k|chẳng|chang).{0,12}(?:(?:lấy|lay|xuất|xuat|cần|can).{0,20})?(?:hóa đơn|hoá đơn|hoa don|xhd)/i;
 
+export function isCustomerInvoiceRequestText(text: string): boolean {
+  return REQUEST.test(text) && !NO_INVOICE.test(text);
+}
+
 export function hasRecentCustomerInvoiceRequest(messages: InboxMessageRow[]): boolean {
   const recent = messages.slice(-50);
   const reset = recent.findLastIndex((m) => m.direction === "in" && /^\/(?:new|reset)\s*$/i.test(m.text.trim()));
-  return recent.slice(reset + 1).some((m) => m.direction === "in" &&
-    REQUEST.test(m.text) && !NO_INVOICE.test(m.text));
+  return recent.slice(reset + 1).some((m) => m.direction === "in" && isCustomerInvoiceRequestText(m.text));
 }
 
 export function isInvoiceConfirmation(text: string): boolean {
-  return /^(?:ok(?:ay)?|đúng(?: rồi)?|dung(?: roi)?|đồng ý|dong y|xác nhận|xac nhan|được(?: rồi)?|duoc(?: roi)?)(?:\s+(?:anh|chị|em|e))?[\s.!]*$/i.test(text.trim());
+  return /^(?:ok(?:ay)?|đúng(?: rồi)?|dung(?: roi)?|đồng ý|dong y|xác nhận|xac nhan|được(?: rồi)?|duoc(?: roi)?)(?:\s+(?:anh|chị|em|e))?(?:\s*[,.;!]\s*(?:đồng ý|dong y|đúng(?: rồi)?|dung(?: roi)?))?[\s.!]*$/i.test(text.trim());
 }
 
 export function customerInvoiceTaxCode(text: string): string | null {
