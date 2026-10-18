@@ -94,6 +94,8 @@ export async function inspectMisaInvoiceReadback(login: MisaLogin, refId: string
   httpStatus: number; success: unknown; topKeys: string[]; dataKind: string;
   dataKeys: string[]; nestedKeys: string[]; refId: unknown; publishStatus: unknown;
   errorCode: unknown; error: string; content: string;
+  invoiceType: unknown; sourceType: unknown; templateNo: unknown; templateId: unknown;
+  detailsCount: number; detailKeys: string[];
 }>> {
   if (!/^[0-9a-f-]{36}$/i.test(refId)) throw new Error("Mã hóa đơn MISA không hợp lệ");
   const { token } = await misaWebToken(login);
@@ -101,6 +103,8 @@ export async function inspectMisaInvoiceReadback(login: MisaLogin, refId: string
     httpStatus: number; success: unknown; topKeys: string[]; dataKind: string;
     dataKeys: string[]; nestedKeys: string[]; refId: unknown; publishStatus: unknown;
     errorCode: unknown; error: string; content: string;
+    invoiceType: unknown; sourceType: unknown; templateNo: unknown; templateId: unknown;
+    detailsCount: number; detailKeys: string[];
   }> = {};
   for (const [variant, path] of [["legacy", "SAInvoice/Get"], ["v3", "code/v3sainvoice"]]) {
     const response = await fetch(`${BASE}/v2/${path}/${encodeURIComponent(refId)}`, {
@@ -110,6 +114,7 @@ export async function inspectMisaInvoiceReadback(login: MisaLogin, refId: string
     const body = await readPayload(response);
     const data = payloadObject(body.data ?? body.Data);
     const nested = payloadObject(data.master ?? data.Master ?? data.invoice ?? data.Invoice);
+    const details = Array.isArray(data.InvoiceDetails) ? data.InvoiceDetails : [];
     output[variant!] = {
       httpStatus: response.status, success: body.success, topKeys: Object.keys(body).slice(0, 30),
       dataKind: Array.isArray(body.data) ? "array" : typeof body.data,
@@ -119,6 +124,10 @@ export async function inspectMisaInvoiceReadback(login: MisaLogin, refId: string
       errorCode: body.errorCode ?? body.ErrorCode ?? null,
       error: String(body.error ?? "").slice(0, 300),
       content: String(body.content ?? "").slice(0, 300),
+      invoiceType: data.InvoiceType ?? null, sourceType: data.SourceType ?? null,
+      templateNo: data.InvTemplateNo ?? null, templateId: data.InvoiceTemplateID ?? null,
+      detailsCount: details.length,
+      detailKeys: Object.keys(payloadObject(details[0])).slice(0, 50),
     };
   }
   return output;
