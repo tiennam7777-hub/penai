@@ -19,7 +19,7 @@ import { join, relative, resolve, sep } from "node:path";
 import AdmZip from "adm-zip";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { hasRole, logger, type WorkspaceContext } from "@penai/shared";
+import { decryptSecret, hasRole, logger, type WorkspaceContext } from "@penai/shared";
 import {
   clearInboxPauses,
   getChannelById,
@@ -42,6 +42,11 @@ import {
   setInboxThreadTags,
   setInboxThreadHidden,
   setInboxCustomerNote,
+  claimMisaAccountingNotice,
+  finishMisaAccountingNotice,
+  applyMisaAccountingReply,
+  pendingMisaAccountingRequest,
+  getMisaCredentials,
   markInboxThreadRead,
   markAgentMessageRecalled,
   markInboxMessageRemoved,
@@ -62,6 +67,9 @@ import {
   type InboxMessageRow,
   type InboxThread,
 } from "@penai/db";
+import { lookupMisaBuyerCompany } from "./misa-api.js";
+import { missingOldInvoiceDetailsRequest, misaAccountingNotice,
+  taxCodeFromAccountingReply } from "./misa-accounting-policy.js";
 import {
   isPersonalChannel,
   isPersonalChannelKind,
@@ -211,7 +219,7 @@ function recordInboxContact(
 /** Hook onMessageLog / onContactsSynced / onThreadName… cho 1 kênh cá nhân (Zalo, WhatsApp). */
 export function inboxHooks(
   db: Db,
-  ch: { id: string; kind: string; workspaceId: string; config: Record<string, unknown> },
+  ch: { id: string; kind: string; name?: string; workspaceId: string; config: Record<string, unknown> },
   dataDir: string,
   onAgentMessageRecalled?: (threadId: string, peerKind: "direct" | "group") => Promise<void>,
 ) {
@@ -219,6 +227,9 @@ export function inboxHooks(
   inboxState.set(ch.id, { workspaceId: ch.workspaceId, enabled: cfg.enabled, pauseMinutes: cfg.pauseMinutes });
   if (onAgentMessageRecalled) agentRecallHandlers.set(ch.id, onAgentMessageRecalled);
   const ctx = ctxOf(ch.workspaceId);
+  const accountingGroupId = typeof ch.config["orchid_invoice_accounting_group"] === "string" &&
+    /^\d{1,30}$/.test(ch.config["orchid_invoice_accounting_group"] as string)
+    ? ch.config["orchid_invoice_accounting_group"] as string : null;
   const toInput = (entry: ChannelMessageLog) => ({
     threadId: entry.threadId,
     peerKind: entry.peerKind,
@@ -295,6 +306,61 @@ export function inboxHooks(
           thread: saved.thread,
           message: publicMessage(saved.message, ch.workspaceId),
         });
+        if (ORCHID_SALES_CHANNEL_IDS.has(ch.id) && accountingGroupId &&
+            (entry.direction === "in" || (entry.peerKind === "group" && entry.direction === "out" &&
+              (entry.source === "app" || entry.source === "web")))) {
+          if (entry.peerKind === "direct" && entry.direction === "in") {
+            const history = await listInboxMessages(db, ctx, ch.id, entry.threadId, { limit: 40 });
+            const requestId = missingOldInvoiceDetailsRequest(history);
+            if (requestId) {
+              const customer = saved.thread.contactAlias || saved.thread.profileName || saved.thread.name || entry.senderName;
+              const message = misaAccountingNotice("missing_info", customer, ch.kind === "zalo_personal" ? ch.name ?? ch.id : ch.id);
+              const noticeId = await claimMisaAccountingNotice(db, ctx, {
+                channelId: ch.id, threadId: entry.threadId, eventKey: `missing:${requestId}`,
+                kind: "missing_info", groupId: accountingGroupId, message,
+              });
+              if (noticeId) {
+                try {
+                  const runtime = inboxRuntime(ch.id);
+                  if (!runtime?.isConnected()) throw new Error("Kênh Zalo chưa kết nối");
+                  const ids = await runtime.sendManual({ threadId: accountingGroupId,
+                    peerKind: "group", text: message, source: "agent", threadName: "Kế Toán Orchids World" });
+                  if (!ids[0]) throw new Error("Zalo không trả mã tin nhóm");
+                  await finishMisaAccountingNotice(db, ctx, noticeId, { messageId: ids[0] });
+                } catch (error) {
+                  await finishMisaAccountingNotice(db, ctx, noticeId, { error: String(error) }).catch(() => {});
+                  logger.warn(`misa.accounting_missing_notice_fail: ${String(error)}`);
+                }
+              }
+            }
+          } else if (entry.peerKind === "group" && entry.threadId === accountingGroupId) {
+            const quote = entry.meta?.quote;
+            const quotedMessageId = quote && typeof quote === "object" && "msgId" in quote
+              ? String((quote as { msgId: unknown }).msgId ?? "") : "";
+            const answer = quotedMessageId ? taxCodeFromAccountingReply(entry.text) : null;
+            if (answer && entry.msgId && await pendingMisaAccountingRequest(db, ctx,
+              ch.id, accountingGroupId, quotedMessageId)) {
+              const credentials = await getMisaCredentials(db, ctx);
+              if (credentials) {
+                const buyer = await lookupMisaBuyerCompany({ taxCode: credentials.taxCode,
+                  username: credentials.username, password: decryptSecret(credentials.passwordEncrypted) }, answer.taxCode);
+                const linked = await applyMisaAccountingReply(db, ctx, {
+                  channelId: ch.id, groupId: accountingGroupId, quotedMessageId,
+                  responseMessageId: entry.msgId,
+                  buyer: { taxCode: answer.taxCode, companyName: buyer.name,
+                    address: buyer.address, email: answer.email },
+                });
+                if (linked) {
+                  const thread = await getInboxThread(db, ctx, ch.id, linked.threadId);
+                  if (thread) broadcast(ch.workspaceId, ch.id, "customer_note", {
+                    channelId: ch.id, threadId: linked.threadId,
+                    note: thread.customerNote, updatedAt: thread.customerNoteUpdatedAt,
+                  });
+                }
+              }
+            }
+          }
+        }
         // Nhóm chưa có tên → tra 1 lần
         const key = `${ch.id}:${entry.threadId}`;
         if (entry.peerKind === "group" && !saved.thread.name && !groupNameLookups.has(key)) {

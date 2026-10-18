@@ -11,3 +11,9 @@ Hàng thường dùng HH00001, tên Hoa Lan Hồ Điệp, đơn vị **Cây**, s
 API MISA `POST /api/v2/SAInvoice/Insert` lưu hóa đơn; PenAI chỉ nhận thành công sau khi `GET /api/v2/SAInvoice/Get/{id}` xác minh `PublishStatus = 0`. Một yêu cầu chỉ POST một lần; lỗi hoặc hết giờ chờ phải đối chiếu MISA trước khi thử lại. PenAI không ghi nhận thanh toán hay ký/phát hành từ lệnh `-xhd`.
 
 Hiện `misa_credentials.draft_enabled = false`: chưa thử POST/GET với hóa đơn thật có kiểm soát. Vì thế `-xhd` chưa tạo nháp, và chức năng gửi bản xem trước cho khách chưa hoạt động. `-xuat` được giữ làm lệnh nội bộ nhưng luôn báo chưa bật, không gọi API phát hành. Chỉ triển khai ký/phát hành sau khi HSM/ký từ xa được cấu hình và kiểm tra riêng với một hóa đơn nháp hợp lệ.
+
+## Nhóm Kế Toán Orchids World
+
+Mỗi Hot 1/4/6 cấu hình mã nhóm theo góc nhìn tài khoản đó trong `orchid_invoice_accounting_group`. Sau khi MISA xác nhận nháp, PenAI gửi một tin ngắn ghi trạng thái, tên khách và nguồn. Nếu sau này `-xuat` được bật, chỉ báo phát hành cùng số hóa đơn sau khi MISA thực sự xác nhận phát hành. Thông báo được ghi dấu trước khi gửi để không gửi trùng khi Zalo trả lỗi hoặc hết giờ chờ.
+
+Nếu khách yêu cầu dùng thông tin hóa đơn cũ, PenAI đã xin lại mà khách từ chối cung cấp, PenAI gửi một tin duy nhất cho yêu cầu đó vào nhóm kế toán. Nhân viên kế toán phải **trả lời bằng cách trích dẫn đúng tin báo này**, kèm MST. PenAI tra tên và địa chỉ pháp lý qua MISA, lưu thông tin vào ghi chú đúng hội thoại khách và dùng khi xử lý hóa đơn tiếp theo. Tin trả lời thiếu MST hoặc trích dẫn sai tin không được tự gắn vào khách. Việc có thông tin cũ không bỏ qua kiểm tra giá thực bán và khách đồng ý VAT.

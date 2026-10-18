@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { AccountingBuyerInfo } from "@penai/db";
 import type { InboxMessageRow } from "@penai/db";
 import type { Provider } from "@penai/providers";
 
@@ -102,15 +103,16 @@ export function hasConfirmedBuyerCompany(messages: InboxMessageRow[], evidence: 
 }
 
 export async function extractInvoiceEvidence(provider: Provider, model: string,
-  messages: InboxMessageRow[]): Promise<InvoiceEvidence | null> {
+  messages: InboxMessageRow[], accountingInfo?: AccountingBuyerInfo | null): Promise<InvoiceEvidence | null> {
   const reset = [...messages].reverse().findIndex((m) => m.direction === "in" && /^\/new\s*$/i.test(m.text.trim()));
   const current = reset < 0 ? messages : messages.slice(messages.length - reset);
   const transcript = current.slice(-80).map((m) => {
     const speaker = m.direction === "in" ? "Khách" : m.source === "agent" ? "AI" : "Nhân viên";
     return `${speaker}: ${m.text.trim().slice(0, 700)}`;
   }).join("\n").slice(-18_000);
+  const note = accountingInfo ? `\n[THÔNG TIN XHD ĐÃ ĐƯỢC KẾ TOÁN CUNG CẤP VÀ LƯU CHO KHÁCH NÀY]\nMST: ${accountingInfo.taxCode}; Công ty: ${accountingInfo.companyName}; Địa chỉ: ${accountingInfo.address}; Email: ${accountingInfo.email || "chưa có"}.\n` : "";
   const response = await provider.chat({ model, system: SYSTEM,
-    messages: [{ role: "user", content: transcript }], maxTokens: 800 });
+    messages: [{ role: "user", content: `${transcript}${note}` }], maxTokens: 800 });
   if (response.stopReason !== "end" || response.toolCalls.length) return null;
   return parseInvoiceEvidence(response.content);
 }

@@ -34,6 +34,9 @@ import {
   getMisaCredentials,
   claimMisaInvoiceDraft,
   finishMisaInvoiceDraft,
+  claimMisaAccountingNotice,
+  finishMisaAccountingNotice,
+  latestMisaAccountingBuyer,
   getPersonContextData,
   loadMessages,
   type EnabledChannel,
@@ -84,6 +87,7 @@ import { createMisaUnpublishedInvoice, lookupMisaBuyerCompany } from "./misa-api
 import { extractInvoiceEvidence, hasConfirmedBuyerCompany, hasExplicitVatApproval,
   invoiceRequestFingerprint, staffInvoiceFingerprint } from "./misa-invoice-extract.js";
 import { calculateOrchidInvoiceLine } from "./misa-invoice-policy.js";
+import { missingOldInvoiceDetailsRequest, misaAccountingNotice } from "./misa-accounting-policy.js";
 import { requestedOrchidYellowSamples, orchidYellowSamplePath } from "./orchid-yellow-samples.js";
 
 /** Handler + channel theo channelId — cho webhook route (WhatsApp, Teams) dùng. */
@@ -637,10 +641,11 @@ export function makeInboundHandler(
       const history = await listInboxMessages(db, ctx, channel.id, threadId, { limit: 200 });
       const provider = rt.providers.get(agent.provider, ctx.workspaceId);
       const limited = rt.gate ? gatedProvider(rt.gate, provider, { providerKey: agent.provider, priority: 0 }) : provider;
-      const evidence = await extractInvoiceEvidence(limited, agent.model, history);
+      const accountingInfo = await latestMisaAccountingBuyer(db, ctx, channel.id, threadId);
+      const evidence = await extractInvoiceEvidence(limited, agent.model, history, accountingInfo);
       if (!evidence) throw new Error("Thiếu MST, loại chậu, số cành thực tế hoặc giá đã chốt; chưa tạo hóa đơn");
       const humanText = history.filter((m) => m.direction === "in" || ["web", "app", "mcp"].includes(m.source))
-        .map((m) => m.text).join("\n");
+        .map((m) => m.text).join("\n") + (accountingInfo ? `\n${accountingInfo.taxCode}\n${accountingInfo.email}` : "");
       if (!humanText.includes(evidence.buyerTaxCode) || (evidence.buyerEmail &&
           !humanText.toLocaleLowerCase("vi-VN").includes(evidence.buyerEmail.toLocaleLowerCase("vi-VN")))) {
         throw new Error("MST hoặc email xuất hóa đơn không có bằng chứng trong tin khách/nhân viên; chưa tạo hóa đơn");
@@ -655,7 +660,9 @@ export function makeInboundHandler(
       const login = { taxCode: credentials.taxCode, username: credentials.username,
         password: decryptSecret(credentials.passwordEncrypted) };
       const buyer = await lookupMisaBuyerCompany(login, evidence.buyerTaxCode);
-      if (!hasConfirmedBuyerCompany(history, evidence, buyer.name)) {
+      const accountantOverride = accountingInfo?.taxCode === evidence.buyerTaxCode &&
+        accountingInfo.companyName === buyer.name && !!missingOldInvoiceDetailsRequest(history);
+      if (!accountantOverride && !hasConfirmedBuyerCompany(history, evidence, buyer.name)) {
         throw new Error(`Cần hỏi khách xác nhận đúng công ty ${buyer.name} và chờ khách đồng ý trước khi lập nháp`);
       }
       const fingerprint = invoiceRequestFingerprint(history) ?? staffInvoiceFingerprint(evidence);
@@ -674,7 +681,36 @@ export function makeInboundHandler(
           series: credentials.invoiceSeries,
         });
         await finishMisaInvoiceDraft(db, ctx, claimId, { refId: saved.refId });
-        return `Đã lưu hóa đơn nháp MISA cho ${buyer.name}; chưa phát hành. Nhân viên kiểm tra trước khi phát hành.`;
+        const accountingGroupId = channel.config["orchid_invoice_accounting_group"];
+        let accountingNotice = "";
+        if (typeof accountingGroupId === "string" && /^\d{1,30}$/.test(accountingGroupId)) {
+          try {
+          const customer = thread.contactAlias || thread.profileName || thread.name || buyer.name;
+          const noticeText = misaAccountingNotice("draft_saved", customer, channel.name);
+          const noticeId = await claimMisaAccountingNotice(db, ctx, {
+            channelId: channel.id, threadId, eventKey: `draft:${saved.refId}`,
+            kind: "draft_saved", groupId: accountingGroupId, message: noticeText, refId: saved.refId,
+          });
+          if (noticeId) {
+            try {
+              const runtime = channelHandlers.get(channel.id)?.channel;
+              if (!isPersonalChannel(runtime) || !runtime.isConnected()) throw new Error("Zalo chưa kết nối");
+              const ids = await runtime.sendManual({ threadId: accountingGroupId, peerKind: "group",
+                text: noticeText, source: "agent", threadName: "Kế Toán Orchids World" });
+              if (!ids[0]) throw new Error("Zalo không trả mã tin nhóm");
+              await finishMisaAccountingNotice(db, ctx, noticeId, { messageId: ids[0] });
+              accountingNotice = " Đã báo nhóm Kế Toán Orchids World.";
+            } catch (error) {
+              await finishMisaAccountingNotice(db, ctx, noticeId, { error: String(error) }).catch(() => {});
+              accountingNotice = " Chưa báo được nhóm Kế Toán Orchids World; cần nhân viên kiểm tra.";
+            }
+          }
+          } catch (error) {
+            logger.warn(`misa.accounting_draft_notice_fail: ${String(error)}`);
+            accountingNotice = " Chưa báo được nhóm Kế Toán Orchids World; cần nhân viên kiểm tra.";
+          }
+        }
+        return `Đã lưu hóa đơn nháp MISA cho ${buyer.name}; chưa phát hành.${accountingNotice} Nhân viên kiểm tra trước khi phát hành.`;
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         await finishMisaInvoiceDraft(db, ctx, claimId, { error: reason, uncertain: true });
