@@ -11,7 +11,8 @@ export interface AccountingBuyerInfo {
 }
 
 export async function claimMisaAccountingNotice(db: Db, ctx: WorkspaceContext, input: {
-  channelId: string; threadId: string; eventKey: string; kind: "draft_saved" | "issued" | "missing_info";
+  channelId: string; threadId: string; eventKey: string;
+  kind: "draft_saved" | "issued" | "missing_info" | "increase_request";
   groupId: string; message: string; refId?: string;
 }): Promise<string | null> {
   const result = await withWorkspace(db, ctx, (tx) => tx.execute(sql`

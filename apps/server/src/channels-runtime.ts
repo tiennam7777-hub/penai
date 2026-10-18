@@ -93,6 +93,8 @@ import { extractInvoiceEvidence, hasConfirmedBuyerCompany, hasExplicitVatApprova
   invoiceRequestFingerprint, staffInvoiceFingerprint } from "./misa-invoice-extract.js";
 import { calculateOrchidInvoiceLine } from "./misa-invoice-policy.js";
 import { missingOldInvoiceDetailsRequest, misaAccountingNotice } from "./misa-accounting-policy.js";
+import { classifyIncreasedInvoiceRequest, increasedInvoiceAccountingNotice,
+  mayRequestIncreasedInvoice, MISA_INCREASE_CUSTOMER_REPLY } from "./misa-increase-request.js";
 import { requestedOrchidYellowSamples, orchidYellowSamplePath } from "./orchid-yellow-samples.js";
 
 /** Handler + channel theo channelId — cho webhook route (WhatsApp, Teams) dùng. */
@@ -1352,6 +1354,48 @@ export function makeInboundHandler(
       direction: "in", text: msg.text,
       meta: { quote: { msgId: quotedInvoiceOriginal.msgId, text: quotedInvoiceOriginal.text } },
     } as unknown as InboxMessageRow, [quotedInvoiceOriginal]) : false;
+    const accountingGroupId = channel.config["orchid_invoice_accounting_group"];
+    if (agent.key === "nhan-vien-kinh-doanh-orchids-world" && channel.kind === "zalo_personal" &&
+        msg.peerKind === "direct" && !staffDelegation &&
+        typeof accountingGroupId === "string" && /^\d{1,30}$/.test(accountingGroupId) &&
+        mayRequestIncreasedInvoice(msg.text, handoffMessages)) {
+      const threadId = msg.chatKey.slice(msg.chatKey.indexOf(":") + 1);
+      try {
+        const history = await listInboxMessages(db, ctx, channel.id, threadId, { limit: 100 });
+        const current = history.some((m) => m.direction === "in" && m.msgId === msg.messageId)
+          ? history : [...history, { direction: "in", source: "zalo", text: msg.text,
+            msgId: msg.messageId ?? "", sentAt: (msg.sentAt ?? new Date()).toISOString() } as InboxMessageRow];
+        const provider = rt.providers.get(agent.provider, ctx.workspaceId);
+        const limited = rt.gate ? gatedProvider(rt.gate, provider,
+          { providerKey: agent.provider, priority: 0 }) : provider;
+        if (await classifyIncreasedInvoiceRequest(limited, agent.model, current, msg.text)) {
+          const thread = await getInboxThread(db, ctx, channel.id, threadId);
+          const customer = thread?.contactAlias || thread?.profileName || thread?.name || msg.senderName || msg.senderId;
+          const notice = increasedInvoiceAccountingNotice(customer, channel.name);
+          const noticeId = await claimMisaAccountingNotice(db, ctx, {
+            channelId: channel.id, threadId,
+            eventKey: `increase:${msg.messageId || `${msg.sentAt?.toISOString() ?? ""}:${msg.text}`}`,
+            kind: "increase_request", groupId: accountingGroupId, message: notice,
+          });
+          if (noticeId) {
+            try {
+              const runtime = channelHandlers.get(channel.id)?.channel;
+              if (!isPersonalChannel(runtime) || !runtime.isConnected()) throw new Error("Zalo chưa kết nối");
+              const ids = await runtime.sendManual({ threadId: accountingGroupId, peerKind: "group",
+                text: notice, source: "agent", threadName: "Kế Toán Orchids World" });
+              if (!ids[0]) throw new Error("Zalo không trả mã tin nhóm");
+              await finishMisaAccountingNotice(db, ctx, noticeId, { messageId: ids[0] });
+            } catch (error) {
+              await finishMisaAccountingNotice(db, ctx, noticeId, { error: String(error) }).catch(() => {});
+              logger.warn(`misa.accounting_increase_notice_fail: ${String(error)}`);
+            }
+          }
+          return { kind: "reply", text: MISA_INCREASE_CUSTOMER_REPLY };
+        }
+      } catch (error) {
+        logger.warn(`misa.increase_request_check_fail: ${String(error)}`);
+      }
+    }
     if (agent.key === "nhan-vien-kinh-doanh-orchids-world" && msg.peerKind === "direct" &&
         !staffDelegation && hasRecentCustomerInvoiceRequest(handoffMessages)) {
       const threadId = msg.chatKey.slice(msg.chatKey.indexOf(":") + 1);
