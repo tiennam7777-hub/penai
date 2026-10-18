@@ -83,8 +83,10 @@ import { classifyOrchidFlowerComplaint, formatOrchidFlowerComplaintDispatch, orc
 import { createKiotVietOrchidDraft, readKiotVietOrderSlip } from "./kiotviet-api.js";
 import { withKiotVietSlipImage } from "./kiotviet-slip-image.js";
 import { kiotVietBillNotice } from "./kiotviet-bill-notice.js";
-import { createMisaUnpublishedInvoice, lookupMisaBuyerCompany } from "./misa-api.js";
+import { createMisaUnpublishedInvoice, lookupMisaBuyerCompany,
+  previewMisaUnpublishedInvoice } from "./misa-api.js";
 import { extractInvoiceEvidence, hasConfirmedBuyerCompany, hasExplicitVatApproval,
+  customerInvoiceTaxCode, hasRecentCustomerInvoiceRequest, isInvoiceConfirmation,
   invoiceRequestFingerprint, staffInvoiceFingerprint } from "./misa-invoice-extract.js";
 import { calculateOrchidInvoiceLine } from "./misa-invoice-policy.js";
 import { missingOldInvoiceDetailsRequest, misaAccountingNotice } from "./misa-accounting-policy.js";
@@ -96,7 +98,9 @@ export const channelHandlers = new Map<
   { handler: InboundHandler; channel: Channel; workspaceId: string }
 >();
 const orchidKiotStaffCommands = new Map<string, (threadId: string, command: "-lb" | "-cn") => Promise<string>>();
-const orchidMisaStaffCommands = new Map<string, (threadId: string, command: "-xhd" | "-xuat") => Promise<string>>();
+interface MisaCommandResult { notice: string; previewSent: boolean }
+const orchidMisaStaffCommands = new Map<string,
+  (threadId: string, command: "-xhd" | "-xuat") => Promise<MisaCommandResult>>();
 
 export async function runOrchidKiotStaffCommand(channelId: string, threadId: string, command: "-lb" | "-cn"): Promise<string> {
   const handler = orchidKiotStaffCommands.get(channelId);
@@ -105,7 +109,7 @@ export async function runOrchidKiotStaffCommand(channelId: string, threadId: str
 }
 
 export async function runOrchidMisaStaffCommand(channelId: string, threadId: string,
-  command: "-xhd" | "-xuat" = "-xhd"): Promise<string> {
+  command: "-xhd" | "-xuat" = "-xhd"): Promise<MisaCommandResult> {
   const handler = orchidMisaStaffCommands.get(channelId);
   if (!handler) throw new Error("Kênh kinh doanh chưa sẵn sàng");
   return handler(threadId, command);
@@ -644,6 +648,9 @@ export function makeInboundHandler(
       const accountingInfo = await latestMisaAccountingBuyer(db, ctx, channel.id, threadId);
       const evidence = await extractInvoiceEvidence(limited, agent.model, history, accountingInfo);
       if (!evidence) throw new Error("Thiếu MST, loại chậu, số cành thực tế hoặc giá đã chốt; chưa tạo hóa đơn");
+      if (evidence.buyerTaxCode === credentials.taxCode) {
+        throw new Error("MST bên mua trùng MST bên bán; cần xác minh lại giao dịch trước khi lập nháp");
+      }
       const humanText = history.filter((m) => m.direction === "in" || ["web", "app", "mcp"].includes(m.source))
         .map((m) => m.text).join("\n") + (accountingInfo ? `\n${accountingInfo.taxCode}\n${accountingInfo.email}` : "");
       if (!humanText.includes(evidence.buyerTaxCode) || (evidence.buyerEmail &&
@@ -710,7 +717,31 @@ export function makeInboundHandler(
             accountingNotice = " Chưa báo được nhóm Kế Toán Orchids World; cần nhân viên kiểm tra.";
           }
         }
-        return `Đã lưu hóa đơn nháp MISA cho ${buyer.name}; chưa phát hành.${accountingNotice} Nhân viên kiểm tra trước khi phát hành.`;
+        let previewSent = false;
+        try {
+          const bytes = await previewMisaUnpublishedInvoice(login, saved.refId);
+          const dir = join(rt.config.dataDir, channel.workspaceId, "misa-previews");
+          await mkdir(dir, { recursive: true, mode: 0o700 });
+          const previewPath = join(dir, `${saved.refId}.pdf`);
+          await writeFile(previewPath, bytes, { mode: 0o600 });
+          try {
+            const runtime = channelHandlers.get(channel.id)?.channel;
+            if (!isPersonalChannel(runtime) || !runtime.isConnected()) throw new Error("Zalo chưa kết nối");
+            const ids = await runtime.sendManual({ threadId, peerKind: "direct", source: "agent",
+              filePaths: [previewPath], threadName: thread.name });
+            if (!ids.length) throw new Error("Zalo không xác nhận gửi PDF nháp");
+            previewSent = true;
+            await runtime.sendManual({ threadId, peerKind: "direct", source: "agent",
+              text: `Em gửi anh/chị bản xem trước hóa đơn nháp cho ${buyer.name}. Hóa đơn chưa phát hành; anh/chị vui lòng kiểm tra thông tin giúp em.`,
+              threadName: thread.name });
+          } finally {
+            await rm(previewPath, { force: true }).catch(() => {});
+          }
+        } catch (error) {
+          logger.warn(`misa.preview_send_fail: ${String(error)}`);
+        }
+        return { notice: `Đã lưu hóa đơn nháp MISA cho ${buyer.name}; chưa phát hành.${accountingNotice} ` +
+          (previewSent ? "Đã gửi bản xem trước cho khách." : "Chưa gửi được bản xem trước; nhân viên cần kiểm tra và gửi cho khách."), previewSent };
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         await finishMisaInvoiceDraft(db, ctx, claimId, { error: reason, uncertain: true });
@@ -1315,6 +1346,47 @@ export function makeInboundHandler(
           return [];
         })
       : [];
+    if (agent.key === "nhan-vien-kinh-doanh-orchids-world" && msg.peerKind === "direct" &&
+        !staffDelegation && hasRecentCustomerInvoiceRequest(handoffMessages)) {
+      const threadId = msg.chatKey.slice(msg.chatKey.indexOf(":") + 1);
+      const currentTaxCode = customerInvoiceTaxCode(msg.text);
+      if (currentTaxCode) {
+        const credentials = await getMisaCredentials(db, ctx);
+        if (credentials && currentTaxCode === credentials.taxCode) {
+          return { kind: "reply", text: "Mã số thuế anh/chị gửi trùng mã số thuế bên bán của shop. Anh/chị vui lòng kiểm tra lại mã số thuế bên mua để em lập hóa đơn đúng ạ." };
+        }
+        if (credentials) {
+          try {
+            const buyer = await lookupMisaBuyerCompany({ taxCode: credentials.taxCode,
+              username: credentials.username, password: decryptSecret(credentials.passwordEncrypted) }, currentTaxCode);
+            return { kind: "reply", text: `Anh/chị xác nhận hóa đơn xuất cho ${buyer.name} (MST ${currentTaxCode}) đúng không ạ?` };
+          } catch (error) {
+            logger.warn(`misa.customer_company_lookup_fail: ${String(error)}`);
+          }
+        }
+      } else if (isInvoiceConfirmation(msg.text)) {
+        const credentials = await getMisaCredentials(db, ctx);
+        if (credentials?.draftEnabled) {
+          // The Zalo Inbox logger persists asynchronously; the current approval must be
+          // visible before the draft validator checks message order and evidence.
+          if (msg.messageId) {
+            let visible = false;
+            for (let attempt = 0; attempt < 6 && !visible; attempt++) {
+              visible = !!await getInboxMessageByMsgId(db, ctx, channel.id, threadId, msg.messageId).catch(() => null);
+              if (!visible) await new Promise((resolve) => setTimeout(resolve, 150));
+            }
+            if (!visible) return { kind: "reply", text: "Em đã nhận xác nhận của anh/chị nhưng chưa kiểm tra được lịch sử hóa đơn; em sẽ nhờ nhân viên xử lý ạ." };
+          }
+          try {
+            const result = await runOrchidMisaStaffCommand(channel.id, threadId, "-xhd");
+            return result.previewSent ? { kind: "ignore" } : { kind: "reply", text:
+              "Em đã lưu hóa đơn nháp nhưng chưa gửi được bản xem trước. Em sẽ nhờ nhân viên kiểm tra và gửi lại; hóa đơn chưa phát hành ạ." };
+          } catch (error) {
+            logger.info(`misa.customer_draft_not_ready: ${String(error)}`);
+          }
+        }
+      }
+    }
     const handoffContext = orchidHandoffContext(handoffMessages);
     const requestedYellowSamples = agent.key === "nhan-vien-kinh-doanh-orchids-world" && msg.peerKind === "direct"
       ? requestedOrchidYellowSamples(msg.text, handoffMessages.filter((m) => m.direction === "in").map((m) => m.text))

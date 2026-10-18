@@ -1184,7 +1184,7 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
           return { sent: false, notice: "AI đã thực hiện lời nhắn vừa rồi" };
         }
         const notice = staffCommand === "-xhd" || staffCommand === "-xuat"
-          ? await runOrchidMisaStaffCommand(channelId, threadId, staffCommand)
+          ? (await runOrchidMisaStaffCommand(channelId, threadId, staffCommand)).notice
           : await runOrchidKiotStaffCommand(channelId, threadId, staffCommand);
         return { sent: false, notice };
       } catch (err) { return sendError(reply, err, channelId); }

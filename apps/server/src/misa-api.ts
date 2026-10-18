@@ -88,6 +88,24 @@ export async function verifyMisaWebConnection(login: MisaLogin): Promise<void> {
   await misaWebToken(login, AbortSignal.timeout(20_000));
 }
 
+/** Fetch the preview only for a saved draft. Reject HTML/JSON errors and oversized files. */
+export async function previewMisaUnpublishedInvoice(login: MisaLogin, refId: string): Promise<Buffer> {
+  if (!/^[0-9a-f-]{36}$/i.test(refId)) throw new Error("Mã hóa đơn nháp MISA không hợp lệ");
+  const { token } = await misaWebToken(login);
+  const response = await fetch(`${BASE}/v2/einvoice/preview?refId=${encodeURIComponent(refId)}`, {
+    headers: { Authorization: `Bearer ${token}`, TaxCode: login.taxCode },
+    signal: AbortSignal.timeout(20_000),
+  });
+  const length = Number(response.headers.get("content-length") ?? 0);
+  if (!response.ok || length > 10 * 1024 * 1024) throw new Error("MISA chưa trả bản xem trước hóa đơn nháp");
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.length < 100 || bytes.length > 10 * 1024 * 1024 ||
+      bytes.subarray(0, 5).toString("ascii") !== "%PDF-") {
+    throw new Error("MISA chưa trả tệp PDF xem trước hợp lệ");
+  }
+  return bytes;
+}
+
 /** Result is accepted only after MISA GET confirms the same RefID remains unpublished. */
 export async function createMisaUnpublishedInvoice(login: MisaLogin, input: MisaDraftInput): Promise<{ refId: string }> {
   const signal = AbortSignal.timeout(25_000);

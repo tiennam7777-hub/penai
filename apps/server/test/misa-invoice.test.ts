@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { InboxMessageRow } from "@penai/db";
-import { createMisaUnpublishedInvoice, lookupMisaBuyerCompany, verifyMisaWebConnection } from "../src/misa-api.js";
+import { createMisaUnpublishedInvoice, lookupMisaBuyerCompany,
+  previewMisaUnpublishedInvoice, verifyMisaWebConnection } from "../src/misa-api.js";
 import { hasConfirmedBuyerCompany, hasExplicitVatApproval, invoiceRequestFingerprint,
+  customerInvoiceTaxCode, hasRecentCustomerInvoiceRequest, isInvoiceConfirmation,
   parseInvoiceEvidence, staffInvoiceFingerprint } from "../src/misa-invoice-extract.js";
 
 const originalFetch = globalThis.fetch;
@@ -82,6 +84,19 @@ describe("MISA invoice draft", () => {
     expect(await lookupMisaBuyerCompany(login, "0311111111")).toMatchObject({ address: "42 Điện Biên Phủ" });
   });
 
+  it("accepts only a PDF preview from MISA", async () => {
+    const bytes = Buffer.concat([Buffer.from("%PDF-1.7\n"), Buffer.alloc(150)]);
+    globalThis.fetch = vi.fn(async (url: string) => url.endsWith("/v2/oauth")
+      ? new Response(JSON.stringify({ access_token: "a".repeat(30), TaxCode: login.taxCode, CompanyID: 9480 }))
+      : new Response(bytes, { headers: { "content-type": "application/pdf" } })) as typeof fetch;
+    expect(await previewMisaUnpublishedInvoice(login, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")).toEqual(bytes);
+    globalThis.fetch = vi.fn(async (url: string) => url.endsWith("/v2/oauth")
+      ? new Response(JSON.stringify({ access_token: "a".repeat(30), TaxCode: login.taxCode, CompanyID: 9480 }))
+      : new Response("<html>not a PDF</html>")) as typeof fetch;
+    await expect(previewMisaUnpublishedInvoice(login, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"))
+      .rejects.toThrow("PDF");
+  });
+
   it("uses one customer request as the duplicate guard", () => {
     const row = (id: string, direction: "in" | "out", text: string) => ({ id, direction, text,
       sentAt: new Date(), source: "zalo" }) as unknown as InboxMessageRow;
@@ -93,5 +108,11 @@ describe("MISA invoice draft", () => {
     expect(invoiceRequestFingerprint([row("old", "in", "thông tin XHD như cũ nhé")])).not.toBeNull();
     expect(staffInvoiceFingerprint(parseInvoiceEvidence(JSON.stringify(sample))!)).toBe(
       staffInvoiceFingerprint(parseInvoiceEvidence(JSON.stringify(sample))!));
+    expect(hasRecentCustomerInvoiceRequest([row("req-1", "in", "Xhd cho a"), row("yes", "in", "Ok")])).toBe(true);
+    expect(hasRecentCustomerInvoiceRequest([row("req-1", "in", "Xhd cho a"), row("reset", "in", "/new")])).toBe(false);
+    expect(isInvoiceConfirmation("Ok")).toBe(true);
+    expect(isInvoiceConfirmation("Ok nhưng đổi công ty")).toBe(false);
+    expect(customerInvoiceTaxCode("Công ty A, MST: 0312767097")).toBe("0312767097");
+    expect(customerInvoiceTaxCode("Gọi 0938699916 nhé")).toBeNull();
   });
 });

@@ -2,7 +2,7 @@
 
 Trang quản trị MISA meInvoice xác minh tài khoản và mã số thuế bằng OAuth, lưu mật khẩu mã hóa. Nút **Kiểm tra kết nối đã lưu** dùng thông tin đang lưu, không thay đổi mật khẩu. Xác minh đăng nhập và đọc dữ liệu chưa chứng minh quyền ghi hóa đơn nháp.
 
-Khách có thể yêu cầu hóa đơn trong hội thoại. Nhân viên dùng `-xhd` trong DM Zalo Hot 1/4/6 để yêu cầu tạo nháp. Lệnh nhập trong Inbox web được xử lý nội bộ. Lệnh gửi từ điện thoại đã đi qua Zalo trước khi PenAI thu hồi; PenAI chỉ xử lý khi thu hồi thành công.
+Khách có thể yêu cầu hóa đơn trong hội thoại, kể cả câu ngắn như “Xhd cho a”. PenAI tra MST, hỏi xác nhận đúng tên pháp lý đầy đủ, đợi báo VAT và khách đồng ý rồi tự thử tạo nháp khi cờ tạo nháp đã được bật. Nhân viên cũng có thể dùng `-xhd` trong DM Zalo Hot 1/4/6. Lệnh nhập trong Inbox web được xử lý nội bộ. Lệnh gửi từ điện thoại đã đi qua Zalo trước khi PenAI thu hồi; PenAI chỉ xử lý khi thu hồi thành công. MST bên mua trùng MST bên bán bị chặn để xác minh lại giao dịch.
 
 Trước khi lập nháp, PenAI kiểm tra lịch sử chat, mã số thuế người mua, tên pháp lý đầy đủ và địa chỉ tra từ MISA. Phải hỏi khách xác nhận đúng tên công ty, có câu trả lời đồng ý sau đó; tên người mua chỉ điền nếu khách yêu cầu. Giá shop chốt chưa gồm VAT. Phải có tin báo đúng VAT 5% cho hàng thường hoặc 8% cho lan ghép lũa và tin khách đồng ý sau đó. Không suy diễn từ lời AI, dữ liệu thiếu hoặc thông tin hóa đơn cũ không hiện trong lịch sử.
 
@@ -10,7 +10,9 @@ Hàng thường dùng HH00001, tên Hoa Lan Hồ Điệp, đơn vị **Cây**, s
 
 API MISA `POST /api/v2/SAInvoice/Insert` lưu hóa đơn; PenAI chỉ nhận thành công sau khi `GET /api/v2/SAInvoice/Get/{id}` xác minh `PublishStatus = 0`. Một yêu cầu chỉ POST một lần; lỗi hoặc hết giờ chờ phải đối chiếu MISA trước khi thử lại. PenAI không ghi nhận thanh toán hay ký/phát hành từ lệnh `-xhd`.
 
-Hiện `misa_credentials.draft_enabled = false`: chưa thử POST/GET với hóa đơn thật có kiểm soát. Vì thế `-xhd` chưa tạo nháp, và chức năng gửi bản xem trước cho khách chưa hoạt động. `-xuat` được giữ làm lệnh nội bộ nhưng luôn báo chưa bật, không gọi API phát hành. Chỉ triển khai ký/phát hành sau khi HSM/ký từ xa được cấu hình và kiểm tra riêng với một hóa đơn nháp hợp lệ.
+Sau khi MISA xác nhận `PublishStatus = 0`, PenAI tải PDF xem trước từ `/api/v2/einvoice/preview` và gửi vào đúng DM khách, ghi rõ **chưa phát hành**. Nếu MISA không trả PDF hợp lệ hoặc Zalo gửi lỗi, bản nháp vẫn được ghi nhận, còn PenAI báo nhân viên cần kiểm tra và gửi lại thủ công; không tự POST hóa đơn thêm lần nữa.
+
+Hiện `misa_credentials.draft_enabled = false`: chưa thử POST/GET với hóa đơn thật có kiểm soát. Vì thế yêu cầu khách và `-xhd` đều chưa tạo nháp hay gửi PDF. `-xuat` được giữ làm lệnh nội bộ nhưng luôn báo chưa bật, không gọi API phát hành. Chỉ triển khai ký/phát hành sau khi HSM/ký từ xa được cấu hình và kiểm tra riêng với một hóa đơn nháp hợp lệ.
 
 ## Nhóm Kế Toán Orchids World
 
