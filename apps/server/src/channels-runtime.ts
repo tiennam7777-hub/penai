@@ -81,7 +81,7 @@ import { createKiotVietOrchidDraft, readKiotVietOrderSlip } from "./kiotviet-api
 import { withKiotVietSlipImage } from "./kiotviet-slip-image.js";
 import { kiotVietBillNotice } from "./kiotviet-bill-notice.js";
 import { createMisaUnpublishedInvoice } from "./misa-api.js";
-import { extractInvoiceEvidence, invoiceRequestFingerprint } from "./misa-invoice-extract.js";
+import { extractInvoiceEvidence, hasExplicitVatApproval, invoiceRequestFingerprint } from "./misa-invoice-extract.js";
 import { requestedOrchidYellowSamples, orchidYellowSamplePath } from "./orchid-yellow-samples.js";
 
 /** Handler + channel theo channelId — cho webhook route (WhatsApp, Teams) dùng. */
@@ -643,6 +643,9 @@ export function makeInboundHandler(
       }
       const rate = credentials.vatRate;
       if (![0, 5, 8, 10].includes(rate)) throw new Error("Mức thuế GTGT MISA chưa hợp lệ");
+      if (credentials.priceIncludesVat || !hasExplicitVatApproval(history, evidence, rate)) {
+        throw new Error("Chưa thấy nhân viên báo VAT 5% và khách đồng ý trong hội thoại; chưa tạo hóa đơn");
+      }
       const price = evidence.totalPrice;
       const beforeVat = credentials.priceIncludesVat ? Math.round(price / (1 + rate / 100)) : price;
       if (credentials.priceIncludesVat && beforeVat + Math.round(beforeVat * rate / 100) !== price) {

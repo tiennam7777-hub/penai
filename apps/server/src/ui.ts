@@ -1038,7 +1038,7 @@ export const INDEX_HTML = `<!doctype html>
     var m = page("MISA meInvoice", "Kết nối API để lệnh -xhd lưu hóa đơn nháp, không ký hoặc phát hành");
     var c = card(m);
     c.innerHTML = '<div id="misaStatus" class="muted">Đang kiểm tra...</div>' +
-      '<p class="muted">Chỉ lưu sau khi xác thực được API MISA. Mật khẩu được mã hóa trong PenAI và không hiện lại. -xhd chỉ chạy khi hội thoại có đủ thông tin công ty, mặt hàng và giá chốt; lệnh không gửi cho khách.</p>' +
+      '<p class="muted">Chỉ lưu sau khi MISA xác thực đúng mã số thuế. Mật khẩu được mã hóa trong PenAI và không hiện lại. Giá shop chốt chưa gồm VAT 5%; -xhd chỉ chạy khi nhân viên đã báo VAT 5% và khách đồng ý trong hội thoại, đủ thông tin xuất hóa đơn. Lệnh không gửi cho khách và vẫn chờ kiểm tra lưu nháp trước khi bật.</p>' +
       '<label>Mã số thuế đơn vị bán</label><input id="misaTax" value="0312767097" autocomplete="off" style="width:100%">' +
       '<label>Tài khoản đăng nhập MISA</label><input id="misaUser" autocomplete="username" style="width:100%">' +
       '<label>Mật khẩu MISA</label><input id="misaPass" type="password" autocomplete="new-password" style="width:100%">' +

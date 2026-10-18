@@ -1,27 +1,27 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { InboxMessageRow } from "@penai/db";
 import { createMisaUnpublishedInvoice, verifyMisaWebConnection } from "../src/misa-api.js";
-import { invoiceRequestFingerprint, parseInvoiceEvidence } from "../src/misa-invoice-extract.js";
+import { hasExplicitVatApproval, invoiceRequestFingerprint, parseInvoiceEvidence } from "../src/misa-invoice-extract.js";
 
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
 
 describe("MISA invoice draft", () => {
   const login = { taxCode: "0312767097", username: "account@example.com", password: "secret-pass" };
-  it("verifies account with read-only API before saving credentials", async () => {
+  it("verifies the OAuth company identity before saving credentials", async () => {
     const calls = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "a".repeat(30), TaxCode: login.taxCode, CompanyID: 9480 }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { TaxCode: login.taxCode } }), { status: 200 }));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "a".repeat(30), TaxCode: login.taxCode, CompanyID: 9480 }), { status: 200 }));
     globalThis.fetch = calls;
     await verifyMisaWebConnection(login);
-    expect(calls).toHaveBeenCalledTimes(2);
+    expect(calls).toHaveBeenCalledTimes(1);
     expect(String(calls.mock.calls[0]![0])).toContain("/v2/oauth");
-    expect(String(calls.mock.calls[1]![0])).toContain("/v2/user/getcurent");
+    calls.mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "a".repeat(30), TaxCode: "0311111111", CompanyID: 9480 }), { status: 200 }));
+    await expect(verifyMisaWebConnection(login)).rejects.toThrow("Mã số thuế");
   });
 
   it("only inserts an unpublished invoice and confirms its saved state", async () => {
     const calls = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.endsWith("/v2/oauth")) return new Response(JSON.stringify({ access_token: "a".repeat(30), CompanyID: 9480 }));
+      if (url.endsWith("/v2/oauth")) return new Response(JSON.stringify({ access_token: "a".repeat(30), TaxCode: login.taxCode, CompanyID: 9480 }));
       if (url.endsWith("/SAInvoice/Insert")) return new Response(JSON.stringify({ success: true }));
       const refId = new URL(url).searchParams.get("id");
       return new Response(JSON.stringify({ data: { RefID: refId, PublishStatus: 0 } }));
@@ -47,6 +47,19 @@ describe("MISA invoice draft", () => {
     expect(parseInvoiceEvidence(JSON.stringify({ buyerName: "Công ty A", buyerTaxCode: "",
       buyerAddress: "TP HCM", buyerEmail: "buyer@example.com", itemName: "Chậu lan", totalPrice: 1_000_000 })))
       .toBeNull();
+  });
+
+  it("requires a human VAT 5% quote followed by customer approval", () => {
+    const row = (direction: "in" | "out", source: string, text: string) =>
+      ({ direction, source, text }) as InboxMessageRow;
+    const evidence = parseInvoiceEvidence(JSON.stringify({ buyerName: "Công ty A", buyerTaxCode: "0311111111",
+      buyerAddress: "TP HCM", buyerEmail: "buyer@example.com", itemName: "Chậu lan", totalPrice: 1_000_000,
+      vatQuoteText: "Giá 1 triệu chưa VAT, VAT 5% là 50 nghìn", vatAcceptanceText: "Ok, xuất giúp chị" }))!;
+    const messages = [row("out", "web", evidence.vatQuoteText), row("in", "zalo", evidence.vatAcceptanceText)];
+    expect(hasExplicitVatApproval(messages, evidence, 5)).toBe(true);
+    expect(hasExplicitVatApproval(messages, evidence, 10)).toBe(false);
+    expect(hasExplicitVatApproval([...messages].reverse(), evidence, 5)).toBe(false);
+    expect(hasExplicitVatApproval([row("out", "agent", evidence.vatQuoteText), messages[1]!], evidence, 5)).toBe(false);
   });
 
   it("uses one customer request as the duplicate guard", () => {

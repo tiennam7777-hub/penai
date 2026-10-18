@@ -48,8 +48,8 @@ export async function misaWebToken(login: MisaLogin, signal = AbortSignal.timeou
   if (!response.ok || typeof token !== "string" || token.length < 20) {
     throw new Error("MISA chưa xác thực được API web cho tài khoản này. Kiểm tra quyền tích hợp hoặc liên hệ MISA.");
   }
-  const returnedTaxCode = body.TaxCode ?? body.taxCode;
-  if (typeof returnedTaxCode === "string" && returnedTaxCode !== login.taxCode) {
+  const returnedTaxCode = body.TaxCode ?? body.taxCode ?? payloadObject(body.data).TaxCode;
+  if (String(returnedTaxCode ?? "").trim() !== login.taxCode) {
     throw new Error("Mã số thuế MISA trả về không khớp tài khoản cần kết nối");
   }
   const companyId = Number(body.CompanyID ?? body.companyID ?? body.companyId);
@@ -60,17 +60,9 @@ export async function misaWebToken(login: MisaLogin, signal = AbortSignal.timeou
 }
 
 export async function verifyMisaWebConnection(login: MisaLogin): Promise<void> {
-  const signal = AbortSignal.timeout(20_000);
-  const { token } = await misaWebToken(login, signal);
-  const response = await fetch(`${BASE}/v2/user/getcurent`, {
-    headers: { Authorization: `Bearer ${token}`, TaxCode: login.taxCode }, signal,
-  });
-  const body = await readPayload(response);
-  const data = payloadObject(body.data ?? body);
-  const returnedTaxCode = data.TaxCode ?? data.taxCode;
-  if (!response.ok || returnedTaxCode !== login.taxCode) {
-    throw new Error("MISA không cho tài khoản này đọc thông tin công ty qua API");
-  }
+  // OAuth itself returns the authenticated company's TaxCode and CompanyID.
+  // getcurent is an optional legacy endpoint and can fail for valid accounts.
+  await misaWebToken(login, AbortSignal.timeout(20_000));
 }
 
 /** Result is accepted only after MISA GET confirms the same RefID remains unpublished. */
