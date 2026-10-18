@@ -365,7 +365,7 @@ export const INDEX_HTML = `<!doctype html>
     { id: "providers", icon: "🔌", label: "Providers" },
     { id: "kiotviet", icon: "🧾", label: "KiotViet", admin: true },
     { id: "misa", icon: "📄", label: "MISA meInvoice", admin: true },
-    { id: "stem-report", icon: "🌸", label: "Báo cáo cắm hoa", admin: true },
+    { id: "stem-report", icon: "🌸", label: "Báo cáo cắm hoa" },
     { id: "channels", icon: "📡", label: "Channels" },
     { id: "cron", icon: "⏰", label: "Cron & lịch hẹn" },
     { id: "users", icon: "👤", label: "Người dùng", admin: true },
@@ -401,7 +401,7 @@ export const INDEX_HTML = `<!doctype html>
     }
     if (isModerator()) {
       nav.appendChild(el("div", { "class": "grp" }, "Công việc"));
-      ["chat", "channels", "library", "contacts"].concat((state.inboxChannels || []).length ? ["inbox"] : []).forEach(function (id) {
+      ["chat", "channels", "library", "contacts", "stem-report"].concat((state.inboxChannels || []).length ? ["inbox"] : []).forEach(function (id) {
         var n = NAV.find(function (item) { return item.id === id; });
         nav.appendChild(el("a", { href: "#/" + id, "class": cur === id ? "active" : "" }, n.icon + " <span>" + (id === "channels" ? "Chờ duyệt" : n.label) + "</span>"));
       });
@@ -956,7 +956,7 @@ export const INDEX_HTML = `<!doctype html>
     var today = new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 7);
     c.innerHTML = '<div class="row"><label>Tháng <input id="stemMonth" type="month" value="' + today + '"></label>' +
       '<button id="stemLoad">Xem báo cáo</button><button id="stemExport" class="ghost">Tải Excel</button></div>' +
-      '<p class="muted">Mỗi tin có tên khách và một số cành hợp lệ được cộng một lần. Mở lại trang để xem số mới nhất; đối chiếu sheet Cần kiểm tra trước khi chốt KPI.</p>' +
+      '<p class="muted">File cố định nằm trong Thư viện file → Chung cả bộ phận → bao-cao-cam-hoa. Tin có tên khách và một số cành hợp lệ được cộng một lần; đối chiếu sheet Cần kiểm tra trước khi chốt KPI.</p>' +
       '<div id="stemSummary">Đang tải...</div><h3>Chi tiết</h3><div id="stemDetail"></div>';
     function load() {
       var month = $("#stemMonth", c).value;
@@ -965,6 +965,8 @@ export const INDEX_HTML = `<!doctype html>
         var total = r.monthly.reduce(function (n, x) { return n + x.stems; }, 0);
         var box = $("#stemSummary", c); box.innerHTML = "";
         box.appendChild(el("p", null, "<b>" + total + " cành</b> · " + r.entries.length + " lượt · " + r.review.length + " tin cần kiểm tra"));
+        var rel = "bao-cao-cam-hoa/bao-cao-cam-hoa-" + r.month + ".xlsx";
+        box.appendChild(el("p", null, 'File đã lưu: <code>' + esc(r.libraryPath) + '</code> · <a href="/v1/library/shared/file?path=' + encodeURIComponent(rel) + '&dl=1">Mở/tải file</a> · <a href="#/library">Thư viện file</a>'));
         box.appendChild(table(["Người gửi", "Số lượt", "Tổng cành"], r.monthly, function (x) {
           var tr = el("tr"); tr.innerHTML = "<td>" + esc(x.senderName) + "</td><td>" + x.jobs + "</td><td><b>" + x.stems + "</b></td>"; return tr;
         }));
@@ -5102,7 +5104,7 @@ export const INDEX_HTML = `<!doctype html>
     var id = location.hash.replace("#/", "") || (isMember() || isModerator() ? "chat" : "overview");
     var qi = id.indexOf("?"); state.routeQuery = qi >= 0 ? id.slice(qi + 1) : ""; if (qi >= 0) id = id.slice(0, qi);
     if (isMember() && !(id === "inbox" && (state.inboxChannels || []).length)) id = "chat";
-    if (isModerator() && ["chat", "channels", "library", "contacts"].indexOf(id) < 0 && !(id === "inbox" && (state.inboxChannels || []).length)) id = "chat";
+    if (isModerator() && ["chat", "channels", "library", "contacts", "stem-report"].indexOf(id) < 0 && !(id === "inbox" && (state.inboxChannels || []).length)) id = "chat";
     var n = null; for (var i = 0; i < NAV.length; i++) if (NAV[i].id === id) n = NAV[i];
     if (n && n.admin && !isAdmin()) id = "overview";
     var fn = PAGES[id] || PAGES.overview;

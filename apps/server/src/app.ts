@@ -293,7 +293,7 @@ import {
 import { registerLibraryRoutes } from "./library.js";
 import { registerInboxRoutes } from "./inbox.js";
 import { buildXlsx, type XlsxCell } from "./xlsx.js";
-import { buildOrchidStemReport } from "./orchid-stem-report.js";
+import { buildOrchidStemReport, orchidStemWorkbook, refreshOrchidStemFile } from "./orchid-stem-report.js";
 import { isMcpPublicPath, registerMcpServerRoutes } from "./mcp-server.js";
 import { registerBrowserRoutes } from "./browser-runtime.js";
 
@@ -1200,7 +1200,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   // ===== KiotViet Retail API: admin-only credentials and order draft status =====
   async function orchidStemReport(req: FastifyRequest, reply: FastifyReply) {
-    if (!requireRole(req, reply, "ws_admin")) return null;
+    if (!requireModeratorOrRole(req, reply, "ws_admin")) return null;
     const month = String((req.query as { month?: string }).month ?? "");
     if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(month)) {
       reply.code(400).send({ error: "Tháng phải có dạng YYYY-MM" }); return null;
@@ -1215,7 +1215,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const start = new Date(Date.UTC(year!, mon! - 1, 1) - 7 * 3600_000);
     const end = new Date(Date.UTC(year!, mon!, 1) - 7 * 3600_000);
     const messages = await listOrchidStemMessages(db, req.authCtx, channel.id, group.slice(6), start, end);
-    return { month, channelName: channel.name, groupId: group.slice(6), ...buildOrchidStemReport(messages) };
+    await refreshOrchidStemFile(db, req.authCtx, channel.id, group.slice(6), month, deps.config.dataDir);
+    return { month, channelName: channel.name, groupId: group.slice(6),
+      libraryPath: `shared/bao-cao-cam-hoa/bao-cao-cam-hoa-${month}.xlsx`, ...buildOrchidStemReport(messages) };
   }
 
   app.get("/v1/orchid-stem-report", async (req, reply) => {
@@ -1225,24 +1227,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.get("/v1/orchid-stem-report.xlsx", async (req, reply) => {
     const report = await orchidStemReport(req, reply);
     if (!report) return;
-    const buf = buildXlsx([
-      { name: "Chi tiết", widths: [20, 25, 24, 30, 12, 48, 22], rows: [
-        ["Ngày", "Người gửi", "UID người gửi", "Tên khách", "Số cành", "Tin gốc", "Mã tin Zalo"],
-        ...report.entries.map(e => [e.day, e.senderName, e.senderId, e.customerName, e.stems, e.text, e.msgId]),
-      ] },
-      { name: "Theo ngày", widths: [20, 25, 24, 16, 16], rows: [
-        ["Ngày", "Người gửi", "UID người gửi", "Số lượt", "Tổng cành"],
-        ...report.daily.map(d => [d.day, d.senderName, d.senderId, d.jobs, d.stems]),
-      ] },
-      { name: "Theo tháng", widths: [25, 24, 16, 16], rows: [
-        ["Người gửi", "UID người gửi", "Số lượt", "Tổng cành"],
-        ...report.monthly.map(m => [m.senderName, m.senderId, m.jobs, m.stems]),
-      ] },
-      { name: "Cần kiểm tra", widths: [22, 25, 24, 50, 22], rows: [
-        ["Thời điểm", "Người gửi", "UID người gửi", "Tin chưa cộng", "Mã tin Zalo"],
-        ...report.review.map(m => [new Date(m.sentAt), m.senderName, m.senderId, m.text, m.msgId]),
-      ] },
-    ]);
+    const buf = orchidStemWorkbook(report);
     return reply.header("cache-control", "no-store")
       .header("content-disposition", `attachment; filename="bao-cao-cam-hoa-${report.month}.xlsx"`)
       .type("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet").send(buf);

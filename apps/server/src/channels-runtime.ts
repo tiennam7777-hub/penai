@@ -78,6 +78,7 @@ import {
   orchidCancellationFingerprint, orchidOrderSessionFingerprint, orchidOrderPayloadFingerprint,
 } from "./orchid-order-dispatch.js";
 import { stemCountForPhoto } from "./orchid-photo-count.js";
+import { orchidStemDay, refreshOrchidStemFile } from "./orchid-stem-report.js";
 import { knownOrchidShippingHint, orchidShippingHintContext, completeOrchidShippingReply, orchidDeliveryPriorityContext } from "./orchid-shipping-reply.js";
 import { orchidCompanyPaymentContext } from "./orchid-payment-context.js";
 import { classifyOrchidFlowerComplaint, formatOrchidFlowerComplaintDispatch, orchidFlowerComplaintFingerprint } from "./orchid-flower-complaint.js";
@@ -633,6 +634,13 @@ export function makeInboundHandler(
   channel: EnabledChannel,
 ): InboundHandler {
   const { db } = rt.db;
+  const stemGroup = channel.config["orchid_stem_report_group"];
+  if (channel.kind === "zalo_personal" && typeof stemGroup === "string" && /^group:\d+$/.test(stemGroup)) {
+    const month = orchidStemDay(new Date().toISOString()).slice(0, 7);
+    void refreshOrchidStemFile(db, systemContext(channel.workspaceId), channel.id,
+      stemGroup.slice(6), month, rt.config.dataDir)
+      .catch(error => logger.warn(`Không tạo file báo cáo cắm hoa: ${String(error)}`));
+  }
   if (channel.kind === "zalo_personal" &&
       ["cdf2a276-fa3d-4fe3-a46b-3ce1162a7678", "657116ed-7570-4f2e-8550-a3d323618724", "6bc2dc02-3d10-4737-931d-a37532bcabb2"].includes(channel.id)) {
     orchidMisaStaffCommands.set(channel.id, async (threadId, command) => {
@@ -824,6 +832,12 @@ export function makeInboundHandler(
   }
   return async (msg, hooks?: RunHooks): Promise<InboundResult> => {
     const ctx = systemContext(channel.workspaceId);
+    if (msg.channelKind === "zalo_personal" && msg.peerKind === "group" &&
+        channel.config["orchid_stem_report_group"] === msg.chatKey && /\d/.test(msg.text)) {
+      const month = orchidStemDay((msg.sentAt ?? new Date()).toISOString()).slice(0, 7);
+      await refreshOrchidStemFile(db, ctx, channel.id, msg.chatKey.slice(6), month, rt.config.dataDir)
+        .catch(error => logger.warn(`Không cập nhật file báo cáo cắm hoa: ${String(error)}`));
+    }
     const staffDelegation = orchidStaffDelegations.get(msg);
     const hasPhoto = (msg.media ?? []).some((m) => m.kind === "photo");
     const silentPhoto = hasPhoto && !msg.text.trim();

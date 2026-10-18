@@ -199,6 +199,7 @@ export function memberAllowed(method: string, path: string): boolean {
 export function moderatorAllowed(method: string, path: string): boolean {
   const m = method.toUpperCase();
   if (memberAllowed(m, path)) return true;
+  if (m === "GET" && (path === "/v1/orchid-stem-report" || path === "/v1/orchid-stem-report.xlsx")) return true;
   // Moderator có đầy đủ chức năng Inbox như quản trị. Mỗi route vẫn kiểm tra
   // workspace và canUseInboxChannel; không mở API cấu hình Channels.
   if (["GET", "POST", "PUT", "PATCH", "DELETE"].includes(m) &&

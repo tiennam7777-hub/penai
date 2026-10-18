@@ -1,4 +1,11 @@
 import type { OrchidStemMessage } from "@penai/db";
+import { listOrchidStemMessages, type Db } from "@penai/db";
+import type { WorkspaceContext } from "@penai/shared";
+import { mkdir, rename, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { randomBytes } from "node:crypto";
+import { buildXlsx } from "./xlsx.js";
+import { sharedDirFor } from "./library-paths.js";
 
 export interface OrchidStemEntry extends OrchidStemMessage {
   customerName: string;
@@ -44,4 +51,51 @@ export function buildOrchidStemReport(messages: OrchidStemMessage[]) {
     m.senderName = entry.senderName; m.stems += entry.stems; m.jobs++; monthly.set(entry.senderId, m);
   }
   return { entries, review, daily: [...daily.values()], monthly: [...monthly.values()] };
+}
+
+export function orchidStemWorkbook(report: ReturnType<typeof buildOrchidStemReport>): Buffer {
+  return buildXlsx([
+    { name: "Chi tiết", widths: [20, 25, 24, 30, 12, 48, 22], rows: [
+      ["Ngày", "Người gửi", "UID người gửi", "Tên khách", "Số cành", "Tin gốc", "Mã tin Zalo"],
+      ...report.entries.map(e => [e.day, e.senderName, e.senderId, e.customerName, e.stems, e.text, e.msgId]),
+    ] },
+    { name: "Theo ngày", widths: [20, 25, 24, 16, 16], rows: [
+      ["Ngày", "Người gửi", "UID người gửi", "Số lượt", "Tổng cành"],
+      ...report.daily.map(d => [d.day, d.senderName, d.senderId, d.jobs, d.stems]),
+    ] },
+    { name: "Theo tháng", widths: [25, 24, 16, 16], rows: [
+      ["Người gửi", "UID người gửi", "Số lượt", "Tổng cành"],
+      ...report.monthly.map(m => [m.senderName, m.senderId, m.jobs, m.stems]),
+    ] },
+    { name: "Cần kiểm tra", widths: [22, 25, 24, 50, 22], rows: [
+      ["Thời điểm", "Người gửi", "UID người gửi", "Tin chưa cộng", "Mã tin Zalo"],
+      ...report.review.map(m => [new Date(m.sentAt), m.senderName, m.senderId, m.text, m.msgId]),
+    ] },
+  ]);
+}
+
+const refreshes = new Map<string, Promise<string>>();
+/** Persist the current month as a single Excel file in the visible shared library. */
+export function refreshOrchidStemFile(db: Db, ctx: WorkspaceContext, channelId: string,
+  threadId: string, month: string, dataDir: string): Promise<string> {
+  const key = `${ctx.workspaceId}:${channelId}:${month}`;
+  const prior = refreshes.get(key) ?? Promise.resolve("");
+  const next = prior.catch(() => "").then(async () => {
+    const [year, mon] = month.split("-").map(Number);
+    if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(month)) throw new Error("Tháng không hợp lệ");
+    const start = new Date(Date.UTC(year!, mon! - 1, 1) - 7 * 3600_000);
+    const end = new Date(Date.UTC(year!, mon!, 1) - 7 * 3600_000);
+    const messages = await listOrchidStemMessages(db, ctx, channelId, threadId, start, end);
+    const report = buildOrchidStemReport(messages);
+    const dir = join(sharedDirFor(dataDir, ctx.workspaceId), "bao-cao-cam-hoa");
+    await mkdir(dir, { recursive: true });
+    const file = join(dir, `bao-cao-cam-hoa-${month}.xlsx`);
+    const temp = join(dir, `.bao-cao-${randomBytes(8).toString("hex")}.tmp`);
+    await writeFile(temp, orchidStemWorkbook(report));
+    await rename(temp, file);
+    return file;
+  });
+  refreshes.set(key, next);
+  void next.finally(() => { if (refreshes.get(key) === next) refreshes.delete(key); }).catch(() => {});
+  return next;
 }
