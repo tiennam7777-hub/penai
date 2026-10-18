@@ -1035,10 +1035,10 @@ export const INDEX_HTML = `<!doctype html>
   };
 
   PAGES.misa = function () {
-    var m = page("MISA meInvoice", "Kết nối API để lệnh -xhd lưu hóa đơn nháp, không ký hoặc phát hành");
+    var m = page("MISA meInvoice", "Khách yêu cầu xuất hóa đơn hoặc nhân viên dùng -xhd: lưu và gửi bản nháp, không phát hành");
     var c = card(m);
     c.innerHTML = '<div id="misaStatus" class="muted">Đang kiểm tra...</div>' +
-      '<p class="muted">Chỉ lưu sau khi MISA xác thực đúng mã số thuế. Mật khẩu được mã hóa trong PenAI và không hiện lại. Giá shop chốt chưa gồm VAT; hàng thường dùng 5%, ghép lũa thực tế dùng 8%. Chỉ lập nháp khi đã báo đúng VAT, khách đồng ý, xác nhận tên công ty và đủ thông tin đơn hàng. -xhd còn chờ thử lưu nháp; -xuat chưa bật ký số/phát hành.</p>' +
+      '<p class="muted">Có hai cách yêu cầu hóa đơn nháp: khách yêu cầu trong chat, hoặc nhân viên dùng -xhd. Mật khẩu MISA được mã hóa trong PenAI và không hiện lại. Giá shop chốt chưa gồm VAT; hàng thường dùng 5%, ghép lũa thực tế dùng 8%. Chỉ lập và gửi bản nháp khi đã báo đúng VAT, khách đồng ý, xác nhận tên công ty và đủ thông tin đơn hàng. Khách duyệt bản nháp không làm hóa đơn phát hành; việc phát hành chỉ được phép sau lệnh nhân viên -xuat. Tạo nháp qua API còn chờ kiểm tra; phát hành chưa bật ký số.</p>' +
       '<label>Mã số thuế đơn vị bán</label><input id="misaTax" value="0312767097" autocomplete="off" style="width:100%">' +
       '<label>Tài khoản đăng nhập MISA</label><input id="misaUser" autocomplete="username" style="width:100%">' +
       '<label>Mật khẩu MISA</label><input id="misaPass" type="password" autocomplete="new-password" style="width:100%">' +
@@ -1049,7 +1049,7 @@ export const INDEX_HTML = `<!doctype html>
     api("/v1/misa").then(function (j) {
       var x = j.connection;
       $("#misaStatus", c).textContent = x ? "Đã xác thực API cho MST " + x.taxCode + ", ký hiệu " + x.invoiceSeries +
-        (x.draftEnabled ? ". Lệnh -xhd đã bật." : ". Lệnh -xhd chờ kiểm tra lưu nháp.") : "Chưa kết nối MISA.";
+        (x.draftEnabled ? ". Đã bật tạo nháp khi khách yêu cầu hoặc nhân viên dùng -xhd." : ". Hai cách tạo nháp đang chờ kiểm tra API lưu nháp.") : "Chưa kết nối MISA.";
       if (x) {
         $("#misaVerifySaved", c).style.display = "";
         $("#misaTax", c).value = x.taxCode;
@@ -1072,7 +1072,7 @@ export const INDEX_HTML = `<!doctype html>
       api("/v1/misa", { method: "PUT", body: b }).then(function () {
         $("#misaPass", c).value = "";
         $("#misaVerifySaved", c).style.display = "";
-        $("#misaStatus", c).textContent = "Đã xác thực API cho MST " + b.taxCode + ", ký hiệu " + b.invoiceSeries + ". Lệnh -xhd chờ kiểm tra lưu nháp.";
+        $("#misaStatus", c).textContent = "Đã xác thực API cho MST " + b.taxCode + ", ký hiệu " + b.invoiceSeries + ". Hai cách tạo nháp đang chờ kiểm tra API lưu nháp.";
         $("#misaMsg", c).textContent = "Đã xác minh và lưu mã hóa.";
       }).catch(function (e) { $("#misaMsg", c).textContent = "Lần xác minh mới thất bại: " + e.message + ". Kết nối đã lưu trước đó không bị xóa; dùng nút Kiểm tra kết nối đã lưu."; })
         .finally(function () { $("#misaSave", c).disabled = false; });
@@ -1082,7 +1082,7 @@ export const INDEX_HTML = `<!doctype html>
       button.disabled = true;
       $("#misaMsg", c).textContent = "Đang kiểm tra bằng thông tin đã lưu...";
       api("/v1/misa/verify-saved").then(function (j) {
-        $("#misaMsg", c).textContent = j.valid ? "Kết nối đã lưu còn hoạt động với MISA; lệnh -xhd vẫn chờ kiểm tra lưu nháp." :
+        $("#misaMsg", c).textContent = j.valid ? "Kết nối đã lưu còn hoạt động với MISA; tạo nháp từ yêu cầu khách hoặc lệnh -xhd vẫn chờ kiểm tra API lưu nháp." :
           "Kết nối đã lưu hiện không xác thực được: " + j.error;
       }).catch(function (e) { $("#misaMsg", c).textContent = e.message; })
         .finally(function () { button.disabled = false; });
