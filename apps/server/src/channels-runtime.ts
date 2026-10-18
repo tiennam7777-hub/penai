@@ -684,7 +684,8 @@ export function makeInboundHandler(
           buyerAddress: buyer.address, buyerEmail: evidence.buyerEmail,
           buyerContact: evidence.buyerContact, itemName: line.itemName,
           itemCode: line.itemCode, unitName: line.unitName,
-          quantity: line.quantity, unitPrice: line.unitPrice, vatRate: line.vatRate,
+          quantity: line.quantity, unitPrice: line.unitPrice,
+          amountBeforeVat: line.amountBeforeVat, vatRate: line.vatRate,
           series: credentials.invoiceSeries,
         });
         await finishMisaInvoiceDraft(db, ctx, claimId, { refId: saved.refId });

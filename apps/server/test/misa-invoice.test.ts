@@ -34,7 +34,8 @@ describe("MISA invoice draft", () => {
       buyerName: "Công ty A", buyerTaxCode: "0311111111", buyerAddress: "TP HCM",
       buyerEmail: "buyer@example.com", buyerContact: "", itemName: "Hoa Lan Hồ Điệp",
       itemCode: "HH00001", unitName: "Cây",
-      quantity: 1, unitPrice: 1_000_000, vatRate: 10, series: "1C26TGP",
+      quantity: 1, unitPrice: 1_000_000, amountBeforeVat: 1_000_000,
+      vatRate: 10, series: "1C26TGP",
     });
     expect(saved.refId).toMatch(/^[0-9a-f-]{36}$/);
     const insert = calls.mock.calls.find((call) => String(call[0]).endsWith("/SAInvoice/Insert"))!;

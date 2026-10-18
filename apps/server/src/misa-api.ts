@@ -20,6 +20,7 @@ export interface MisaDraftInput {
   unitName: string;
   quantity: number;
   unitPrice: number;
+  amountBeforeVat: number;
   vatRate: number;
   series: string;
 }
@@ -112,7 +113,11 @@ export async function createMisaUnpublishedInvoice(login: MisaLogin, input: Misa
   const { token, companyId } = await misaWebToken(login, signal);
   const refId = randomUUID();
   const detailId = randomUUID();
-  const amount = input.quantity * input.unitPrice;
+  const amount = input.amountBeforeVat;
+  if (!Number.isSafeInteger(amount) || amount < 1 ||
+      Math.round(input.quantity * input.unitPrice) !== amount) {
+    throw new Error("Đơn giá và thành tiền hóa đơn không khớp sau làm tròn");
+  }
   const vat = Math.round(amount * input.vatRate / 100);
   const total = amount + vat;
   const detail = [{

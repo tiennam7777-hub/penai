@@ -36,8 +36,17 @@ export function calculateOrchidInvoiceLine(sale: OrchidInvoiceSale): OrchidInvoi
   if (!driftwood && amount / quantity > 250_000) {
     throw new Error("Đơn giá vượt 250.000đ/cành; cần nhân viên/kế toán kiểm tra cách ghi đúng hàng đã bán");
   }
-  if (amount % quantity !== 0) {
-    throw new Error("Không chia được đơn giá nguyên đồng theo số cành thực tế; cần kiểm tra cách ghi hóa đơn");
+  // Use the shortest decimal unit price whose extended amount rounds to the
+  // agreed whole-VND line amount.
+  let unitPrice = amount / quantity;
+  for (let digits = 0; digits <= 6; digits++) {
+    const scale = 10 ** digits;
+    const candidate = Math.round(unitPrice * scale) / scale;
+    if (Math.round(candidate * quantity) === amount) {
+      unitPrice = candidate;
+      break;
+    }
+    if (digits === 6) throw new Error("Không thể biểu diễn đơn giá với độ chính xác MISA hỗ trợ");
   }
   const vatRate = driftwood ? 8 : 5;
   const vatAmount = Math.round(amount * vatRate / 100);
@@ -45,7 +54,7 @@ export function calculateOrchidInvoiceLine(sale: OrchidInvoiceSale): OrchidInvoi
     itemCode: driftwood ? "HH00002" : "HH00001",
     itemName: "Hoa Lan Hồ Điệp",
     unitName: driftwood ? "Chậu" : "Cây",
-    quantity, unitPrice: amount / quantity, amountBeforeVat: amount,
+    quantity, unitPrice, amountBeforeVat: amount,
     vatRate, vatAmount, totalAfterVat: amount + vatAmount,
   };
 }

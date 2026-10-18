@@ -20,6 +20,15 @@ describe("Orchid invoice rules", () => {
     });
   });
 
+  it("uses the fewest decimal places needed for thirty stems and preserves the agreed total", () => {
+    expect(calculateOrchidInvoiceLine({ kind: "standard", actualStemCount: 30,
+      flowerAmount: 4_800_000, shippingFee: 160_000, tallPotFee: 0,
+      requestedInvoicePreTax: 4_960_000 })).toMatchObject({
+      quantity: 30, unitPrice: 165_333.33, amountBeforeVat: 4_960_000,
+      vatAmount: 248_000, totalAfterVat: 5_208_000,
+    });
+  });
+
   it("rejects a higher invoice amount without a matching real sale", () => {
     expect(() => calculateOrchidInvoiceLine({ kind: "standard", actualStemCount: 5,
       flowerAmount: 1_000_000, shippingFee: 0, tallPotFee: 0,
