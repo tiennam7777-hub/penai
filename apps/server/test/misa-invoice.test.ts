@@ -25,9 +25,14 @@ describe("MISA invoice draft", () => {
   it("only inserts an unpublished invoice and confirms its saved state", async () => {
     const calls = vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith("/v2/oauth")) return new Response(JSON.stringify({ access_token: "a".repeat(30), TaxCode: login.taxCode, CompanyID: 9480 }));
-      if (url.endsWith("/SAInvoice/Insert")) return new Response(JSON.stringify({ success: true, errorCode: [] }));
+      if (url.endsWith("/code/v3common/template")) return new Response(JSON.stringify({ success: true,
+        data: JSON.stringify([{ InvSeries: "1C26TGP", InvoiceType: 1,
+          IPTemplateID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", InvTemplateNo: "1" }]) }));
+      if (url.endsWith("/code/v3sainvoice/insertone")) return new Response(JSON.stringify({ success: true, errorCode: [] }));
       const refId = url.split("/").at(-1);
-      return new Response(JSON.stringify({ data: { RefID: refId, PublishStatus: 0 } }));
+      return new Response(JSON.stringify({ success: true, data: { RefID: refId,
+        PublishStatus: 0, TotalSaleAmountOC: 1_000_000, TotalVATAmountOC: 100_000,
+        TotalAmountOC: 1_100_000 } }));
     });
     globalThis.fetch = calls as typeof fetch;
     const saved = await createMisaUnpublishedInvoice(login, {
@@ -38,14 +43,15 @@ describe("MISA invoice draft", () => {
       vatRate: 10, series: "1C26TGP",
     });
     expect(saved.refId).toMatch(/^[0-9a-f-]{36}$/);
-    const insert = calls.mock.calls.find((call) => String(call[0]).endsWith("/SAInvoice/Insert"))!;
+    const insert = calls.mock.calls.find((call) => String(call[0]).endsWith("/code/v3sainvoice/insertone"))!;
     const body = JSON.parse(String(insert[1]?.body));
     expect(body.EntityState).toBe(1);
-    expect(JSON.parse(body.data).PublishStatus).toBe(0);
-    expect(JSON.parse(body.data).InvNo).toBe("<Chưa cấp số>");
-    expect(JSON.parse(body.data).ReceiverName).toBe("");
-    expect(JSON.parse(body.detail)[0].InventoryItemCode).toBe("HH00001");
-    expect(JSON.parse(body.detail)[0].UnitName).toBe("Cây");
+    expect(body.PublishStatus).toBe(0);
+    expect(body.InvNo).toBe("");
+    expect(body.ReceiverName).toBe("");
+    expect(body.InvoiceTemplateID).toBe("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+    expect(body.InvoiceDetails[0].InventoryItemCode).toBe("HH00001");
+    expect(body.InvoiceDetails[0].UnitName).toBe("Cây");
     expect(calls.mock.calls.map((call) => String(call[0])).join(" ")).not.toMatch(/publishinvoice|signinvoice/i);
   });
 

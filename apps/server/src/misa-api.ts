@@ -145,6 +145,14 @@ export async function inspectMisaInvoiceReadback(login: MisaLogin, refId: string
         templateNo: t.InvTemplateNo ?? null, templateId: t.InvoiceTemplateID ?? null };
     }),
   };
+  const previewResponse = await fetch(`${BASE}/v2/v3invoice/code/preview/${encodeURIComponent(refId)}`, {
+    headers: { Authorization: `Bearer ${token}`, TaxCode: login.taxCode },
+    signal: AbortSignal.timeout(15_000),
+  });
+  const previewBytes = Buffer.from(await previewResponse.arrayBuffer());
+  output.preview = { httpStatus: previewResponse.status,
+    contentType: previewResponse.headers.get("content-type"), bytes: previewBytes.length,
+    isPdf: previewBytes.subarray(0, 5).toString("ascii") === "%PDF-" };
   return output;
 }
 
@@ -152,7 +160,7 @@ export async function inspectMisaInvoiceReadback(login: MisaLogin, refId: string
 export async function previewMisaUnpublishedInvoice(login: MisaLogin, refId: string): Promise<Buffer> {
   if (!/^[0-9a-f-]{36}$/i.test(refId)) throw new Error("Mã hóa đơn nháp MISA không hợp lệ");
   const { token } = await misaWebToken(login);
-  const response = await fetch(`${BASE}/v2/einvoice/preview?refId=${encodeURIComponent(refId)}`, {
+  const response = await fetch(`${BASE}/v2/v3invoice/code/preview/${encodeURIComponent(refId)}`, {
     headers: { Authorization: `Bearer ${token}`, TaxCode: login.taxCode },
     signal: AbortSignal.timeout(20_000),
   });
@@ -166,11 +174,38 @@ export async function previewMisaUnpublishedInvoice(login: MisaLogin, refId: str
   return bytes;
 }
 
+async function misaV3Template(login: MisaLogin, token: string, series: string): Promise<{
+  templateId: string; templateNo: string;
+}> {
+  const response = await fetch(`${BASE}/v2/code/v3common/template`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, TaxCode: login.taxCode, "Content-Type": "application/json" },
+    body: JSON.stringify({ TypeInvoice: 1, TaxCode: login.taxCode,
+      UserName: login.username, Password: login.password }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  const body = await readPayload(response);
+  let data: unknown = body.data;
+  if (typeof data === "string") {
+    try { data = JSON.parse(data); } catch { data = null; }
+  }
+  const templates = Array.isArray(data) ? data : [];
+  const template = templates.map(payloadObject).find((t) =>
+    String(t.InvSeries ?? "") === series && Number(t.InvoiceType) === 1 && t.Inactive !== true);
+  const templateId = String(template?.IPTemplateID ?? "");
+  const templateNo = String(template?.InvTemplateNo ?? "");
+  if (!response.ok || body.success !== true || !/^[0-9a-f-]{36}$/i.test(templateId) || !templateNo) {
+    throw new Error(`MISA chưa trả mẫu hóa đơn có mã đang dùng cho ký hiệu ${series}; chưa lập nháp`);
+  }
+  return { templateId, templateNo };
+}
+
 /** Result is accepted only after MISA GET confirms the same RefID remains unpublished. */
 export async function createMisaUnpublishedInvoice(login: MisaLogin, input: MisaDraftInput,
   refId = randomUUID()): Promise<{ refId: string }> {
   const signal = AbortSignal.timeout(25_000);
   const { token, companyId } = await misaWebToken(login, signal);
+  const template = await misaV3Template(login, token, input.series);
   const detailId = randomUUID();
   const amount = input.amountBeforeVat;
   if (!Number.isSafeInteger(amount) || amount < 1 ||
@@ -189,29 +224,33 @@ export async function createMisaUnpublishedInvoice(login: MisaLogin, input: Misa
     IsPromotion: false, SortOrder: 1,
   }];
   const data = {
-    RefID: refId, RefType: 0,
+    RefID: refId, CompanyID: companyId, SourceType: 0,
+    InvTemplateNo: template.templateNo, InvoiceTemplateID: template.templateId,
+    InvoiceType: 1, EntityState: 1, IsAutoCalculate: false,
+    InvoiceDetails: detail.map((line) => ({ ...line, EntityState: 1, CompanyID: companyId })),
     AccountObjectTaxCode: input.buyerTaxCode,
     AccountObjectName: input.buyerName,
     AccountObjectAddress: input.buyerAddress,
     ContactName: input.buyerContact,
     ReceiverName: input.buyerContact,
-    receiveremail: input.buyerEmail,
+    ReceiverEmail: input.buyerEmail,
     PaymentMethod: "TM/CK",
     InvSeries: input.series,
-    InvNo: "<Chưa cấp số>",
-    InvDate: `/Date(${Date.now()})/`,
+    InvNo: "",
+    InvDate: new Date().toISOString(),
     VATRate: input.vatRate,
     TotalSaleAmountOC: amount, TotalDiscountAmountOC: 0,
     TotalVATAmountOC: vat, TotalAmountOC: total,
     CurrencyID: "VND", ExchangeRate: 1,
     TotalSaleAmount: amount, TotalDiscountAmount: 0,
     TotalVATAmount: vat, TotalAmount: total, TotalAmountWithVAT: total,
-    PublishStatus: 0, EInvoiceStatus: 1, CompanyID: companyId, CompanyTaxCode: login.taxCode,
+    TotalAmountWithoutVATOC: amount, TotalVATAmountViewOC: vat,
+    PublishStatus: 0, CompanyTaxCode: login.taxCode,
   };
-  const response = await fetch(`${BASE}/v2/SAInvoice/Insert`, {
+  const response = await fetch(`${BASE}/v2/code/v3sainvoice/insertone`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, TaxCode: login.taxCode, "Content-Type": "application/json" },
-    body: JSON.stringify({ detail: JSON.stringify(detail), data: JSON.stringify(data), EntityState: 1 }), signal,
+    body: JSON.stringify(data), signal,
   });
   const body = await readPayload(response);
   const errorCodes = body.errorCode ?? body.ErrorCode;
@@ -221,13 +260,15 @@ export async function createMisaUnpublishedInvoice(login: MisaLogin, input: Misa
     const reason = String(body.error ?? body.content ?? "").slice(0, 150);
     throw new Error(`MISA từ chối lưu hóa đơn nháp (HTTP ${response.status}, success=${String(body.success)}, mã=${code}, lỗi=${reason})`);
   }
-  const read = await fetch(`${BASE}/v2/SAInvoice/Get/${encodeURIComponent(refId)}`, {
+  const read = await fetch(`${BASE}/v2/code/v3sainvoice/${encodeURIComponent(refId)}`, {
     headers: { Authorization: `Bearer ${token}`, TaxCode: login.taxCode }, signal: AbortSignal.timeout(15_000),
   });
   const got = await readPayload(read);
   const invoice = payloadObject(got.data ?? got.Data ?? got);
-  if (!read.ok || String(invoice.RefID ?? invoice.refID ?? "") !== refId ||
-      Number(invoice.PublishStatus ?? invoice.publishStatus) !== 0) {
+  if (!read.ok || got.success !== true || String(invoice.RefID ?? "") !== refId ||
+      Number(invoice.PublishStatus) !== 0 ||
+      Number(invoice.TotalSaleAmountOC) !== amount ||
+      Number(invoice.TotalVATAmountOC) !== vat || Number(invoice.TotalAmountOC) !== total) {
     throw new Error("MISA có thể đã nhận hóa đơn nhưng chưa xác minh được trạng thái nháp; không tự gửi lại");
   }
   return { refId };
