@@ -113,7 +113,9 @@ export async function createKiotVietOrchidDraft(input: {
     quantity: input.stems,
     price: totalPrice === null ? 0 : Math.round((totalPrice / input.stems) * 100) / 100,
     note: `${clean(input.pot)} ${input.stems} cành, màu ${clean(input.color)}`,
-    orderDetailTaxs: [{ taxId: 1 }], // VAT 0%; quoted amount is the final flower price.
+    // Match a KiotViet order with its VAT switch off. A 0% tax row locks the switch to 0%
+    // even after staff turns VAT on; no tax rows lets KiotViet use the product's configured rate.
+    orderDetailTaxs: [],
   }];
   for (const [code, amount] of [["SP00021", shipping], ["SP00022", vat]] as const) {
     if (amount === null) continue;
@@ -121,7 +123,7 @@ export async function createKiotVietOrchidDraft(input: {
     details.push({ productId: Number(extra.id), productCode: code,
       productName: String(extra.fullName ?? extra.name ?? code), quantity: 1, price: amount,
       note: code === "SP00021" ? "Phí ship đã báo khách" : "Thuế GTGT đã báo khách; khách lấy hóa đơn công ty",
-      orderDetailTaxs: [{ taxId: 1 }],
+      orderDetailTaxs: [],
     });
   }
   const expectedDelivery = input.delivery ? parseVietnamDelivery(input.delivery) : null;
