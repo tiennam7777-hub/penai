@@ -174,7 +174,7 @@ describe("Inbox: ghi tin đi/đến + bỏ bản dội lại", () => {
     expect(logs).toEqual([]);
   });
 
-  it("thu hồi -lb và -cn từ điện thoại rồi mới chạy lệnh nội bộ", async () => {
+  it("thu hồi -lb, -cn và -xhd từ điện thoại rồi mới chạy lệnh nội bộ", async () => {
     const logs: ChannelMessageLog[] = [];
     const order: string[] = [];
     const channel = new ZaloPersonalChannel({
@@ -187,12 +187,12 @@ describe("Inbox: ghi tin đi/đến + bỏ bản dội lại", () => {
       undo: async () => { order.push("recall"); },
     };
     const handle = (channel as unknown as { handleMessage: (m: unknown) => Promise<void> }).handleMessage.bind(channel);
-    for (const command of ["-lb", "-cn"]) {
+    for (const command of ["-lb", "-cn", "-xhd"]) {
       await handle({ type: ThreadType.User, threadId: "customer", isSelf: true,
         data: { msgId: `msg-${command}`, cliMsgId: `cli-${command}`, uidFrom: "owner",
           content: command, msgType: "webchat", ts: String(Date.now()) } });
     }
-    expect(order).toEqual(["recall", "run:-lb", "recall", "run:-cn"]);
+    expect(order).toEqual(["recall", "run:-lb", "recall", "run:-cn", "recall", "run:-xhd"]);
     expect(logs).toEqual([]);
   });
 

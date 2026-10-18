@@ -364,6 +364,7 @@ export const INDEX_HTML = `<!doctype html>
     { id: "agents", icon: "🤖", label: "Agents" },
     { id: "providers", icon: "🔌", label: "Providers" },
     { id: "kiotviet", icon: "🧾", label: "KiotViet", admin: true },
+    { id: "misa", icon: "📄", label: "MISA meInvoice", admin: true },
     { id: "channels", icon: "📡", label: "Channels" },
     { id: "cron", icon: "⏰", label: "Cron & lịch hẹn" },
     { id: "users", icon: "👤", label: "Người dùng", admin: true },
@@ -1031,6 +1032,68 @@ export const INDEX_HTML = `<!doctype html>
     }
     $("#kvRefresh", draftsCard).onclick = loadDrafts;
     loadDrafts();
+  };
+
+  PAGES.misa = function () {
+    var m = page("MISA meInvoice", "Kết nối API để lệnh -xhd lưu hóa đơn nháp, không ký hoặc phát hành");
+    var c = card(m);
+    c.innerHTML = '<div id="misaStatus" class="muted">Đang kiểm tra...</div>' +
+      '<p class="muted">Chỉ lưu sau khi xác thực được API MISA. Mật khẩu được mã hóa trong PenAI và không hiện lại. -xhd chỉ chạy khi hội thoại có đủ thông tin công ty, mặt hàng và giá chốt; lệnh không gửi cho khách.</p>' +
+      '<label>Mã số thuế đơn vị bán</label><input id="misaTax" value="0312767097" autocomplete="off" style="width:100%">' +
+      '<label>Tài khoản đăng nhập MISA</label><input id="misaUser" autocomplete="username" style="width:100%">' +
+      '<label>Mật khẩu MISA</label><input id="misaPass" type="password" autocomplete="new-password" style="width:100%">' +
+      '<label>Ký hiệu hóa đơn</label><input id="misaSeries" value="1C26TGP" autocomplete="off" style="width:100%">' +
+      '<label>Thuế GTGT cho mặt hàng này</label><select id="misaVat"><option value="">Chọn mức đã xác nhận</option><option value="0">0%</option><option value="5">5%</option><option value="8">8%</option><option value="10">10%</option></select>' +
+      '<label>Giá hàng chốt với khách</label><select id="misaIncludes"><option value="">Chọn quy tắc đã xác nhận</option><option value="yes">Đã gồm VAT</option><option value="no">Chưa gồm VAT</option></select>' +
+      '<div class="row" style="margin-top:12px"><button id="misaSave">Xác minh và lưu kết nối</button><span id="misaMsg" class="muted"></span></div>';
+    api("/v1/misa").then(function (j) {
+      var x = j.connection;
+      $("#misaStatus", c).textContent = x ? "Đã xác thực API cho MST " + x.taxCode + ", ký hiệu " + x.invoiceSeries +
+        (x.draftEnabled ? ". Lệnh -xhd đã bật." : ". Lệnh -xhd chờ kiểm tra lưu nháp.") : "Chưa kết nối MISA.";
+      if (x) {
+        $("#misaTax", c).value = x.taxCode;
+        $("#misaUser", c).value = x.username;
+        $("#misaSeries", c).value = x.invoiceSeries;
+        $("#misaVat", c).value = String(x.vatRate);
+        $("#misaIncludes", c).value = x.priceIncludesVat ? "yes" : "no";
+      }
+    }).catch(function (e) { $("#misaStatus", c).textContent = e.message; });
+    $("#misaSave", c).onclick = function () {
+      var rate = $("#misaVat", c).value, includes = $("#misaIncludes", c).value;
+      if (!rate || !includes || !$("#misaPass", c).value) {
+        $("#misaMsg", c).textContent = "Cần điền mật khẩu và xác nhận thuế/giá."; return;
+      }
+      var b = { taxCode: $("#misaTax", c).value.trim(), username: $("#misaUser", c).value.trim(),
+        password: $("#misaPass", c).value, invoiceSeries: $("#misaSeries", c).value.trim(),
+        vatRate: Number(rate), priceIncludesVat: includes === "yes" };
+      $("#misaSave", c).disabled = true;
+      $("#misaMsg", c).textContent = "Đang xác minh tài khoản MISA...";
+      api("/v1/misa", { method: "PUT", body: b }).then(function () {
+        $("#misaPass", c).value = "";
+        $("#misaStatus", c).textContent = "Đã xác thực API cho MST " + b.taxCode + ", ký hiệu " + b.invoiceSeries + ". Lệnh -xhd chờ kiểm tra lưu nháp.";
+        $("#misaMsg", c).textContent = "Đã xác minh và lưu mã hóa.";
+      }).catch(function (e) { $("#misaMsg", c).textContent = e.message; })
+        .finally(function () { $("#misaSave", c).disabled = false; });
+    };
+    var d = card(m);
+    d.innerHTML = '<div class="row" style="justify-content:space-between"><h3 style="margin:0">Hóa đơn nháp từ Inbox</h3><button id="misaRefresh" class="sm">Làm mới</button></div><div id="misaDrafts" class="muted" style="margin-top:10px">Đang tải...</div>';
+    function loadMisaDrafts() {
+      var host = $("#misaDrafts", d); host.textContent = "Đang tải...";
+      api("/v1/misa/drafts").then(function (j) {
+        host.textContent = "";
+        if (!j.drafts.length) { host.textContent = "Chưa có hóa đơn nháp do PenAI tạo."; return; }
+        j.drafts.forEach(function (x) {
+          var line = document.createElement("div");
+          line.style.cssText = "padding:9px 0;border-bottom:1px solid var(--border)";
+          line.textContent = (x.status === "saved" ? "Đã lưu nháp" : "Cần kiểm tra") + " · " +
+            x.channelName + " · " + (x.buyerName || "") + " · " + new Date(x.createdAt).toLocaleString("vi-VN") +
+            (x.error ? " · " + x.error : "");
+          host.appendChild(line);
+        });
+      }).catch(function (e) { host.textContent = e.message; });
+    }
+    $("#misaRefresh", d).onclick = loadMisaDrafts;
+    loadMisaDrafts();
   };
 
   // ---- Providers: danh sách gộp (subscription CLI + API key DB) kiểu card gọn.
@@ -4002,7 +4065,7 @@ export const INDEX_HTML = `<!doctype html>
     var wrap = el("div", { "class": "ibx" });
     wrap.innerHTML = '<div class="ibx-list"><div class="row" style="padding:8px"><input id="ibxQ" placeholder="Tìm tên, uid, SĐT…"><select id="ibxKind" style="flex:0 0 auto;min-width:0"><option value="">Tất cả</option><option value="direct">Cá nhân</option><option value="group">Nhóm</option><option value="unread">Chưa đọc</option></select></div><div class="row" style="padding:0 8px 8px;gap:6px"><select id="ibxTag" style="flex:1;min-width:0"><option value="">Mọi nhãn Inbox</option></select><select id="ibxHidden" style="flex:0 0 auto;min-width:0" title="Xem hội thoại đang hiện hoặc đã ẩn"><option value="0">Đang hiện</option><option value="1">Đã ẩn</option></select></div><div id="ibxThreads" class="ibx-threads"></div></div>' +
       '<div class="ibx-chat"><div id="ibxHead" class="ibx-head muted">Chọn một hội thoại bên trái.</div><div class="ibx-main"><div id="ibxMsgs" class="ibx-msgs"></div><aside id="ibxDetails" class="ibx-details" style="display:none"><div class="ibx-details-top"><b>Thông tin hội thoại</b><button type="button" class="ghost sm" id="ibxDetailsClose" aria-label="Đóng thông tin">✕</button></div><div class="ibx-details-tabs"><button type="button" class="ghost sm" id="ibxInfoTab">Ảnh & tệp</button><button type="button" class="ghost sm" id="ibxSearchTab">🔎 Tìm tin</button></div><div id="ibxDetailsBody" class="ibx-details-body"></div></aside></div>' +
-      '<div class="ibx-compose" id="ibxCompose" style="display:none"><div id="ibxReply"></div><div id="ibxImg"></div><div id="ibxQuickSuggestions" class="ibx-quick-suggestions"></div><div class="row" style="align-items:flex-end"><textarea id="ibxText" rows="2" placeholder="Nhập tin nhắn… (-ld: AI làm giúp; -lb: lên bill; -cn: bổ sung bill; Enter để gửi)"></textarea><input type="file" id="ibxFile" multiple accept="image/png,image/jpeg,image/gif,image/webp,.pdf,.doc,.docx,.xls,.xlsx" hidden><button class="ghost" id="ibxAttach" title="Chọn tối đa 6 ảnh hoặc một file Word, Excel, PDF">📎</button><button class="ghost" id="ibxDelegate" style="display:none" title="Lệnh nội bộ, không gửi -ld cho khách">AI làm giúp</button><button id="ibxSend">Gửi</button></div></div></div>';
+      '<div class="ibx-compose" id="ibxCompose" style="display:none"><div id="ibxReply"></div><div id="ibxImg"></div><div id="ibxQuickSuggestions" class="ibx-quick-suggestions"></div><div class="row" style="align-items:flex-end"><textarea id="ibxText" rows="2" placeholder="Nhập tin nhắn… (-ld: AI làm giúp; -lb: lên bill; -cn: bổ sung bill; -xhd: hóa đơn nháp MISA; Enter để gửi)"></textarea><input type="file" id="ibxFile" multiple accept="image/png,image/jpeg,image/gif,image/webp,.pdf,.doc,.docx,.xls,.xlsx" hidden><button class="ghost" id="ibxAttach" title="Chọn tối đa 6 ảnh hoặc một file Word, Excel, PDF">📎</button><button class="ghost" id="ibxDelegate" style="display:none" title="Lệnh nội bộ, không gửi -ld cho khách">AI làm giúp</button><button id="ibxSend">Gửi</button></div></div></div>';
     m.appendChild(wrap);
 
     function stopEs() { if (S.es) { try { S.es.close(); } catch (e) {} S.es = null; } }
@@ -4030,7 +4093,7 @@ export const INDEX_HTML = `<!doctype html>
     function orchidStaffCommand() {
       var command = $("#ibxText").value.trim().toLowerCase();
       return ["cdf2a276-fa3d-4fe3-a46b-3ce1162a7678", "657116ed-7570-4f2e-8550-a3d323618724", "6bc2dc02-3d10-4737-931d-a37532bcabb2"].indexOf(S.ch) >= 0 &&
-        ["-ld", "-lb", "-cn"].indexOf(command) >= 0 ? command : "";
+        ["-ld", "-lb", "-cn", "-xhd"].indexOf(command) >= 0 ? command : "";
     }
     function chooseQuickReply(item) {
       var input = $("#ibxText"), token = S.quickToken;

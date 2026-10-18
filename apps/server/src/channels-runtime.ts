@@ -31,6 +31,9 @@ import {
   finishKiotVietOrderUpdate,
   finishKiotVietBillImage,
   getKiotVietCredentials,
+  getMisaCredentials,
+  claimMisaInvoiceDraft,
+  finishMisaInvoiceDraft,
   getPersonContextData,
   loadMessages,
   type EnabledChannel,
@@ -77,6 +80,8 @@ import { classifyOrchidFlowerComplaint, formatOrchidFlowerComplaintDispatch, orc
 import { createKiotVietOrchidDraft, readKiotVietOrderSlip } from "./kiotviet-api.js";
 import { withKiotVietSlipImage } from "./kiotviet-slip-image.js";
 import { kiotVietBillNotice } from "./kiotviet-bill-notice.js";
+import { createMisaUnpublishedInvoice } from "./misa-api.js";
+import { extractInvoiceEvidence, invoiceRequestFingerprint } from "./misa-invoice-extract.js";
 import { requestedOrchidYellowSamples, orchidYellowSamplePath } from "./orchid-yellow-samples.js";
 
 /** Handler + channel theo channelId — cho webhook route (WhatsApp, Teams) dùng. */
@@ -85,11 +90,18 @@ export const channelHandlers = new Map<
   { handler: InboundHandler; channel: Channel; workspaceId: string }
 >();
 const orchidKiotStaffCommands = new Map<string, (threadId: string, command: "-lb" | "-cn") => Promise<string>>();
+const orchidMisaStaffCommands = new Map<string, (threadId: string) => Promise<string>>();
 
 export async function runOrchidKiotStaffCommand(channelId: string, threadId: string, command: "-lb" | "-cn"): Promise<string> {
   const handler = orchidKiotStaffCommands.get(channelId);
   if (!handler) throw new Error("Kênh kinh doanh chưa sẵn sàng");
   return handler(threadId, command);
+}
+
+export async function runOrchidMisaStaffCommand(channelId: string, threadId: string): Promise<string> {
+  const handler = orchidMisaStaffCommands.get(channelId);
+  if (!handler) throw new Error("Kênh kinh doanh chưa sẵn sàng");
+  return handler(threadId);
 }
 
 // Lệnh từ người trực Inbox chỉ được tạo tại route đã xác thực, không đi qua Zalo.
@@ -607,6 +619,59 @@ export function makeInboundHandler(
   const { db } = rt.db;
   if (channel.kind === "zalo_personal" &&
       ["cdf2a276-fa3d-4fe3-a46b-3ce1162a7678", "657116ed-7570-4f2e-8550-a3d323618724", "6bc2dc02-3d10-4737-931d-a37532bcabb2"].includes(channel.id)) {
+    orchidMisaStaffCommands.set(channel.id, async (threadId) => {
+      const ctx = systemContext(channel.workspaceId);
+      const thread = await getInboxThread(db, ctx, channel.id, threadId);
+      if (!thread || thread.kind !== "direct") throw new Error("-xhd chỉ dùng trong hội thoại khách hàng đã có");
+      const agent = channel.agentId ? await getAgentById(db, ctx, channel.agentId) : null;
+      if (agent?.key !== "nhan-vien-kinh-doanh-orchids-world") throw new Error("Kênh chưa gắn Agent kinh doanh");
+      const credentials = await getMisaCredentials(db, ctx);
+      if (!credentials) throw new Error("MISA chưa kết nối trong trang quản trị PenAI");
+      if (!credentials.draftEnabled) throw new Error("Kết nối MISA đang chờ kiểm tra lưu nháp; chưa bật lệnh -xhd");
+      const history = await listInboxMessages(db, ctx, channel.id, threadId, { limit: 200 });
+      const fingerprint = invoiceRequestFingerprint(history);
+      if (!fingerprint) throw new Error("Chưa thấy yêu cầu xuất hóa đơn mới của khách trong hội thoại");
+      const provider = rt.providers.get(agent.provider, ctx.workspaceId);
+      const limited = rt.gate ? gatedProvider(rt.gate, provider, { providerKey: agent.provider, priority: 0 }) : provider;
+      const evidence = await extractInvoiceEvidence(limited, agent.model, history);
+      if (!evidence) throw new Error("Thiếu hoặc chưa chắc MST, tên/địa chỉ/email người mua, mặt hàng hay giá chốt; chưa tạo hóa đơn");
+      const humanText = history.filter((m) => m.direction === "in" || ["web", "app", "mcp"].includes(m.source))
+        .map((m) => m.text).join("\n");
+      if (!humanText.includes(evidence.buyerTaxCode) ||
+          !humanText.toLocaleLowerCase("vi-VN").includes(evidence.buyerEmail.toLocaleLowerCase("vi-VN"))) {
+        throw new Error("MST hoặc email xuất hóa đơn không có bằng chứng trong tin khách/nhân viên; chưa tạo hóa đơn");
+      }
+      const rate = credentials.vatRate;
+      if (![0, 5, 8, 10].includes(rate)) throw new Error("Mức thuế GTGT MISA chưa hợp lệ");
+      const price = evidence.totalPrice;
+      const beforeVat = credentials.priceIncludesVat ? Math.round(price / (1 + rate / 100)) : price;
+      if (credentials.priceIncludesVat && beforeVat + Math.round(beforeVat * rate / 100) !== price) {
+        throw new Error("Không tách được giá trước thuế khớp tổng tiền khách chốt; cần kế toán kiểm tra");
+      }
+      const claimId = await claimMisaInvoiceDraft(db, ctx, {
+        channelId: channel.id, threadId, fingerprint,
+        buyerName: evidence.buyerName,
+        totalAmount: credentials.priceIncludesVat ? price : price + Math.round(price * rate / 100),
+      });
+      if (!claimId) throw new Error("Yêu cầu này đã có hóa đơn nháp hoặc đang cần kiểm tra trên MISA; không tạo trùng");
+      try {
+        const saved = await createMisaUnpublishedInvoice({
+          taxCode: credentials.taxCode, username: credentials.username,
+          password: decryptSecret(credentials.passwordEncrypted),
+        }, {
+          buyerName: evidence.buyerName, buyerTaxCode: evidence.buyerTaxCode,
+          buyerAddress: evidence.buyerAddress, buyerEmail: evidence.buyerEmail,
+          buyerContact: evidence.buyerContact, itemName: evidence.itemName,
+          quantity: 1, unitPrice: beforeVat, vatRate: rate, series: credentials.invoiceSeries,
+        });
+        await finishMisaInvoiceDraft(db, ctx, claimId, { refId: saved.refId });
+        return `Đã lưu hóa đơn nháp MISA cho ${evidence.buyerName}; chưa phát hành. Nhân viên kiểm tra trước khi phát hành.`;
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        await finishMisaInvoiceDraft(db, ctx, claimId, { error: reason, uncertain: true });
+        throw new Error(`${reason} Không tự gửi lại vì MISA có thể đã nhận; kiểm tra trên MISA trước.`);
+      }
+    });
     orchidKiotStaffCommands.set(channel.id, async (threadId, command) => {
       const ctx = systemContext(channel.workspaceId);
       const thread = await getInboxThread(db, ctx, channel.id, threadId);

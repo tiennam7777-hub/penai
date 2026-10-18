@@ -69,6 +69,9 @@ import {
   saveKiotVietCredentials,
   setKiotVietCashier,
   listKiotVietOrderDrafts,
+  getMisaCredentials,
+  saveMisaCredentials,
+  listMisaInvoiceDrafts,
 } from "@penai/db";
 import {
   createCronJob,
@@ -193,6 +196,7 @@ import {
 } from "@penai/core";
 import { CRON_MIN_INTERVAL_MS, deliverLabel } from "./cron-tools.js";
 import { checkKiotVietOrchidProduct, findKiotVietUser, verifyKiotVietRetailConnection } from "./kiotviet-api.js";
+import { verifyMisaWebConnection } from "./misa-api.js";
 import {
   isChannelKindSupported,
   supportedChannelKinds,
@@ -1276,6 +1280,46 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       updatedAt: row.updatedAt,
       hasCredentials: true,
     } };
+  });
+
+  // ===== MISA meInvoice web API: credentials are saved only after read-only verification =====
+  app.get("/v1/misa", async (req, reply) => {
+    if (!requireRole(req, reply, "ws_admin")) return;
+    const row = await getMisaCredentials(db, req.authCtx);
+    return { connection: row ? {
+      taxCode: row.taxCode, username: row.username,
+      invoiceSeries: row.invoiceSeries, vatRate: row.vatRate,
+      priceIncludesVat: row.priceIncludesVat, draftEnabled: row.draftEnabled, updatedAt: row.updatedAt,
+    } : null };
+  });
+
+  app.get("/v1/misa/drafts", async (req, reply) => {
+    if (!requireRole(req, reply, "ws_admin")) return;
+    return { drafts: await listMisaInvoiceDrafts(db, req.authCtx) };
+  });
+
+  app.put("/v1/misa", async (req, reply) => {
+    if (!requireRole(req, reply, "ws_admin")) return;
+    const parsed = z.object({
+      taxCode: z.string().trim().regex(/^\d{10}(?:-\d{3})?$/),
+      username: z.string().trim().min(3).max(200),
+      password: z.string().min(6).max(300),
+      invoiceSeries: z.string().trim().regex(/^[A-Za-z0-9]{5,20}$/),
+      vatRate: z.number().refine((v) => [0, 5, 8, 10].includes(v)),
+      priceIncludesVat: z.boolean(),
+    }).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "Thiếu thông tin MISA, ký hiệu hóa đơn hoặc quy tắc thuế" });
+    const b = parsed.data;
+    try {
+      await verifyMisaWebConnection({ taxCode: b.taxCode, username: b.username, password: b.password });
+    } catch (error) {
+      return reply.code(400).send({ error: error instanceof Error ? error.message : "Không xác thực được MISA" });
+    }
+    await saveMisaCredentials(db, req.authCtx, {
+      taxCode: b.taxCode, username: b.username, passwordEncrypted: encryptSecret(b.password),
+      invoiceSeries: b.invoiceSeries, vatRate: b.vatRate, priceIncludesVat: b.priceIncludesVat,
+    });
+    return { connected: true };
   });
 
   // ===== Providers & models & tools (cho UI) =====

@@ -4,6 +4,7 @@ import {
   customType,
   integer,
   jsonb,
+  numeric,
   pgTable,
   real,
   text,
@@ -79,6 +80,19 @@ export const kiotvietCredentials = pgTable("kiotviet_credentials", {
   cashierUsername: text("cashier_username"),
   clientIdEncrypted: text("client_id_encrypted").notNull(),
   clientSecretEncrypted: text("client_secret_encrypted").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** MISA meInvoice web API credentials; password is encrypted by the server. */
+export const misaCredentials = pgTable("misa_credentials", {
+  workspaceId: uuid("workspace_id").primaryKey().references(() => workspaces.id, { onDelete: "cascade" }),
+  taxCode: text("tax_code").notNull(),
+  username: text("username").notNull(),
+  passwordEncrypted: text("password_encrypted").notNull(),
+  invoiceSeries: text("invoice_series").notNull(),
+  vatRate: numeric("vat_rate", { precision: 5, scale: 2, mode: "number" }).notNull(),
+  priceIncludesVat: boolean("price_includes_vat").notNull(),
+  draftEnabled: boolean("draft_enabled").notNull().default(false),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
