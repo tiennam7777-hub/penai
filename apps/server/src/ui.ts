@@ -958,7 +958,7 @@ export const INDEX_HTML = `<!doctype html>
     if (!selected || selected.length !== 7 || selected.charAt(4) !== "-") selected = today;
     c.innerHTML = '<div class="row"><label>Tháng <input id="stemMonth" type="month" value="' + esc(selected) + '"></label>' +
       '<button id="stemLoad">Xem báo cáo</button><button id="stemExport" class="ghost">Tải Excel</button></div>' +
-      '<p class="muted">File cố định nằm trong Thư viện file → Chung cả bộ phận → bao-cao-cam-hoa. Tin có tên khách và một số cành hợp lệ được cộng một lần; đối chiếu sheet Cần kiểm tra trước khi chốt KPI.</p>' +
+      '<p class="muted">File cố định nằm trong Thư viện file → Chung cả bộ phận → bao-cao-cam-hoa. Báo cáo đọc cùng nhóm từ Trợ Lý và Hot 1/4/6, trùng mã tin Zalo chỉ tính một lần. Tên khách và số cành có thể ở hai tin liền nhau; đối chiếu mục Cần kiểm tra trước khi chốt KPI.</p>' +
       '<div id="stemSummary">Đang tải...</div><h3>Tổng theo tháng</h3><div id="stemMonthly"></div>' +
       '<h3>Tổng theo ngày</h3><div id="stemDaily"></div><h3>Chi tiết từng tin</h3><div id="stemDetail"></div>' +
       '<h3>Tin cần kiểm tra</h3><div id="stemReview"></div>';

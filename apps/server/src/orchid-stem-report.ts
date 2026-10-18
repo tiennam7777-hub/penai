@@ -22,11 +22,28 @@ export function parseOrchidStemText(text: string): { customerName: string; stems
   const match = matches[0]!;
   const stems = Number(match[1]);
   if (stems < 1 || stems > 200) return null;
+  if (match.index! > 0 && /[\p{L}]/u.test(clean[match.index! - 1]!)) return null;
   const after = clean.slice(match.index! + match[0].length).trim();
-  if (after && !/^(?:c|cành|canh|cảnh|cây|cay|nhánh|nhanh|tầm|tam)?$/iu.test(after.replace(/[.)\s-]/g, ""))) return null;
-  const customerName = clean.slice(0, match.index).replace(/[\s,.:;()\-]+$/g, "").trim();
+  if (after && !/^(?:c|f|cành|canh|cảnh|cây|cay|nhánh|nhanh|tầm|tam)?$/iu.test(after.replace(/[.)\s-]/g, ""))) return null;
+  const customerName = clean.slice(0, match.index)
+    .replace(/[\s,.:;()\-]+$/g, "")
+    .replace(/(?:\s+|^)(?:cành|canh|cảnh|cây|cay)$/iu, "")
+    .replace(/^(?:cành|canh|cảnh|cây|cay)[\s,.:;()\-]+/iu, "")
+    .trim();
   if (!/[\p{L}]/u.test(customerName) || customerName.length < 2) return null;
   return { customerName, stems };
+}
+
+function quantityOnly(text: string): number | null {
+  const clean = text.replace(/[\s.()\-]+/g, " ").trim();
+  const match = /^(?:(?:cành|canh|cảnh|cây|cay)\s+)?(\d{1,3})(?:\s*(?:c|f|cành|canh|cảnh|cây|cay|tam|tầm))?$/iu.exec(clean);
+  const stems = match ? Number(match[1]) : 0;
+  return stems >= 1 && stems <= 200 ? stems : null;
+}
+
+function senderLabel(name: string): string {
+  // Zalo currently reports the Hot 6 account as “… S”; shop calls this account “… VI”.
+  return name === "Lan Hồ Điệp Orchids World S" ? "Lan Hồ Điệp Orchids World VI" : name;
 }
 
 export function orchidStemDay(iso: string): string {
@@ -36,19 +53,36 @@ export function orchidStemDay(iso: string): string {
 export function buildOrchidStemReport(messages: OrchidStemMessage[]) {
   const entries: OrchidStemEntry[] = [];
   const review: OrchidStemMessage[] = [];
+  const latestCustomer = new Map<string, { name: string; at: number }>();
   for (const message of messages) {
-    const parsed = parseOrchidStemText(message.text);
-    if (parsed) entries.push({ ...message, ...parsed, day: orchidStemDay(message.sentAt) });
-    else if (/\d/.test(message.text)) review.push(message);
+    const senderName = senderLabel(message.senderName);
+    const source = { ...message, senderName };
+    let parsed = parseOrchidStemText(message.text);
+    if (!parsed) {
+      const stems = quantityOnly(message.text);
+      const prior = latestCustomer.get(senderName);
+      if (stems && prior && new Date(message.sentAt).getTime() - prior.at <= 5 * 60_000) {
+        parsed = { customerName: prior.name, stems };
+      }
+    }
+    if (parsed) entries.push({ ...source, ...parsed, day: orchidStemDay(message.sentAt) });
+    else if (/\d/.test(message.text)) review.push(source);
+    else {
+      const name = message.text.replace(/\s+/g, " ").trim();
+      if (name.length >= 2 && name.length <= 80 && /[\p{L}]/u.test(name) &&
+          !/^(?:hi|ok|dạ|vâng|cảm ơn|xong)$/iu.test(name)) {
+        latestCustomer.set(senderName, { name, at: new Date(message.sentAt).getTime() });
+      }
+    }
   }
   const daily = new Map<string, { day: string; senderId: string; senderName: string; stems: number; jobs: number }>();
   const monthly = new Map<string, { senderId: string; senderName: string; stems: number; jobs: number }>();
   for (const entry of entries) {
-    const dailyKey = `${entry.day}:${entry.senderId}`;
+    const dailyKey = `${entry.day}:${entry.senderName}`;
     const d = daily.get(dailyKey) ?? { day: entry.day, senderId: entry.senderId, senderName: entry.senderName, stems: 0, jobs: 0 };
     d.senderName = entry.senderName; d.stems += entry.stems; d.jobs++; daily.set(dailyKey, d);
-    const m = monthly.get(entry.senderId) ?? { senderId: entry.senderId, senderName: entry.senderName, stems: 0, jobs: 0 };
-    m.senderName = entry.senderName; m.stems += entry.stems; m.jobs++; monthly.set(entry.senderId, m);
+    const m = monthly.get(entry.senderName) ?? { senderId: entry.senderId, senderName: entry.senderName, stems: 0, jobs: 0 };
+    m.senderName = entry.senderName; m.stems += entry.stems; m.jobs++; monthly.set(entry.senderName, m);
   }
   return { entries, review, daily: [...daily.values()], monthly: [...monthly.values()] };
 }
