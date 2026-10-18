@@ -17,15 +17,21 @@ export interface OrchidStemEntry extends OrchidStemMessage {
 export function parseOrchidStemText(text: string): { customerName: string; stems: number } | null {
   const clean = text.replace(/\s+/g, " ").trim();
   if (!clean || /\b(?:ship|vat|giá|tổng|đồng|vnd|kpi)\b/i.test(clean)) return null;
-  const matches = [...clean.matchAll(/(?<!\d)(\d{1,3})(?!\d)/g)];
+  // The shop also writes "C Chi (8c) Lộc": a quantity in parentheses, then a short name/note.
+  // Keep the original message for audit, but ignore that trailing note when reading the quantity.
+  const annotated = /^(.+?\(\s*\d{1,3}\s*(?:c|f|cành|canh|cảnh|cây|cay|nhánh|nhanh)\s*\))\s+([\p{L}]+(?:\s+[\p{L}]+){0,2})$/iu.exec(clean);
+  const suffix = annotated?.[2] ?? "";
+  if (suffix && /^(?:hủy|huỷ|đổi|sửa|xóa|xoá|hoàn|trả)(?:\s|$)/iu.test(suffix)) return null;
+  const counted = annotated ? annotated[1]! : clean;
+  const matches = [...counted.matchAll(/(?<!\d)(\d{1,3})(?!\d)/g)];
   if (matches.length !== 1) return null;
   const match = matches[0]!;
   const stems = Number(match[1]);
   if (stems < 1 || stems > 200) return null;
-  if (match.index! > 0 && /[\p{L}]/u.test(clean[match.index! - 1]!)) return null;
-  const after = clean.slice(match.index! + match[0].length).trim();
+  if (match.index! > 0 && /[\p{L}]/u.test(counted[match.index! - 1]!)) return null;
+  const after = counted.slice(match.index! + match[0].length).trim();
   if (after && !/^(?:c|f|cành|canh|cảnh|cây|cay|nhánh|nhanh|tầm|tam)?$/iu.test(after.replace(/[.)\s-]/g, ""))) return null;
-  const customerName = clean.slice(0, match.index)
+  const customerName = counted.slice(0, match.index)
     .replace(/[\s,.:;()\-]+$/g, "")
     .replace(/(?:\s+|^)(?:cành|canh|cảnh|cây|cay)$/iu, "")
     .replace(/^(?:cành|canh|cảnh|cây|cay)[\s,.:;()\-]+/iu, "")

@@ -4,6 +4,8 @@ import { buildOrchidStemReport, parseOrchidStemText } from "../src/orchid-stem-r
 describe("orchid stem report", () => {
   it("reads the actual group caption formats", () => {
     expect(parseOrchidStemText("C hong (9c)")).toEqual({ customerName: "C hong", stems: 9 });
+    expect(parseOrchidStemText("C Chi (8c) Lộc")).toEqual({ customerName: "C Chi", stems: 8 });
+    expect(parseOrchidStemText("Chị Lan (12 cành) Toàn")).toEqual({ customerName: "Chị Lan", stems: 12 });
     expect(parseOrchidStemText("Hà phượg. 9. Cảnh")).toEqual({ customerName: "Hà phượg", stems: 9 });
     expect(parseOrchidStemText("Nacy 10 tam")).toEqual({ customerName: "Nacy", stems: 10 });
     expect(parseOrchidStemText("Mrr thế guta\n Cảnh 10")).toEqual({ customerName: "Mrr thế guta", stems: 10 });
@@ -11,6 +13,8 @@ describe("orchid stem report", () => {
     expect(parseOrchidStemText("Shop chị hương")).toBeNull();
     expect(parseOrchidStemText("C trang q9")).toBeNull();
     expect(parseOrchidStemText("Khách A 10 cành + ship 140000")).toBeNull();
+    expect(parseOrchidStemText("C Chi (8c) hủy")).toBeNull();
+    expect(parseOrchidStemText("C Chi (8c) Lộc 2")).toBeNull();
   });
 
   it("sums by stable sender ID and local day while keeping ambiguous messages for review", () => {
@@ -19,9 +23,10 @@ describe("orchid stem report", () => {
       { ...base, msgId: "a", text: "C hong (9c)" },
       { ...base, msgId: "b", text: "Khách Hoa 5 cành" },
       { ...base, msgId: "c", text: "Shop chị hương 9 10" },
+      { ...base, msgId: "d", text: "C Chi (8c) Lộc" },
     ]);
-    expect(report.monthly).toMatchObject([{ senderId: "42", stems: 14, jobs: 2 }]);
-    expect(report.daily).toMatchObject([{ day: "2026-10-18", stems: 14 }]);
+    expect(report.monthly).toMatchObject([{ senderId: "42", stems: 22, jobs: 3 }]);
+    expect(report.daily).toMatchObject([{ day: "2026-10-18", stems: 22 }]);
     expect(report.review.map(x => x.msgId)).toEqual(["c"]);
   });
 

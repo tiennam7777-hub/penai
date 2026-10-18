@@ -69,6 +69,8 @@ export const INDEX_HTML = `<!doctype html>
   .stem-report .stem-metric { padding:14px; border:1px solid var(--border); border-radius:10px; background:rgba(128,128,128,.055); }
   .stem-report .stem-metric strong { display:block; font-size:1.55rem; line-height:1.2; font-variant-numeric:tabular-nums; }
   .stem-report .stem-metric span { display:block; margin-top:5px; font-size:.8rem; opacity:.7; }
+  .stem-report .stem-guide { margin:13px 0 0; padding:11px 13px; border-left:3px solid var(--accent); border-radius:7px; background:rgba(128,128,128,.07); font-size:.85rem; line-height:1.5; }
+  .stem-report .stem-guide strong { display:block; margin-bottom:3px; }
   .stem-report .stem-section { margin-top:22px; }
   .stem-report .stem-section h3 { margin:0 0 4px; font-size:1rem; }
   .stem-report .stem-section-note { margin:0 0 10px; }
@@ -990,6 +992,7 @@ export const INDEX_HTML = `<!doctype html>
     if (!selected || selected.length !== 7 || selected.charAt(4) !== "-") selected = today;
     c.innerHTML = '<div class="stem-toolbar"><label>Tháng báo cáo<input id="stemMonth" type="month" value="' + esc(selected) + '"></label>' +
       '<div class="row"><button id="stemLoad">Xem báo cáo</button><button id="stemExport" class="ghost">Tải Excel</button></div></div>' +
+      '<div class="stem-guide"><strong>Cách ghi để được cộng vào báo cáo</strong>Chỉ cần tên khách và số cành; <b>8c nghĩa là 8 cành</b>. Ví dụ <b>C Chi 8c</b> hoặc <b>C Chi (8c) Lộc</b> đều được tính 8 cành cho khách C Chi; chữ sau ngoặc là ghi chú. Có thể gửi tên khách rồi số cành bằng tin tiếp theo trong 5 phút, cùng tài khoản. Tin có nhiều số, giá hoặc phí ship sẽ nằm ở “Tin cần kiểm tra”.</div>' +
       '<div id="stemSummary" aria-live="polite">Đang tải...</div>' +
       '<section class="stem-section"><h3>Theo người gửi</h3><p class="muted stem-section-note">Xếp theo tổng số cành trong tháng.</p><div id="stemMonthly"></div></section>' +
       '<section class="stem-section"><h3>Theo ngày</h3><p class="muted stem-section-note">Mỗi ngày có tổng riêng; bấm vào ngày để xem từng người.</p><div id="stemDaily"></div></section>' +
