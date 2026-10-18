@@ -84,7 +84,7 @@ describe("KiotViet orchid order draft", () => {
     expect(body).not.toHaveProperty("soldById");
     expect(body.orderDetails).toEqual([expect.objectContaining({
       productId: 916, productCode: "SP00016", quantity: 5, price: 200_000,
-      orderDetailTaxs: [],
+      orderDetailTaxs: [{ taxId: 1 }],
     })]);
     expect(body.description).toContain("Chị Mai");
     expect(body.description).not.toMatch(/\b(?:UID|ID)\s+\d+/i);
@@ -119,7 +119,22 @@ describe("KiotViet orchid order draft", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("leaves VAT off without locking SP00016 to 0%", async () => {
+  it("reports KiotViet's validation message without storing contact details", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ access_token: "test-token" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 916, code: "SP00016" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [{ id: 22, code: "KH22", name: "Chị Mai" }] }) })
+      .mockResolvedValueOnce({ ok: false, status: 420, json: async () => ({
+        message: "Sai dòng thuế cho 0901234567\nliên hệ mai@example.com",
+      }) });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(createKiotVietOrchidDraft({
+      ...input, branchId: 55291, customer: "Chị Mai", channelName: "Hot 4",
+      stems: 5, color: "vàng", pot: "chậu lan", price: "1.000.000đ", delivery: null,
+    })).rejects.toThrow("HTTP 420): Sai dòng thuế cho [số điện thoại] liên hệ [email]");
+  });
+
+  it("uses the 0% tax row accepted by KiotViet for a draft order", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ access_token: "test-token" }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 916, code: "SP00016", saleTax: { taxId: 2 } }) })
@@ -131,7 +146,7 @@ describe("KiotViet orchid order draft", () => {
       stems: 5, color: "vàng", pot: "chậu lan", price: "1.000.000đ", delivery: "10:00 18/10/2026",
     });
     const body = JSON.parse(fetchMock.mock.calls[3]![1].body);
-    expect(body.orderDetails[0].orderDetailTaxs).toEqual([]);
+    expect(body.orderDetails[0].orderDetailTaxs).toEqual([{ taxId: 1 }]);
     expect(body.orderDetails).toHaveLength(1);
     expect(body.makeInvoice).toBe(false);
   });
@@ -157,7 +172,8 @@ describe("KiotViet orchid order draft", () => {
       [x.productCode, x.quantity, x.price])).toEqual([
       ["SP00016", 5, 200_000], ["SP00021", 1, 50_000], ["SP00022", 1, 100_000],
     ]);
-    expect(body.orderDetails.every((x: { orderDetailTaxs: unknown[] }) => x.orderDetailTaxs.length === 0)).toBe(true);
+    expect(body.orderDetails.every((x: { orderDetailTaxs: unknown[] }) =>
+      JSON.stringify(x.orderDetailTaxs) === JSON.stringify([{ taxId: 1 }]))).toBe(true);
     expect(body.orderDelivery).toMatchObject({ partnerDeliveryId: 107020,
       address: "12 Lê Lợi, TP.HCM", contactNumber: "0911111111",
       expectedDelivery: "2026-10-19T02:00:00.000Z" });
