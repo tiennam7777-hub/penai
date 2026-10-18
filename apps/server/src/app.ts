@@ -1298,6 +1298,20 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return { drafts: await listMisaInvoiceDrafts(db, req.authCtx) };
   });
 
+  app.get("/v1/misa/verify-saved", async (req, reply) => {
+    if (!requireRole(req, reply, "ws_admin")) return;
+    reply.header("cache-control", "no-store");
+    const row = await getMisaCredentials(db, req.authCtx);
+    if (!row) return reply.code(404).send({ error: "Chưa lưu kết nối MISA" });
+    try {
+      await verifyMisaWebConnection({ taxCode: row.taxCode, username: row.username,
+        password: decryptSecret(row.passwordEncrypted) });
+      return { valid: true, taxCode: row.taxCode, checkedAt: new Date().toISOString() };
+    } catch (error) {
+      return { valid: false, error: error instanceof Error ? error.message : "Không xác thực được MISA" };
+    }
+  });
+
   app.put("/v1/misa", async (req, reply) => {
     if (!requireRole(req, reply, "ws_admin")) return;
     const parsed = z.object({

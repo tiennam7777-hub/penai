@@ -1045,12 +1045,13 @@ export const INDEX_HTML = `<!doctype html>
       '<label>Ký hiệu hóa đơn</label><input id="misaSeries" value="1C26TGP" autocomplete="off" style="width:100%">' +
       '<label>Thuế GTGT cho mặt hàng này</label><select id="misaVat"><option value="">Chọn mức đã xác nhận</option><option value="0">0%</option><option value="5">5%</option><option value="8">8%</option><option value="10">10%</option></select>' +
       '<label>Giá hàng chốt với khách</label><select id="misaIncludes"><option value="">Chọn quy tắc đã xác nhận</option><option value="yes">Đã gồm VAT</option><option value="no">Chưa gồm VAT</option></select>' +
-      '<div class="row" style="margin-top:12px"><button id="misaSave">Xác minh và lưu kết nối</button><span id="misaMsg" class="muted"></span></div>';
+      '<div class="row" style="margin-top:12px"><button id="misaSave">Xác minh và lưu kết nối</button><button id="misaVerifySaved" class="ghost" style="display:none">Kiểm tra kết nối đã lưu</button><span id="misaMsg" class="muted"></span></div>';
     api("/v1/misa").then(function (j) {
       var x = j.connection;
       $("#misaStatus", c).textContent = x ? "Đã xác thực API cho MST " + x.taxCode + ", ký hiệu " + x.invoiceSeries +
         (x.draftEnabled ? ". Lệnh -xhd đã bật." : ". Lệnh -xhd chờ kiểm tra lưu nháp.") : "Chưa kết nối MISA.";
       if (x) {
+        $("#misaVerifySaved", c).style.display = "";
         $("#misaTax", c).value = x.taxCode;
         $("#misaUser", c).value = x.username;
         $("#misaSeries", c).value = x.invoiceSeries;
@@ -1070,10 +1071,21 @@ export const INDEX_HTML = `<!doctype html>
       $("#misaMsg", c).textContent = "Đang xác minh tài khoản MISA...";
       api("/v1/misa", { method: "PUT", body: b }).then(function () {
         $("#misaPass", c).value = "";
+        $("#misaVerifySaved", c).style.display = "";
         $("#misaStatus", c).textContent = "Đã xác thực API cho MST " + b.taxCode + ", ký hiệu " + b.invoiceSeries + ". Lệnh -xhd chờ kiểm tra lưu nháp.";
         $("#misaMsg", c).textContent = "Đã xác minh và lưu mã hóa.";
-      }).catch(function (e) { $("#misaMsg", c).textContent = e.message; })
+      }).catch(function (e) { $("#misaMsg", c).textContent = "Lần xác minh mới thất bại: " + e.message + ". Kết nối đã lưu trước đó không bị xóa; dùng nút Kiểm tra kết nối đã lưu."; })
         .finally(function () { $("#misaSave", c).disabled = false; });
+    };
+    $("#misaVerifySaved", c).onclick = function () {
+      var button = $("#misaVerifySaved", c);
+      button.disabled = true;
+      $("#misaMsg", c).textContent = "Đang kiểm tra bằng thông tin đã lưu...";
+      api("/v1/misa/verify-saved").then(function (j) {
+        $("#misaMsg", c).textContent = j.valid ? "Kết nối đã lưu còn hoạt động với MISA; lệnh -xhd vẫn chờ kiểm tra lưu nháp." :
+          "Kết nối đã lưu hiện không xác thực được: " + j.error;
+      }).catch(function (e) { $("#misaMsg", c).textContent = e.message; })
+        .finally(function () { button.disabled = false; });
     };
     var d = card(m);
     d.innerHTML = '<div class="row" style="justify-content:space-between"><h3 style="margin:0">Hóa đơn nháp từ Inbox</h3><button id="misaRefresh" class="sm">Làm mới</button></div><div id="misaDrafts" class="muted" style="margin-top:10px">Đang tải...</div>';
