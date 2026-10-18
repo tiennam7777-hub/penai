@@ -951,13 +951,17 @@ export const INDEX_HTML = `<!doctype html>
   };
 
   PAGES["stem-report"] = function () {
-    var m = page("Báo cáo cắm hoa", "Nhóm Bao Cao Cam hoa 42 DBP · tổng cành theo người gửi và theo tháng");
+    var m = page("Xem trực tiếp báo cáo cắm hoa", "Nội dung file Excel của nhóm Bao Cao Cam hoa 42 DBP, cập nhật từ tin nhắn trong nhóm");
     var c = card(m);
     var today = new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 7);
-    c.innerHTML = '<div class="row"><label>Tháng <input id="stemMonth" type="month" value="' + today + '"></label>' +
+    var selected = new URLSearchParams(state.routeQuery || "").get("month");
+    if (!selected || selected.length !== 7 || selected.charAt(4) !== "-") selected = today;
+    c.innerHTML = '<div class="row"><label>Tháng <input id="stemMonth" type="month" value="' + esc(selected) + '"></label>' +
       '<button id="stemLoad">Xem báo cáo</button><button id="stemExport" class="ghost">Tải Excel</button></div>' +
       '<p class="muted">File cố định nằm trong Thư viện file → Chung cả bộ phận → bao-cao-cam-hoa. Tin có tên khách và một số cành hợp lệ được cộng một lần; đối chiếu sheet Cần kiểm tra trước khi chốt KPI.</p>' +
-      '<div id="stemSummary">Đang tải...</div><h3>Chi tiết</h3><div id="stemDetail"></div>';
+      '<div id="stemSummary">Đang tải...</div><h3>Tổng theo tháng</h3><div id="stemMonthly"></div>' +
+      '<h3>Tổng theo ngày</h3><div id="stemDaily"></div><h3>Chi tiết từng tin</h3><div id="stemDetail"></div>' +
+      '<h3>Tin cần kiểm tra</h3><div id="stemReview"></div>';
     function load() {
       var month = $("#stemMonth", c).value;
       $("#stemSummary", c).textContent = "Đang tải...";
@@ -966,13 +970,22 @@ export const INDEX_HTML = `<!doctype html>
         var box = $("#stemSummary", c); box.innerHTML = "";
         box.appendChild(el("p", null, "<b>" + total + " cành</b> · " + r.entries.length + " lượt · " + r.review.length + " tin cần kiểm tra"));
         var rel = "bao-cao-cam-hoa/bao-cao-cam-hoa-" + r.month + ".xlsx";
-        box.appendChild(el("p", null, 'File đã lưu: <code>' + esc(r.libraryPath) + '</code> · <a href="/v1/library/shared/file?path=' + encodeURIComponent(rel) + '&dl=1">Mở/tải file</a> · <a href="#/library">Thư viện file</a>'));
-        box.appendChild(table(["Người gửi", "Số lượt", "Tổng cành"], r.monthly, function (x) {
+        box.appendChild(el("p", null, 'Đang xem trực tiếp: <code>' + esc(r.libraryPath) + '</code> · <a href="/v1/library/shared/file?path=' + encodeURIComponent(rel) + '&dl=1">Tải Excel</a>'));
+        var monthly = $("#stemMonthly", c); monthly.innerHTML = "";
+        monthly.appendChild(table(["Người gửi", "Số lượt", "Tổng cành"], r.monthly, function (x) {
           var tr = el("tr"); tr.innerHTML = "<td>" + esc(x.senderName) + "</td><td>" + x.jobs + "</td><td><b>" + x.stems + "</b></td>"; return tr;
+        }));
+        var daily = $("#stemDaily", c); daily.innerHTML = "";
+        daily.appendChild(table(["Ngày", "Người gửi", "Số lượt", "Tổng cành"], r.daily, function (x) {
+          var tr = el("tr"); tr.innerHTML = "<td>" + esc(x.day) + "</td><td>" + esc(x.senderName) + "</td><td>" + x.jobs + "</td><td><b>" + x.stems + "</b></td>"; return tr;
         }));
         var detail = $("#stemDetail", c); detail.innerHTML = "";
         detail.appendChild(table(["Ngày", "Người gửi", "Khách", "Cành", "Tin gốc"], r.entries, function (x) {
           var tr = el("tr"); tr.innerHTML = "<td>" + esc(x.day) + "</td><td>" + esc(x.senderName) + "</td><td>" + esc(x.customerName) + "</td><td>" + x.stems + "</td><td>" + esc(x.text) + "</td>"; return tr;
+        }));
+        var review = $("#stemReview", c); review.innerHTML = "";
+        review.appendChild(table(["Thời điểm", "Người gửi", "Tin chưa cộng"], r.review, function (x) {
+          var tr = el("tr"); tr.innerHTML = "<td>" + esc(new Date(x.sentAt).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })) + "</td><td>" + esc(x.senderName) + "</td><td>" + esc(x.text) + "</td>"; return tr;
         }));
       }).catch(function (e) { $("#stemSummary", c).textContent = e.message; });
     }
@@ -3985,7 +3998,14 @@ export const INDEX_HTML = `<!doctype html>
         '<td class="muted" style="font-size:.8rem">' + esc(String(e.mtime || "").slice(0, 16).replace("T", " ")) + "</td>";
       var td = el("td", { "class": "lib-acts" });
       function btn(label, title, fn) { var b = el("button", { "class": "ghost sm", title: title }, label); b.onclick = fn; td.appendChild(b); }
-      tr.querySelector(".lib-name").onclick = function () { if (e.type === "dir") { cur.path = rel; loadDir(); } else preview(j.scope, rel, e); };
+      var stemPrefix = "bao-cao-cam-hoa-";
+      var stemMonth = j.scope.id === "shared" && j.path === "bao-cao-cam-hoa" && e.type === "file" &&
+        e.name.indexOf(stemPrefix) === 0 && e.name.slice(-5) === ".xlsx"
+        ? e.name.slice(stemPrefix.length, -5) : "";
+      if (stemMonth.length !== 7 || stemMonth.charAt(4) !== "-") stemMonth = "";
+      function showStemReport() { location.hash = "#/stem-report?month=" + encodeURIComponent(stemMonth); }
+      tr.querySelector(".lib-name").onclick = function () { if (e.type === "dir") { cur.path = rel; loadDir(); } else if (stemMonth) showStemReport(); else preview(j.scope, rel, e); };
+      if (stemMonth) btn("👁 Xem", "Xem trực tiếp trong PenAI", showStemReport);
       if (e.type === "file") btn("⬇", "Tải về", function () { window.open(libFileUrl(j.scope.id, rel, true), "_blank"); });
       btn("📋", "Chép đường dẫn cho agent", function () { copyText(agentPath); });
       if (!e.readonly && !j.readonly) {
