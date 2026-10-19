@@ -250,4 +250,29 @@ describe("KiotViet orchid order draft", () => {
     expect(body.description).toContain("Khách chat: Chị Mai; nguồn Hot 1 / Zalo.");
     expect(body.description).not.toContain("UID 12345");
   });
+
+  it("replaces an existing delivery time and address when the customer explicitly changes them", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ access_token: "token" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 916, code: "SP00016" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 42, code: "DH42", status: 1,
+        branchId: 55291, totalPayment: 0, purchaseDate: "2026-10-18T00:53:37", cashierId: 77,
+        customerId: 99, customerCode: "KH99", customerName: "Khách nhân viên đã chọn",
+        description: "Chậu: chậu lan 10 cành. Màu: hồng. Giao: 09:00 19/10/2026. Địa chỉ: 500 Lã Xuân Oai, quận 9. Bảng chữ: Chúc mừng. Giá hoa: 4.800.000đ. Khách chat: Anh Nam; nguồn Hot 1 / Zalo.",
+        orderDetails: [{ productId: 916, productCode: "SP00016", quantity: 10, price: 480000 }],
+        orderDelivery: { expectedDelivery: "2026-10-19T09:00:00", address: "500 Lã Xuân Oai, quận 9",
+          partnerDeliveryId: 107020, partnerDelivery: { code: "DT000001", name: "Anh Sang" } } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 42, code: "DH42" }) });
+    vi.stubGlobal("fetch", fetchMock);
+    await createKiotVietOrchidDraft({ ...input, branchId: 55291, cashierUserId: 77, customer: "Anh Nam",
+      channelName: "Hot 1", stems: 10, color: "hồng", pot: "chậu lan", price: "4.800.000đ",
+      delivery: "10:00 19/10/2026", address: "200 Cách mạng tháng 8",
+      existing: { orderId: 42, code: "DH42", fillMissing: true, replaceDelivery: { time: true, address: true } } });
+    const body = JSON.parse(fetchMock.mock.calls[3]![1].body);
+    expect(body.orderDelivery).toMatchObject({ expectedDelivery: "2026-10-19T03:00:00.000Z",
+      address: "200 Cách mạng tháng 8" });
+    expect(body.description).toContain("Giao: 10:00 19/10/2026. Địa chỉ: 200 Cách mạng tháng 8.");
+    expect(body.description).not.toContain("500 Lã Xuân Oai");
+    expect(body.customer).toMatchObject({ id: 99, name: "Khách nhân viên đã chọn" });
+  });
 });

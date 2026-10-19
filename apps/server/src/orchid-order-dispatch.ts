@@ -130,6 +130,19 @@ export function orchidOrderPayloadFingerprint(order: ConfirmedOrchidOrder): stri
   })).digest("hex");
 }
 
+/** An explicit customer correction lets -cn replace delivery fields already filled on a slip. */
+export function orchidDeliveryCorrection(messages: InboxMessageRow[]): { time: boolean; address: boolean } {
+  const latest = [...messages].reverse().find((message) => message.direction === "in" && message.text.trim());
+  const text = latest?.text ?? "";
+  if (!/(?:đổi|doi|sửa|sua|cập nhật|cap nhat|chuyển|chuyen|dời|doi giờ)/i.test(text)) {
+    return { time: false, address: false };
+  }
+  return {
+    time: /(?:\d{1,2}\s*(?:h|giờ|:)|sáng|chiều|tối|ngày|mai|mốt|thứ)/i.test(text),
+    address: /(?:tại|đến|địa chỉ|dia chi|đường|duong|\bsố\s*\d)/i.test(text),
+  };
+}
+
 export interface OrchidOrderCancellation {
   scope: "all" | "partial";
   cancelled: string;

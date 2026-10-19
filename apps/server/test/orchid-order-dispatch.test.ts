@@ -5,6 +5,7 @@ import {
   mayCancelOrchidOrder, mayConfirmOrchidOrder, orchidCancellationFingerprint,
   orchidOrderFingerprint, parseConfirmedOrchidOrder, parseOrchidOrderCancellation,
   orchidOrderSessionFingerprint, orchidOrderPayloadFingerprint,
+  orchidDeliveryCorrection,
 } from "../src/orchid-order-dispatch.js";
 import type { Provider } from "@penai/providers";
 
@@ -77,6 +78,16 @@ describe("orchid order dispatch", () => {
       { text: "-lb", senderName: "Nhân viên" }, new Date("2026-10-18T01:00:00Z"), "staff");
     expect(order).toMatchObject({ stems: 10, color: "vàng", delivery: null, address: null });
     expect(system).toContain("Không đòi khách xác nhận");
+  });
+
+  it("allows -cn to replace delivery fields only after an explicit customer correction", () => {
+    const messages = [
+      { direction: "in", text: "Đổi mai giao 10h tại 200 Cách mạng tháng 8 nha" },
+      { direction: "out", text: "Dạ" },
+    ] as Parameters<typeof orchidDeliveryCorrection>[0];
+    expect(orchidDeliveryCorrection(messages)).toEqual({ time: true, address: true });
+    expect(orchidDeliveryCorrection([{ direction: "in", text: "Ok em" }] as typeof messages))
+      .toEqual({ time: false, address: false });
   });
 });
 

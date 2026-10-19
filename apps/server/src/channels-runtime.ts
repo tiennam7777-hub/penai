@@ -76,6 +76,7 @@ import {
   classifyConfirmedOrchidOrder, classifyOrchidOrderCancellation, formatOrchidOrderCancellation,
   formatOrchidOrderDispatch, mayCancelOrchidOrder, mayConfirmOrchidOrder,
   orchidCancellationFingerprint, orchidOrderSessionFingerprint, orchidOrderPayloadFingerprint,
+  orchidDeliveryCorrection,
 } from "./orchid-order-dispatch.js";
 import { stemCountForPhoto } from "./orchid-photo-count.js";
 import { orchidStemDay, refreshOrchidStemFile } from "./orchid-stem-report.js";
@@ -789,6 +790,7 @@ export function makeInboundHandler(
       };
       const fingerprint = orchidOrderSessionFingerprint(history, order, now);
       const payloadFingerprint = orchidOrderPayloadFingerprint(order);
+      const replaceDelivery = command === "-cn" ? orchidDeliveryCorrection(history) : null;
       const claim = command === "-lb"
         ? await claimKiotVietOrderDraft(db, ctx, { channelId: channel.id, threadId, fingerprint,
           payloadFingerprint, allowRejectedRetry: true })
@@ -801,6 +803,7 @@ export function makeInboundHandler(
         saved = await createKiotVietOrchidDraft({ ...common,
           ...(command === "-cn" && typeof claim !== "string" ? { existing: {
             orderId: claim.orderId, code: claim.code, fillMissing: true as const,
+            ...(replaceDelivery ? { replaceDelivery } : {}),
           } } : {}),
         });
         if (command === "-lb") await finishKiotVietOrderDraft(db, ctx, id, saved);
