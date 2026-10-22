@@ -126,6 +126,8 @@ describe("Configured group photo editing", () => {
     const captioned = await handler({ ...incoming, text: "Chỉnh ảnh này giúp tôi" });
     expect(captioned.kind).toBe("reply");
     if (captioned.kind === "reply") expect(captioned.media).toHaveLength(1);
+    const unavailable = await handler({ ...incoming, media: [{ kind: "photo", note: "CDN trả file rỗng" }] });
+    expect(unavailable).toMatchObject({ kind: "reply", text: expect.stringContaining("gửi lại ảnh") });
     expect(requests).toHaveLength(0);
     expect(await handler({ ...incoming, text: "@Trợ lý cho biết trạng thái", media: undefined })).toEqual({ kind: "ignore" });
     expect(editRequests).toHaveLength(2);

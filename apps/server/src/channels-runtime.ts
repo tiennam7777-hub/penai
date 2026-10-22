@@ -1021,8 +1021,8 @@ export function makeInboundHandler(
         const photos = (msg.media ?? []).filter((m) => m.kind === "photo" && m.dataUrl).slice(0, 6);
         const saved = await saveInboundImages(userDir, photos);
         if (!saved.length) {
-          logger.warn(`Không đọc được ảnh nhóm ${channel.id}/${msg.chatKey}; không gửi tin nhắn lỗi`);
-          return { kind: "ignore" };
+          logger.warn(`Không đọc được ảnh nhóm ${channel.id}/${msg.chatKey} sau khi thử lại`);
+          return { kind: "reply", text: "⚠️ Zalo chưa cung cấp được dữ liệu ảnh gốc sau nhiều lần thử. Anh/chị vui lòng gửi lại ảnh này.", media: [] };
         }
         const edited: string[] = [];
         for (const original of saved) {
@@ -1043,7 +1043,7 @@ export function makeInboundHandler(
         return { kind: "reply", text: "", media: edited };
       } catch (error) {
         logger.warn(`Không chỉnh được ảnh nhóm ${channel.id}/${msg.chatKey}: ${String(error)}`);
-        return { kind: "ignore" };
+        return { kind: "reply", text: "⚠️ Chưa chỉnh được ảnh này. Anh/chị vui lòng gửi lại sau hoặc báo nhân viên kiểm tra.", media: [] };
       }
     }
     if (silentPhoto) {

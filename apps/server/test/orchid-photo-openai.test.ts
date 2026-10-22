@@ -28,4 +28,25 @@ describe("OC2 OpenAI image editing", () => {
     expect(() => editOrchidPhotoWithOpenAI(Buffer.alloc(20), "", { generateImage }, "gpt-6-sol")).toThrow();
     expect(generateImage).not.toHaveBeenCalled();
   });
+
+  it("runs at most two edits at once and releases a slot after failure", async () => {
+    const releases: Array<() => void> = [];
+    let active = 0;
+    let peak = 0;
+    const editor: OrchidPhotoEditor = { generateImage: async () => {
+      active++;
+      peak = Math.max(peak, active);
+      await new Promise<void>((resolve) => releases.push(resolve));
+      active--;
+      return { data: jpeg, mime: "image/jpeg" };
+    } };
+    const jobs = Array.from({ length: 3 }, () => editOrchidPhotoWithOpenAI(png, "", editor, "gpt-6-sol"));
+    await vi.waitFor(() => expect(releases).toHaveLength(2));
+    expect(peak).toBe(2);
+    releases.shift()!();
+    await vi.waitFor(() => expect(releases).toHaveLength(2));
+    expect(peak).toBe(2);
+    releases.splice(0).forEach((release) => release());
+    await expect(Promise.all(jobs)).resolves.toHaveLength(3);
+  });
 });

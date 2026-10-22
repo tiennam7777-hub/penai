@@ -287,7 +287,7 @@ it("ảnh kèm câu hỏi được trả lời, còn ảnh không chữ thì im 
   expect(sent).toEqual([]);
 });
 
-it("nhóm OC2 chỉ gửi ảnh thành phẩm, không gửi chữ, typing, cảm xúc hoặc báo lỗi", async () => {
+it("nhóm OC2 chỉ gửi ảnh thành phẩm và báo lỗi khi ảnh không xử lý được", async () => {
   const sent: string[] = [];
   let fail = false;
   const channel = new ZaloPersonalChannel({
@@ -298,7 +298,7 @@ it("nhóm OC2 chỉ gửi ảnh thành phẩm, không gửi chữ, typing, cảm
       hooks?.onStatus?.("thinking");
       hooks?.onBlockReply?.("Tin trả lời sớm");
       if (fail) throw new Error("OpenAI unavailable");
-      return { kind: "reply", text: "Không được gửi chữ", media: message.media?.length ? ["/tmp/edited.jpg"] : undefined };
+      return { kind: "reply", text: "", media: message.media?.length ? ["/tmp/edited.jpg"] : undefined };
     },
   });
   const internals = channel as unknown as Record<string, unknown>;
@@ -324,7 +324,15 @@ it("nhóm OC2 chỉ gửi ảnh thành phẩm, không gửi chữ, typing, cảm
   sent.length = 0;
   fail = true;
   await handle(message("oc2-failed", "chat.photo", { title: "Chỉnh tiếp" }));
-  expect(sent).toEqual([]);
+  expect(sent).toEqual(["⚠️ Xử lý ảnh bị gián đoạn. Anh/chị vui lòng báo nhân viên kiểm tra."]);
+  sent.length = 0;
+  fail = false;
+  internals.sendFiles = async () => { sent.push("photo-attempted"); return []; };
+  await handle(message("oc2-send-failed", "chat.photo", { title: "Gửi ảnh" }));
+  expect(sent).toEqual([
+    "photo-attempted",
+    "⚠️ Ảnh đã chỉnh xong nhưng Zalo chưa xác nhận gửi đủ ảnh. Anh/chị báo nhân viên kiểm tra trước khi gửi lại.",
+  ]);
 });
 
 it("câu hỏi giá trích dẫn ảnh đã gửi vẫn tới Agent và được trả lời", async () => {

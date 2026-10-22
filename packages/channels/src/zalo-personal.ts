@@ -1250,6 +1250,7 @@ export class ZaloPersonalChannel implements Channel {
     const media = await this.collectMedia(
       message.data.content,
       String(message.data.msgType ?? ""),
+      photoEditOnlyGroup,
     );
     if (!photoMessage && media.some((item) => item.kind === "photo" ||
       (item.kind === "document" && /\.(png|jpe?g|gif|webp)$/i.test(item.name ?? "")))) {
@@ -1316,7 +1317,7 @@ export class ZaloPersonalChannel implements Channel {
         },
         hooks,
       );
-      if (photoEditOnlyGroup && (result.kind !== "reply" || !result.media?.length)) return;
+      if (photoEditOnlyGroup && (result.kind !== "reply" || (!result.media?.length && !result.text.trim()))) return;
       if (silentPhoto && result.kind !== "reply") return;
       if (result.kind === "pairing") {
         // Ngoại lệ Zalo cá nhân: người chưa duyệt pairing thì IM LẶNG — không
@@ -1327,17 +1328,27 @@ export class ZaloPersonalChannel implements Channel {
         );
       } else if (result.kind === "reply") {
         if (!(await waitForAiReply())) return;
-        if (!photoEditOnlyGroup && result.text.trim()) {
+        if (result.text.trim()) {
           const prior = blockReplies.get(replyKey(result.text));
           if (!prior || !(await prior)) await this.sendText(threadId, threadType, result.text);
         }
         if (result.media?.length) {
-          await this.sendFiles(threadId, threadType, result.media);
+          const sent = await this.sendFiles(threadId, threadType, result.media);
+          if (photoEditOnlyGroup && Array.isArray(sent) && sent.length < result.media.length) {
+            await this.sendText(threadId, threadType,
+              "⚠️ Ảnh đã chỉnh xong nhưng Zalo chưa xác nhận gửi đủ ảnh. Anh/chị báo nhân viên kiểm tra trước khi gửi lại.")
+              .catch((error) => this.deps.onError?.(error as Error));
+          }
         }
       }
     } catch (error) {
       this.deps.onError?.(error as Error);
-      if (silentPhoto || photoEditOnlyGroup) return;
+      if (photoEditOnlyGroup) {
+        await this.sendText(threadId, threadType,
+          "⚠️ Xử lý ảnh bị gián đoạn. Anh/chị vui lòng báo nhân viên kiểm tra.").catch(() => {});
+        return;
+      }
+      if (silentPhoto) return;
       await this.sendText(
         threadId,
         threadType,
@@ -1623,6 +1634,7 @@ export class ZaloPersonalChannel implements Channel {
   private async collectMedia(
     content: Message["data"]["content"],
     msgType = "",
+    photoEditOnlyGroup = false,
   ): Promise<InboundMedia[]> {
     if (!content || typeof content === "string") return [];
     const value = content as ZaloContentObject;
@@ -1690,21 +1702,33 @@ export class ZaloPersonalChannel implements Channel {
     try {
       let data = Buffer.alloc(0);
       let mime = "";
-      // CDN Zalo đôi khi trả HTTP 200 nhưng thân ảnh rỗng ngay sau khi gửi.
-      // Thử lại trước khi chuyển ảnh cho OC2; không lưu file 0 byte.
-      for (let attempt = 0; attempt < (kind === "photo" ? 3 : 1); attempt++) {
-        const response = await fetch(url, {
-          signal: AbortSignal.timeout(60_000),
-          headers: { "user-agent": "Mozilla/5.0 (PenAI Zalo bridge)" },
-        });
-        const declared = Number(response.headers.get("content-length") ?? 0);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        if (declared > MEDIA_MAX_BYTES) throw new Error("media vượt 10MB");
-        data = Buffer.from(await response.arrayBuffer());
-        if (data.length > MEDIA_MAX_BYTES) throw new Error("media vượt 10MB");
-        mime = response.headers.get("content-type")?.split(";")[0]?.trim() ?? "";
-        if (data.length) break;
-        if (attempt < 2 && kind === "photo") await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
+      // CDN Zalo đôi khi trả HTTP 200 với thân rỗng trong lúc ảnh chưa sẵn.
+      // OC2 chờ lâu hơn; nếu hết lượt vẫn lỗi thì báo rõ trong nhóm.
+      const delays = kind === "photo"
+        ? (photoEditOnlyGroup ? [0, 1_000, 3_000, 7_000, 15_000, 30_000, 30_000] : [0, 300, 600])
+        : [0];
+      for (let attempt = 0; attempt < delays.length; attempt++) {
+        if (delays[attempt]) await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
+        try {
+          const response = await fetch(url, {
+            signal: AbortSignal.timeout(photoEditOnlyGroup ? 15_000 : 60_000),
+            headers: { "user-agent": "Mozilla/5.0 (PenAI Zalo bridge)" },
+          });
+          const declared = Number(response.headers.get("content-length") ?? 0);
+          if (!response.ok) {
+            const error = new Error(`HTTP ${response.status}`);
+            if (response.status < 500 && response.status !== 429) throw error;
+            if (attempt === delays.length - 1) throw error;
+            continue;
+          }
+          if (declared > MEDIA_MAX_BYTES) throw new Error("media vượt 10MB");
+          data = Buffer.from(await response.arrayBuffer());
+          if (data.length > MEDIA_MAX_BYTES) throw new Error("media vượt 10MB");
+          mime = response.headers.get("content-type")?.split(";")[0]?.trim() ?? "";
+          if (data.length) break;
+        } catch (error) {
+          if (attempt === delays.length - 1 || /media vượt 10MB|HTTP 4(?!29)/.test(errorMessage(error))) throw error;
+        }
       }
       if (!data.length) throw new Error("CDN Zalo trả file rỗng");
       logger.info(

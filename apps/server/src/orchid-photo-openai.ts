@@ -70,7 +70,24 @@ function inputInfo(input: Buffer): { mime: string; width: number; height: number
   throw new Error("OC2 chỉ hỗ trợ ảnh JPG, PNG hoặc WebP hợp lệ");
 }
 
-let queue: Promise<void> = Promise.resolve();
+// Keep two image edits in flight. A single slow provider request must not hold
+// every OC2 group and direct-photo command behind it.
+const MAX_CONCURRENT_EDITS = 2;
+let activeEdits = 0;
+const waitingEdits: Array<() => void> = [];
+
+async function withEditSlot<T>(task: () => Promise<T>): Promise<T> {
+  if (activeEdits >= MAX_CONCURRENT_EDITS) {
+    await new Promise<void>((resolve) => waitingEdits.push(resolve));
+  } else activeEdits++;
+  try {
+    return await task();
+  } finally {
+    const next = waitingEdits.shift();
+    if (next) next();
+    else activeEdits--;
+  }
+}
 
 export function editOrchidPhotoWithOpenAI(
   input: Buffer,
@@ -85,7 +102,7 @@ export function editOrchidPhotoWithOpenAI(
   }
   const ratio = source.width / source.height;
   const size = ratio < 0.84 ? "1024x1536" : ratio > 1.2 ? "1536x1024" : "1024x1024";
-  const task = queue.then(async () => {
+  return withEditSlot(async () => {
     const result = await editor.generateImage({
       prompt: `${agentPrompt.trim()}\n\n${backgroundBlur === "moderate"
         ? REQUIRED_EDIT.replace("smooth, strong, even background defocus", "smooth, moderate, natural background defocus")
@@ -105,6 +122,4 @@ export function editOrchidPhotoWithOpenAI(
     }
     return { data: result.data, mime: "image/jpeg" as const };
   });
-  queue = task.then(() => {}, () => {});
-  return task;
 }
