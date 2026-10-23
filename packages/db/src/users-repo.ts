@@ -285,6 +285,8 @@ export async function removeWorkspaceMember(
 ): Promise<boolean> {
   return withWorkspace(db, ctx, async (tx) => {
     await tx.delete(agentUserGrants).where(eq(agentUserGrants.userId, userId));
+    await tx.execute(sql`DELETE FROM inbox_user_access WHERE user_id = ${userId}`);
+    await tx.execute(sql`DELETE FROM inbox_channel_members WHERE user_id = ${userId}`);
     const rows = await tx
       .delete(workspaceMembers)
       .where(eq(workspaceMembers.userId, userId))

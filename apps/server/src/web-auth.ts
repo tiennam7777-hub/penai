@@ -41,6 +41,7 @@ import {
   getWorkspaceById,
   listChannels,
   listInboxChannelMembers,
+  listUserInboxChannelIds,
   listInboxUserAccess,
   setUserInboxAccess,
   setUserInboxChannels,
@@ -468,6 +469,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
       return reply.code(404).send({ error: "Người dùng không thuộc workspace" });
     }
     const b = (req.body ?? {}) as { name?: unknown; role?: unknown; isActive?: unknown; agentIds?: unknown; zaloChannelIds?: unknown };
+    const previousRole = (await listWorkspaceUsers(db, req.authCtx)).find((u) => u.id === id)?.role;
     const self = id === req.authCtx.userId;
     if (b.role !== undefined) {
       if (!isRole(b.role)) return reply.code(400).send({ error: "Role không hợp lệ" });
@@ -500,6 +502,16 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
         id,
         b.zaloChannelIds.filter((x): x is string => typeof x === "string"),
       );
+    }
+    if (b.role !== undefined && b.role !== previousRole) {
+      if (b.role === "member") {
+        const ids = Array.isArray(b.zaloChannelIds)
+          ? b.zaloChannelIds.filter((x): x is string => typeof x === "string")
+          : await listUserInboxChannelIds(db, req.authCtx, id);
+        await setUserInboxAccess(db, req.authCtx, id, ids);
+      } else if (b.role === "viewer") {
+        await setUserInboxAccess(db, req.authCtx, id, []);
+      }
     }
     await recordAudit(db, req.authCtx, "user.update", {
       userId: id,
@@ -553,6 +565,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
     if (id === req.authCtx.userId) return reply.code(400).send({ error: "Không thể xóa chính mình" });
     const ok = await removeWorkspaceMember(db, req.authCtx, id);
     if (!ok) return reply.code(404).send({ error: "Người dùng không thuộc workspace" });
+    closeInboxUserEvents(req.authCtx.workspaceId, id);
     await revokeAllWebSessions(db, id);
     await recordAudit(db, req.authCtx, "user.remove", { userId: id });
     return { removed: true };
