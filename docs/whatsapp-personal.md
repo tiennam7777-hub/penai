@@ -46,7 +46,7 @@ Agent nhận được: chữ, ảnh, file (≤ 10 MB). Tin nhắn thoại, video
 
 Dashboard → **📥 Inbox** → chọn kênh WhatsApp ở ô đầu trang. Cách dùng như Inbox của Zalo cá nhân
 ([zalo-personal.md](zalo-personal.md) mục 3): xem hội thoại, gửi chữ/ảnh, nhắn tin mới theo số điện thoại, tắt AI theo
-từng hội thoại, thả cảm xúc, tự thả cảm xúc khi khách nhắn. Thành viên chỉ thấy kênh được gán (Người dùng → Sửa).
+từng hội thoại, thả cảm xúc, tự thả cảm xúc khi khách nhắn. Vận hành, Người kiểm duyệt và Thành viên chỉ thấy kênh được cấp (Người dùng → **Quyền Inbox**).
 
 Riêng WhatsApp:
 

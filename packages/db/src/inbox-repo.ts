@@ -924,6 +924,35 @@ export async function pruneInboxMessages(
 
 // ===== Member được trực kênh Zalo nào =====
 
+/** Quyền xem Inbox, độc lập với quyền sử dụng kênh qua MCP. */
+export async function listInboxUserAccess(db: Db, ctx: WorkspaceContext): Promise<Array<{ channelId: string; userId: string }>> {
+  const res = await withWorkspace(db, ctx, (tx) => tx.execute(sql`SELECT channel_id, user_id FROM inbox_user_access`));
+  return (res.rows as Raw[]).map((r) => ({ channelId: String(r.channel_id), userId: String(r.user_id) }));
+}
+
+export async function listUserInboxAccessIds(db: Db, ctx: WorkspaceContext, userId: string): Promise<string[]> {
+  const res = await withWorkspace(db, ctx, (tx) =>
+    tx.execute(sql`SELECT channel_id FROM inbox_user_access WHERE user_id = ${userId}`),
+  );
+  return (res.rows as Raw[]).map((r) => String(r.channel_id));
+}
+
+export async function setUserInboxAccess(db: Db, ctx: WorkspaceContext, userId: string, channelIds: string[]): Promise<string[]> {
+  return withWorkspace(db, ctx, async (tx) => {
+    const ids = [...new Set(channelIds.filter((x) => /^[0-9a-f-]{36}$/i.test(x)))];
+    const valid = ids.length
+      ? ((await tx.execute(sql`SELECT id FROM channels WHERE kind IN ('zalo_personal', 'whatsapp_personal')
+          AND id IN (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)})`)).rows as Raw[]).map((r) => String(r.id))
+      : [];
+    await tx.execute(sql`DELETE FROM inbox_user_access WHERE user_id = ${userId}`);
+    for (const channelId of valid) {
+      await tx.execute(sql`INSERT INTO inbox_user_access (workspace_id, channel_id, user_id, granted_by)
+        VALUES (${ctx.workspaceId}, ${channelId}, ${userId}, ${ctx.userId}) ON CONFLICT DO NOTHING`);
+    }
+    return valid;
+  });
+}
+
 export async function listInboxChannelMembers(
   db: Db,
   ctx: WorkspaceContext,

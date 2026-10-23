@@ -41,9 +41,12 @@ import {
   getWorkspaceById,
   listChannels,
   listInboxChannelMembers,
+  listInboxUserAccess,
+  setUserInboxAccess,
   setUserInboxChannels,
   type Db,
 } from "@penai/db";
+import { closeInboxUserEvents } from "./inbox.js";
 
 export const SESSION_COOKIE = "penai_session";
 const MIN_PASSWORD = 8;
@@ -391,16 +394,18 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
 
   app.get("/v1/users", async (req, reply) => {
     if (!requireRole(req, reply, "ws_admin")) return;
-    const [users, agents, channels, zaloMembers] = await Promise.all([
+    const [users, agents, channels, zaloMembers, inboxAccess] = await Promise.all([
       listWorkspaceUsers(db, req.authCtx),
       listAgents(db, req.authCtx),
       listChannels(db, req.authCtx),
       listInboxChannelMembers(db, req.authCtx),
+      listInboxUserAccess(db, req.authCtx),
     ]);
     return {
       users: users.map((u) => ({
         ...u,
         zaloChannelIds: zaloMembers.filter((m) => m.userId === u.id).map((m) => m.channelId),
+        inboxChannelIds: inboxAccess.filter((m) => m.userId === u.id).map((m) => m.channelId),
       })),
       agents: agents.map((a) => ({ id: a.id, key: a.key, name: a.name })),
       zaloChannels: channels.filter((c) => isPersonalChannelKind(c.kind)).map((c) => ({ id: c.id, name: c.name, kind: c.kind })),
@@ -446,6 +451,12 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
     if ((role === "member" || role === "moderator") && zaloIds.length) {
       await setUserInboxChannels(db, req.authCtx, created.id, zaloIds);
     }
+    if (role === "moderator" || role === "operator") {
+      const channelIds = (await listChannels(db, req.authCtx)).filter((c) => isPersonalChannelKind(c.kind)).map((c) => c.id);
+      await setUserInboxAccess(db, req.authCtx, created.id, channelIds);
+    } else if (role === "member" && zaloIds.length) {
+      await setUserInboxAccess(db, req.authCtx, created.id, zaloIds);
+    }
     await recordAudit(db, req.authCtx, "user.create", { userId: created.id, email: b.email, role });
     return reply.code(201).send({ id: created.id, reusedExisting: created.reusedExisting });
   });
@@ -473,6 +484,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
     }
     await updateUserProfile(db, id, profile);
     if (profile.isActive === false) await revokeAllWebSessions(db, id);
+    if (b.role !== undefined || profile.isActive === false) closeInboxUserEvents(req.authCtx.workspaceId, id);
     if (Array.isArray(b.agentIds)) {
       await setUserAgentGrants(
         db,
@@ -496,6 +508,26 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
       ...(Array.isArray(b.agentIds) ? { agentCount: b.agentIds.length } : {}),
     });
     return { ok: true };
+  });
+
+  app.put("/v1/users/:id/inbox-channels", async (req, reply) => {
+    if (!requireRole(req, reply, "ws_admin")) return;
+    const { id } = req.params as { id: string };
+    if (!(await isWorkspaceMember(db, req.authCtx, id)))
+      return reply.code(404).send({ error: "Người dùng không thuộc workspace" });
+    const target = (await listWorkspaceUsers(db, req.authCtx)).find((u) => u.id === id);
+    if (!target || !["member", "moderator", "operator"].includes(target.role))
+      return reply.code(400).send({ error: "Vai trò này không cấu hình quyền Inbox theo kênh" });
+    const body = (req.body ?? {}) as { channelIds?: unknown };
+    if (!Array.isArray(body.channelIds) || !body.channelIds.every((x) => typeof x === "string"))
+      return reply.code(400).send({ error: "Danh sách kênh không hợp lệ" });
+    const available = new Set((await listChannels(db, req.authCtx)).filter((c) => isPersonalChannelKind(c.kind)).map((c) => c.id));
+    if (body.channelIds.some((id) => !available.has(id)))
+      return reply.code(400).send({ error: "Danh sách chứa kênh Inbox không hợp lệ" });
+    const channelIds = await setUserInboxAccess(db, req.authCtx, id, body.channelIds);
+    closeInboxUserEvents(req.authCtx.workspaceId, id);
+    await recordAudit(db, req.authCtx, "user.inbox_access_update", { userId: id, channelIds });
+    return { ok: true, channelIds };
   });
 
   app.post("/v1/users/:id/password", async (req, reply) => {

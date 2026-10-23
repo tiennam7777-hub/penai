@@ -3350,11 +3350,11 @@ export const INDEX_HTML = `<!doctype html>
     ws_admin: "Toàn quyền: cấu hình, tạo người dùng, khóa API.",
     operator: "Vận hành: chat mọi agent, kênh, cron, kho tri thức. Không tạo người dùng.",
     viewer: "Chỉ xem dữ liệu, không chat.",
-    moderator: "Chat với agent được gán; đầy đủ tính năng Inbox trên mọi kênh; duyệt yêu cầu, quản lý Contacts và Thư viện file. Kênh MCP gán riêng. Không xem cấu hình Channels.",
+    moderator: "Chat với agent được gán; dùng Inbox theo các kênh quản trị cấp; duyệt yêu cầu, quản lý Contacts và Thư viện file. Kênh MCP gán riêng. Không xem cấu hình Channels.",
     member: "Chỉ thấy trang Chat và chỉ chat với các agent được gán bên dưới."
   };
   PAGES.users = function () {
-    var m = page("Người dùng", "Tài khoản đăng nhập Dashboard và quyền truy cập agent (chỉ Quản trị)");
+    var m = page("Người dùng", "Tài khoản đăng nhập Dashboard, quyền truy cập agent và Inbox (chỉ Quản trị)");
     var top = el("div", { "class": "row", style: "margin-bottom:12px" });
     var addB = el("button", null, "＋ Thêm người dùng"); top.appendChild(addB);
     m.appendChild(top);
@@ -3366,15 +3366,19 @@ export const INDEX_HTML = `<!doctype html>
       api("/v1/users").then(function (j) {
         DATA = j;
         c.innerHTML = "";
-        c.appendChild(table(["Tên", "Email", "Vai trò", "Agent được chat", "Đăng nhập gần nhất", "Trạng thái", ""], j.users, function (u) {
+        c.appendChild(table(["Tên", "Email", "Vai trò", "Agent và kênh được cấp", "Đăng nhập gần nhất", "Trạng thái", ""], j.users, function (u) {
           var tr = el("tr");
           var agentsTxt = (u.role === "member" || u.role === "moderator") ? (u.agentIds.length ? u.agentIds.map(function (id) { return '<span class="pill">' + esc(agentName(id)) + "</span>"; }).join(" ") : '<span class="err">chưa gán</span>') : '<span class="muted">tất cả</span>';
-          if (u.role === "moderator") agentsTxt += '<div style="margin-top:3px"><span class="pill">📥 Mọi kênh Inbox</span></div>';
-          if ((u.role === "member" || u.role === "moderator") && (u.zaloChannelIds || []).length) agentsTxt += '<div style="margin-top:3px">' + u.zaloChannelIds.map(function (id) { return '<span class="pill">' + (u.role === "moderator" ? "🔌 " : "📥 ") + esc(zaloName(id)) + "</span>"; }).join(" ") + "</div>";
+          if (u.role === "ws_admin") agentsTxt += '<div style="margin-top:3px"><span class="pill">📥 Mọi kênh Inbox</span></div>';
+          else if (u.role === "member" || u.role === "moderator" || u.role === "operator") agentsTxt += '<div style="margin-top:3px">' + ((u.inboxChannelIds || []).length ? u.inboxChannelIds.map(function (id) { return '<span class="pill">📥 ' + esc(zaloName(id)) + "</span>"; }).join(" ") : '<span class="muted">Chưa được xem Inbox</span>') + "</div>";
+          if ((u.role === "member" || u.role === "moderator") && (u.zaloChannelIds || []).length) agentsTxt += '<div style="margin-top:3px">' + u.zaloChannelIds.map(function (id) { return '<span class="pill">🔌 ' + esc(zaloName(id)) + "</span>"; }).join(" ") + "</div>";
           var me = state.me && state.me.user && state.me.user.id === u.id;
           tr.innerHTML = "<td>" + esc(u.name) + (me ? ' <span class="pill">bạn</span>' : "") + "</td><td>" + esc(u.email) + "</td><td><span class='role-pill'>" + esc(ROLE_LABELS[u.role] || u.role) + "</span></td><td>" + agentsTxt + "</td><td class='muted'>" + esc(u.lastLoginAt ? String(u.lastLoginAt).slice(0, 16).replace("T", " ") : "chưa") + "</td><td>" + (u.isActive ? '<span class="ok">hoạt động</span>' : '<span class="err">đã khóa</span>') + (u.mustChangePassword ? ' <span class="pill">phải đổi MK</span>' : "") + "</td>";
           var td = el("td", { style: "white-space:nowrap" });
           var ed = el("button", { "class": "ghost sm" }, "Sửa"); ed.onclick = function () { openForm(u); }; td.appendChild(ed);
+          if (u.role === "member" || u.role === "moderator" || u.role === "operator") {
+            var ib = el("button", { "class": "ghost sm", style: "margin-left:4px" }, "Quyền Inbox"); ib.onclick = function () { openInboxAccess(u); }; td.appendChild(ib);
+          }
           var pw = el("button", { "class": "ghost sm", style: "margin-left:4px" }, "Đặt lại MK"); pw.onclick = function () { openReset(u); }; td.appendChild(pw);
           if (!me) {
             var lk = el("button", { "class": "ghost sm", style: "margin-left:4px" }, u.isActive ? "Khóa" : "Mở khóa");
@@ -3385,6 +3389,31 @@ export const INDEX_HTML = `<!doctype html>
           tr.appendChild(td); return tr;
         }));
       }).catch(function (e) { c.innerHTML = '<span class="err">' + esc(e.message) + "</span>"; });
+    }
+    function openInboxAccess(u) {
+      var dlg = el("dialog", { style: "width:500px;max-width:95vw;padding:20px" });
+      dlg.innerHTML = "<h3 style='margin:0 0 6px'>Kênh Inbox được xem — " + esc(u.name) + "</h3>" +
+        '<p class="muted">Chọn kênh người này được xem và trả lời trong Inbox. Quyền MCP được quản lý riêng trong nút Sửa.</p>' +
+        '<div id="inboxAccessChecks" class="agent-checks"></div>' +
+        '<div class="dialog-actions"><button class="ghost" id="inboxAccessCancel">Hủy</button><button id="inboxAccessSave">Lưu quyền Inbox</button></div>' +
+        '<div id="inboxAccessMsg" style="margin-top:8px"></div>';
+      document.body.appendChild(dlg);
+      var box = $("#inboxAccessChecks", dlg);
+      if (!(DATA.zaloChannels || []).length) box.innerHTML = '<span class="muted">Chưa có kênh Inbox nào.</span>';
+      (DATA.zaloChannels || []).forEach(function (z) {
+        var lb = el("label"); var cb = el("input", { type: "checkbox", value: z.id });
+        cb.checked = (u.inboxChannelIds || []).indexOf(z.id) >= 0;
+        lb.appendChild(cb); lb.appendChild(document.createTextNode(z.name + (z.kind === "whatsapp_personal" ? " (WhatsApp)" : " (Zalo)"))); box.appendChild(lb);
+      });
+      $("#inboxAccessCancel", dlg).onclick = function () { dlg.close(); dlg.remove(); };
+      $("#inboxAccessSave", dlg).onclick = function () {
+        var channelIds = Array.prototype.map.call(box.querySelectorAll("input:checked"), function (x) { return x.value; });
+        $("#inboxAccessSave", dlg).disabled = true;
+        api("/v1/users/" + u.id + "/inbox-channels", { method: "PUT", body: { channelIds: channelIds } })
+          .then(function () { dlg.close(); dlg.remove(); toast("Đã lưu quyền Inbox"); load(); })
+          .catch(function (e) { $("#inboxAccessSave", dlg).disabled = false; $("#inboxAccessMsg", dlg).innerHTML = '<span class="err">' + esc(e.message) + "</span>"; });
+      };
+      dlg.showModal();
     }
     function agentChecks(selected) {
       var box = el("div", { "class": "agent-checks", id: "uAgents" });
@@ -3405,7 +3434,7 @@ export const INDEX_HTML = `<!doctype html>
         '<label>Vai trò</label><select id="uRole" style="width:100%">' + Object.keys(ROLE_LABELS).map(function (r) { return '<option value="' + r + '">' + esc(ROLE_LABELS[r]) + "</option>"; }).join("") + "</select>" +
         '<div id="uRoleHelp" class="muted" style="margin-top:4px"></div>' +
         '<div id="uAgentWrap"><label>Agent được phép chat</label></div>' +
-        '<div id="uZaloWrap"><label id="uZaloLabel">Kênh được trực (Inbox Zalo / WhatsApp — cũng là kênh tài khoản này dùng được qua MCP)</label></div>' +
+        '<div id="uZaloWrap"><label id="uZaloLabel">Kênh được dùng qua MCP</label></div>' +
         '<div class="dialog-actions"><button class="ghost" id="uCancel">Hủy</button><button id="uSave">' + (isEdit ? "Lưu" : "Tạo tài khoản") + "</button></div>" +
         '<div id="uMsg" style="margin-top:8px"></div>';
       document.body.appendChild(dlg);
@@ -3420,7 +3449,7 @@ export const INDEX_HTML = `<!doctype html>
       $("#uZaloWrap", dlg).appendChild(zbox);
       if (isEdit) { $("#uName", dlg).value = u.name; $("#uEmail", dlg).value = u.email; $("#uRole", dlg).value = u.role; }
       else { $("#uRole", dlg).value = "member"; }
-      function syncRole() { var r = $("#uRole", dlg).value; $("#uRoleHelp", dlg).textContent = ROLE_HELP[r] || ""; $("#uAgentWrap", dlg).style.display = (r === "member" || r === "moderator") ? "block" : "none"; $("#uZaloWrap", dlg).style.display = (r === "member" || r === "moderator") ? "block" : "none"; $("#uZaloLabel", dlg).textContent = r === "moderator" ? "Kênh được dùng qua MCP (Inbox luôn truy cập mọi kênh)" : "Kênh được trực (Inbox Zalo / WhatsApp — cũng là kênh tài khoản này dùng được qua MCP)"; }
+      function syncRole() { var r = $("#uRole", dlg).value; $("#uRoleHelp", dlg).textContent = ROLE_HELP[r] || ""; $("#uAgentWrap", dlg).style.display = (r === "member" || r === "moderator") ? "block" : "none"; $("#uZaloWrap", dlg).style.display = (r === "member" || r === "moderator") ? "block" : "none"; }
       $("#uRole", dlg).onchange = syncRole; syncRole();
       $("#uCancel", dlg).onclick = function () { dlg.close(); dlg.remove(); };
       $("#uSave", dlg).onclick = function () {

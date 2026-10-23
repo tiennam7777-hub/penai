@@ -29,6 +29,7 @@ import {
   listInboxThreadSenders,
   listChannels,
   listUserInboxChannelIds,
+  listUserInboxAccessIds,
   listInboxMessages,
   listInboxThreads,
   listInboxTags,
@@ -129,12 +130,22 @@ export function readInboxConfig(config: Record<string, unknown>): {
 
 interface SseClient {
   workspaceId: string;
+  userId: string;
   /** null = mọi kênh (operator trở lên) */
   channelIds: Set<string> | null;
   write: (chunk: string) => void;
+  close: () => void;
 }
 
 const sseClients = new Set<SseClient>();
+
+export function closeInboxUserEvents(workspaceId: string, userId: string): void {
+  for (const client of sseClients) {
+    if (client.workspaceId !== workspaceId || client.userId !== userId) continue;
+    sseClients.delete(client);
+    client.close();
+  }
+}
 
 function broadcast(workspaceId: string, channelId: string, event: string, data: unknown): void {
   const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -511,12 +522,14 @@ export function forgetInboxChannel(channelId: string): void {
 
 // ===== Quyền truy cập kênh =====
 
-/** Moderator thấy mọi kênh trong Inbox; quyền MCP vẫn theo kênh được quản trị gán. */
+/** Quyền Inbox theo từng người; quyền MCP được gán riêng. */
 export async function allowedInboxChannelIds(db: Db, ctx: WorkspaceContext, scope: "inbox" | "mcp" = "inbox"): Promise<string[]> {
-  if ((ctx.role === "moderator" && scope === "inbox") || hasRole(ctx.role, "operator")) {
+  if (ctx.role === "ws_admin" || (scope === "mcp" && hasRole(ctx.role, "operator"))) {
     return (await listChannels(db, ctx)).filter((c) => isPersonalChannelKind(c.kind)).map((c) => c.id);
   }
-  if (ctx.role === "member" || ctx.role === "moderator") return listUserInboxChannelIds(db, ctx, ctx.userId);
+  if (scope === "inbox" && (ctx.role === "member" || ctx.role === "moderator" || ctx.role === "operator"))
+    return listUserInboxAccessIds(db, ctx, ctx.userId);
+  if (scope === "mcp" && (ctx.role === "member" || ctx.role === "moderator")) return listUserInboxChannelIds(db, ctx, ctx.userId);
   return [];
 }
 
@@ -967,8 +980,10 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
     raw.write("event: ready\ndata: {}\n\n");
     const client: SseClient = {
       workspaceId: req.authCtx.workspaceId,
-      channelIds: req.authCtx.role === "moderator" || hasRole(req.authCtx.role, "operator") ? null : new Set(ids),
+      userId: req.authCtx.userId,
+      channelIds: req.authCtx.role === "ws_admin" ? null : new Set(ids),
       write: (chunk) => raw.write(chunk),
+      close: () => raw.end(),
     };
     sseClients.add(client);
     req.raw.on("close", () => sseClients.delete(client));

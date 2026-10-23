@@ -10,7 +10,7 @@ const moderator: WorkspaceContext = {
 };
 
 describe("moderator Inbox channel scope", () => {
-  it("sees every personal channel in Inbox while MCP keeps assigned channels", async () => {
+  it("uses per-user Inbox grants while MCP keeps its own grants", async () => {
     const channels = [
       { id: "hot-1", kind: "zalo_personal" },
       { id: "hot-6", kind: "zalo_personal" },
@@ -21,8 +21,10 @@ describe("moderator Inbox channel scope", () => {
       select: () => ({ from: async () => channels }),
     };
     const db = { transaction: async (fn: (inner: typeof tx) => Promise<unknown>) => fn(tx) } as unknown as Db;
-    expect(await allowedInboxChannelIds(db, moderator)).toEqual(["hot-1", "hot-6"]);
+    expect(await allowedInboxChannelIds(db, moderator)).toEqual(["hot-6"]);
     expect(await allowedInboxChannelIds(db, moderator, "mcp")).toEqual(["hot-6"]);
     expect(await allowedInboxChannelIds(db, { ...moderator, role: "member" })).toEqual(["hot-6"]);
+    expect(await allowedInboxChannelIds(db, { ...moderator, role: "operator" })).toEqual(["hot-6"]);
+    expect(await allowedInboxChannelIds(db, { ...moderator, role: "ws_admin" })).toEqual(["hot-1", "hot-6"]);
   });
 });

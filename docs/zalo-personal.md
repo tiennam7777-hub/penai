@@ -89,8 +89,8 @@ Dashboard → **📥 Inbox Zalo**.
 
 | Vai trò | Quyền |
 |---|---|
-| Quản trị, Vận hành | Mọi kênh Zalo của workspace |
-| Thành viên | Chỉ kênh được gán: Người dùng → Sửa → tick **"Kênh Zalo được trực"** |
+| Quản trị | Mọi kênh Zalo của workspace |
+| Vận hành, Người kiểm duyệt, Thành viên | Chỉ kênh được cấp tại Người dùng → **Quyền Inbox**; quyền MCP được gán riêng trong **Sửa** |
 | Chỉ xem | Không |
 
 ---
