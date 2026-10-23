@@ -993,6 +993,25 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
     return res;
   });
 
+  app.get(`${base}/:channelId/threads/:threadId/mutual-groups`, async (req, reply) => {
+    const { channelId, threadId } = req.params as { channelId: string; threadId: string };
+    if (!(await guard(req, reply, channelId))) return;
+    const thread = await getInboxThread(db, req.authCtx, channelId, threadId);
+    if (!thread || thread.kind !== "direct") return reply.code(404).send({ error: "Không tìm thấy khách trong kênh này" });
+    const runtime = inboxRuntime(channelId);
+    if (runtime?.kind !== "zalo_personal" || !runtime.mutualGroups) {
+      return reply.code(400).send({ error: "Nhóm chung chỉ có trên Zalo cá nhân" });
+    }
+    if (!runtime.isConnected()) return reply.code(409).send({ error: "Zalo chưa kết nối để kiểm tra nhóm chung" });
+    try {
+      const result = await runtime.mutualGroups(threadId);
+      return { count: result.groups.length, groups: result.groups, incomplete: result.incomplete };
+    } catch (error) {
+      logger.warn(`zalo.mutual_groups_failed: ${error instanceof Error ? error.message : String(error)}`);
+      return reply.code(502).send({ error: "Chưa đọc được nhóm chung từ Zalo. Vui lòng thử lại." });
+    }
+  });
+
   app.put(`${base}/:channelId/threads/:threadId/visibility`, async (req, reply) => {
     const { channelId, threadId } = req.params as { channelId: string; threadId: string };
     if (!(await guard(req, reply, channelId))) return;

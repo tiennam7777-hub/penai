@@ -464,6 +464,8 @@ export class ZaloPersonalChannel implements Channel {
   private demoThreadSet: Set<string>;
   private observed = new Map<string, ZaloObservedPeer>();
   private groupNames = new Map<string, string>();
+  private mutualGroupCache: { expiresAt: number; groups: { id: string; name: string; memberIds: string[]; incomplete: boolean }[] } | null = null;
+  private mutualGroupLoad: Promise<NonNullable<ZaloPersonalChannel["mutualGroupCache"]>> | null = null;
   /** Kênh tắt "yêu cầu pairing" → DM mở cho mọi người; nhóm vẫn gate theo demo threads. */
   private openDirect: boolean;
   /**
@@ -568,6 +570,7 @@ export class ZaloPersonalChannel implements Channel {
     this.currentQrId = null;
     this.stopListener();
     this.api = null;
+    this.mutualGroupCache = null;
     await this.runner.drain(10_000);
   }
 
@@ -660,6 +663,7 @@ export class ZaloPersonalChannel implements Channel {
     this.currentQrId = null;
     this.stopListener();
     this.api = null;
+    this.mutualGroupCache = null;
     this.account = null;
     this.credentials = null;
     this.lastError = null;
@@ -717,6 +721,40 @@ export class ZaloPersonalChannel implements Channel {
       }
     }
     return targets.sort((a, b) => (a.contactAlias || a.name).localeCompare(b.contactAlias || b.name, "vi"));
+  }
+
+  /** Đọc thành viên nhóm từ chính tài khoản Zalo của kênh, cache ngắn để tránh gọi lại cho mỗi khách. */
+  async mutualGroups(userId: string): Promise<{ groups: { id: string; name: string }[]; incomplete: boolean }> {
+    if (!this.api) throw new ZaloNotConnectedError();
+    if (!this.mutualGroupCache || this.mutualGroupCache.expiresAt <= Date.now()) {
+      if (!this.mutualGroupLoad) {
+        const api = this.api;
+        this.mutualGroupLoad = (async () => {
+          const all = await api.getAllGroups();
+          const ids = Object.keys(all.gridVerMap ?? {});
+          const groups: { id: string; name: string; memberIds: string[]; incomplete: boolean }[] = [];
+          for (let i = 0; i < ids.length; i += 10) {
+            const detail = await api.getGroupInfo(ids.slice(i, i + 10));
+            for (const id of ids.slice(i, i + 10)) {
+              const group = detail.gridInfoMap[id];
+              if (!group) throw new Error("Zalo chưa trả đủ thông tin thành viên nhóm");
+              groups.push({ id, name: group.name || id, memberIds: group.memberIds ?? [], incomplete: !Array.isArray(group.memberIds) || !!group.hasMoreMember });
+            }
+          }
+          const result = { expiresAt: Date.now() + 2 * 60_000, groups };
+          if (this.api === api) this.mutualGroupCache = result;
+          return result;
+        })().finally(() => { this.mutualGroupLoad = null; });
+      }
+      await this.mutualGroupLoad;
+    }
+    if (!this.mutualGroupCache) throw new ZaloNotConnectedError();
+    const groups = this.mutualGroupCache?.groups ?? [];
+    return {
+      groups: groups.filter((group) => group.memberIds.includes(userId))
+        .map(({ id, name }) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "vi")),
+      incomplete: groups.some((group) => group.incomplete),
+    };
   }
 
   /** Đã đăng nhập Zalo và sẵn sàng gửi. */
@@ -1078,6 +1116,7 @@ export class ZaloPersonalChannel implements Channel {
     const profile = info.profile;
     this.stopListener();
     this.api = api;
+    this.mutualGroupCache = null;
     this.account = {
       id: String(profile.userId),
       name: profile.displayName || profile.zaloName || String(profile.userId),

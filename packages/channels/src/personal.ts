@@ -52,6 +52,8 @@ export interface PersonalChannel extends Channel {
   sendFriendRequest?(uid: string, message: string): Promise<void>;
   resolvePhone(phone: string): Promise<{ uid: string; name: string }>;
   lookupGroupName(threadId: string): Promise<string>;
+  /** Zalo: các nhóm mà tài khoản này và khách cùng tham gia. */
+  mutualGroups?(userId: string): Promise<{ groups: { id: string; name: string }[]; incomplete: boolean }>;
   sendManual(input: {
     threadId: string;
     peerKind: "direct" | "group";

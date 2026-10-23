@@ -4266,14 +4266,15 @@ export const INDEX_HTML = `<!doctype html>
   PAGES.inbox = function () {
     var m = page("Inbox", "Nhiều người cùng xem và trả lời khách trên Zalo cá nhân, WhatsApp cá nhân. Nhân viên trả lời thì AI tự tạm im trong hội thoại đó.");
     var S = { channels: [], canManage: false, ch: null, threads: [], total: 0, tags: [], tag: "", quick: [], quickMatches: [], quickToken: null, quickIndex: 0, hidden: false, cur: null, msgs: [], filter: "", kind: "", imgs: [], loadingAttach: false, file: null, reply: null, es: null, seq: 0, lastStaffSent: null,
-      detailsOpen: false, detailsTab: "info", detailsCategory: "media", exploreRows: [], exploreNext: null, exploreSeq: 0, exploreQ: "", exploreSender: "", exploreDirection: "", exploreSenders: [], jumped: false };
+      detailsOpen: false, detailsTab: "info", detailsCategory: "media", exploreRows: [], exploreNext: null, exploreSeq: 0, exploreQ: "", exploreSender: "", exploreDirection: "", exploreSenders: [], jumped: false,
+      mutualGroups: [], mutualIncomplete: false, mutualLoading: false, mutualError: "", mutualSeq: 0 };
     var top = el("div", { "class": "row", style: "margin-bottom:10px" });
     top.innerHTML = '<select id="ibxCh" style="max-width:260px"></select><span id="ibxSt" class="muted"></span><span style="flex:1"></span>' +
       '<button class="ghost sm" id="ibxQuick">⚡ Tin nhắn nhanh</button><button class="ghost sm" id="ibxFriend" style="display:none">＋ Kết bạn</button><button class="ghost sm" id="ibxNew">＋ Nhắn tin mới</button><button class="ghost sm" id="ibxSync" style="display:none">🔄 Đồng bộ danh bạ</button><button class="ghost sm" id="ibxSet" style="display:none">⚙️ Cài đặt</button>';
     m.appendChild(top);
     var wrap = el("div", { "class": "ibx" });
     wrap.innerHTML = '<div class="ibx-list"><div class="row" style="padding:8px"><input id="ibxQ" placeholder="Tìm tên, uid, SĐT…"><select id="ibxKind" style="flex:0 0 auto;min-width:0"><option value="">Tất cả</option><option value="direct">Cá nhân</option><option value="group">Nhóm</option><option value="unread">Chưa đọc</option></select></div><div class="row" style="padding:0 8px 8px;gap:6px"><select id="ibxTag" style="flex:1;min-width:0"><option value="">Mọi nhãn Inbox</option></select><select id="ibxHidden" style="flex:0 0 auto;min-width:0" title="Xem hội thoại đang hiện hoặc đã ẩn"><option value="0">Đang hiện</option><option value="1">Đã ẩn</option></select></div><div id="ibxThreads" class="ibx-threads"></div></div>' +
-      '<div class="ibx-chat"><div id="ibxHead" class="ibx-head muted">Chọn một hội thoại bên trái.</div><div class="ibx-main"><div id="ibxMsgs" class="ibx-msgs"></div><aside id="ibxDetails" class="ibx-details" style="display:none"><div class="ibx-details-top"><b>Thông tin hội thoại</b><button type="button" class="ghost sm" id="ibxDetailsClose" aria-label="Đóng thông tin">✕</button></div><div class="ibx-details-tabs"><button type="button" class="ghost sm" id="ibxInfoTab">Ảnh & tệp</button><button type="button" class="ghost sm" id="ibxSearchTab">🔎 Tìm tin</button></div><div id="ibxDetailsBody" class="ibx-details-body"></div></aside></div>' +
+      '<div class="ibx-chat"><div id="ibxHead" class="ibx-head muted">Chọn một hội thoại bên trái.</div><div class="ibx-main"><div id="ibxMsgs" class="ibx-msgs"></div><aside id="ibxDetails" class="ibx-details" style="display:none"><div class="ibx-details-top"><b>Thông tin hội thoại</b><button type="button" class="ghost sm" id="ibxDetailsClose" aria-label="Đóng thông tin">✕</button></div><div class="ibx-details-tabs"><button type="button" class="ghost sm" id="ibxProfileTab">Nhóm chung</button><button type="button" class="ghost sm" id="ibxInfoTab">Ảnh & tệp</button><button type="button" class="ghost sm" id="ibxSearchTab">🔎 Tìm tin</button></div><div id="ibxDetailsBody" class="ibx-details-body"></div></aside></div>' +
       '<div class="ibx-compose" id="ibxCompose" style="display:none"><div id="ibxReply"></div><div id="ibxImg"></div><div id="ibxQuickSuggestions" class="ibx-quick-suggestions"></div><div class="row" style="align-items:flex-end"><textarea id="ibxText" rows="2" placeholder="Nhập tin nhắn… (-ld: AI làm giúp; -lb: lên bill; -cn: bổ sung bill; -xhd: hóa đơn nháp MISA; -xuat: chưa bật; Enter để gửi)"></textarea><input type="file" id="ibxFile" multiple accept="image/png,image/jpeg,image/gif,image/webp,.pdf,.doc,.docx,.xls,.xlsx" hidden><button class="ghost" id="ibxAttach" title="Chọn tối đa 6 ảnh hoặc một file Word, Excel, PDF">📎</button><button class="ghost" id="ibxDelegate" style="display:none" title="Lệnh nội bộ, không gửi -ld cho khách">AI làm giúp</button><button id="ibxSend">Gửi</button></div></div></div>';
     m.appendChild(wrap);
 
@@ -4609,7 +4610,7 @@ export const INDEX_HTML = `<!doctype html>
       var displayName = t.profileName || t.contactAlias || t.name || t.threadId;
       h.innerHTML = '<div class="ibx-head-person"><b>' + (t.kind === "group" ? "👥 " : "👤 ") + esc(displayName) + '</b> ' + (!t.virtual && t.kind === "direct" ? ' <button type="button" class="ghost sm" id="ibxEditTags">🏷 Gắn/bỏ nhãn</button> <button type="button" class="ghost sm" id="ibxCustomerNote">📝 Ghi chú' + (t.customerNote ? ' ✓' : '') + '</button>' : '') + (!t.virtual ? ' <button type="button" class="ghost sm" id="ibxHideThread">' + (t.hiddenInInbox ? "👁 Hiện lại" : "🙈 Ẩn trò chuyện") + '</button>' : '') + (t.name && displayName !== t.name ? '<div class="muted">Zalo: ' + esc(t.name) + '</div>' : '') + ' <span class="muted">' + (t.kind === "group" ? "nhóm" : "cá nhân") + " · uid <code>" + esc(t.threadId) + "</code>" + (t.phone ? " · " + esc(t.phone) : "") + "</span></div>" +
         (t.tags && t.tags.length ? '<div class="ibx-head-tags">' + inboxTagPills(t) + '</div>' : '') +
-        '<div class="row" style="gap:6px">' + (t.virtual ? '<span class="muted">Hội thoại sẽ xuất hiện trong Inbox sau khi gửi tin đầu tiên.</span>' : '<button type="button" class="ghost sm" id="ibxDetailsToggle">📁 Ảnh, tệp & tìm tin</button><span class="muted">AI trả lời:</span><select id="ibxAi" style="padding:3px 6px"><option value="auto">Theo cấu hình kênh</option><option value="off">Tắt cho hội thoại này</option></select>') +
+        '<div class="row" style="gap:6px">' + (t.virtual ? '<span class="muted">Hội thoại sẽ xuất hiện trong Inbox sau khi gửi tin đầu tiên.</span>' : '<button type="button" class="ghost sm" id="ibxDetailsToggle">' + (t.kind === "direct" && chInfo() && chInfo().kind === "zalo_personal" ? '👥 Nhóm chung & thông tin' : '📁 Ảnh, tệp & tìm tin') + '</button><span class="muted">AI trả lời:</span><select id="ibxAi" style="padding:3px 6px"><option value="auto">Theo cấu hình kênh</option><option value="off">Tắt cho hội thoại này</option></select>') +
         (paused ? '<span class="pill">⏸️ tạm dừng tới ' + esc(ibxTime(t.pausedUntil)) + '</span>' : "") +
         (recalled ? '<span class="pill">⏸️ chờ khách hỏi mới sau khi thu hồi tin AI</span>' : "") +
         (paused || recalled ? '<button class="ghost sm" id="ibxResume">Cho AI trả lời lại</button>' : "") + "</div>";
@@ -4617,7 +4618,7 @@ export const INDEX_HTML = `<!doctype html>
       var tagButton = $("#ibxEditTags"); if (tagButton) tagButton.onclick = editInboxTags;
       var noteButton = $("#ibxCustomerNote"); if (noteButton) noteButton.onclick = editCustomerNote;
       var detailsButton = $("#ibxDetailsToggle"); if (detailsButton) detailsButton.onclick = function () {
-        S.detailsOpen = !S.detailsOpen; renderDetails(); if (S.detailsOpen) { loadExplore(false); loadExploreSenders(); }
+        S.detailsOpen = !S.detailsOpen; renderDetails(); if (S.detailsOpen) { if (S.detailsTab === "profile") loadMutualGroups(); else { loadExplore(false); loadExploreSenders(); } }
       };
       var hideButton = $("#ibxHideThread"); if (hideButton) hideButton.onclick = function () {
         var btn = this, tid = S.cur.threadId, hidden = !S.cur.hiddenInInbox; btn.disabled = true;
@@ -4707,10 +4708,21 @@ export const INDEX_HTML = `<!doctype html>
       var panel = $("#ibxDetails"); if (!panel) return;
       panel.style.display = S.detailsOpen && S.cur && !S.cur.virtual ? "" : "none";
       if (panel.style.display === "none") return;
+      var profileTab = $("#ibxProfileTab");
+      profileTab.style.display = S.cur.kind === "direct" && chInfo() && chInfo().kind === "zalo_personal" ? "" : "none";
+      profileTab.classList.toggle("active", S.detailsTab === "profile");
       $("#ibxInfoTab").classList.toggle("active", S.detailsTab === "info");
       $("#ibxSearchTab").classList.toggle("active", S.detailsTab === "search");
       var body = $("#ibxDetailsBody");
-      if (S.detailsTab === "info") {
+      if (S.detailsTab === "profile") {
+        var count = S.mutualGroups.length;
+        body.innerHTML = '<div style="font-weight:600;margin:4px 0 10px">' + (S.mutualLoading ? 'Đang kiểm tra nhóm chung…' : S.mutualError ? 'Chưa xem được nhóm chung' : count + ' nhóm chung' + (S.mutualIncomplete ? ' đã xác định' : '')) + '</div>' +
+          (S.mutualError ? '<div class="muted">' + esc(S.mutualError) + '</div><button type="button" class="ghost sm" id="ibxMutualRetry" style="margin-top:8px">Thử lại</button>' : '') +
+          (!S.mutualLoading && !S.mutualError && S.mutualIncomplete ? '<div class="muted" style="margin-bottom:10px">Zalo chưa trả đủ thành viên của một số nhóm; số thực tế có thể cao hơn.</div>' : '') +
+          (!S.mutualLoading && !S.mutualError && !count && !S.mutualIncomplete ? '<div class="muted">Chưa có nhóm chung.</div>' : '') +
+          S.mutualGroups.map(function (g) { return '<div style="padding:8px 0;border-top:1px solid var(--border)">👥 ' + esc(g.name) + '</div>'; }).join('');
+        var retry = $("#ibxMutualRetry"); if (retry) retry.onclick = loadMutualGroups;
+      } else if (S.detailsTab === "info") {
         body.innerHTML = '<div class="ibx-details-cats"><button type="button" class="ghost sm" data-cat="media">Ảnh / Video</button><button type="button" class="ghost sm" data-cat="file">Tài liệu</button><button type="button" class="ghost sm" data-cat="link">Liên kết</button></div><div id="ibxExploreRows"></div><button type="button" class="ghost sm" id="ibxExploreMore" style="display:none;width:100%">Xem thêm</button>';
         Array.prototype.forEach.call(body.querySelectorAll("[data-cat]"), function (button) {
           button.classList.toggle("active", button.getAttribute("data-cat") === S.detailsCategory);
@@ -4722,8 +4734,19 @@ export const INDEX_HTML = `<!doctype html>
         $("#ibxExploreGo").onclick = function () { S.exploreQ = $("#ibxExploreQ").value; S.exploreSender = $("#ibxExploreSender").value; S.exploreDirection = $("#ibxExploreDirection").value; loadExplore(false); };
         $("#ibxExploreQ").onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); $("#ibxExploreGo").click(); } };
       }
-      $("#ibxExploreMore").onclick = function () { loadExplore(true); };
-      renderExploreRows();
+      if (S.detailsTab !== "profile") { $("#ibxExploreMore").onclick = function () { loadExplore(true); }; renderExploreRows(); }
+    }
+    function loadMutualGroups() {
+      if (!S.cur || S.cur.virtual || S.cur.kind !== "direct" || !chInfo() || chInfo().kind !== "zalo_personal") return;
+      var channelId = S.ch, threadId = S.cur.threadId, seq = ++S.mutualSeq;
+      S.mutualGroups = []; S.mutualIncomplete = false; S.mutualError = ""; S.mutualLoading = true; renderDetails();
+      api("/v1/inbox/" + channelId + "/threads/" + encodeURIComponent(threadId) + "/mutual-groups").then(function (j) {
+        if (seq !== S.mutualSeq || S.ch !== channelId || !S.cur || S.cur.threadId !== threadId) return;
+        S.mutualGroups = j.groups || []; S.mutualIncomplete = !!j.incomplete; S.mutualLoading = false; renderDetails();
+      }).catch(function (e) {
+        if (seq !== S.mutualSeq || S.ch !== channelId || !S.cur || S.cur.threadId !== threadId) return;
+        S.mutualError = e.message; S.mutualLoading = false; renderDetails();
+      });
     }
     function loadExploreSenders() {
       if (!S.cur || S.cur.virtual) return;
@@ -4761,6 +4784,7 @@ export const INDEX_HTML = `<!doctype html>
       }).catch(function (e) { toast(e.message, true); });
     }
     $("#ibxDetailsClose").onclick = function () { S.detailsOpen = false; renderDetails(); };
+    $("#ibxProfileTab").onclick = function () { if (S.detailsTab !== "profile") { S.detailsTab = "profile"; renderDetails(); loadMutualGroups(); } };
     $("#ibxInfoTab").onclick = function () { if (S.detailsTab !== "info") { S.detailsTab = "info"; renderDetails(); loadExplore(false); } };
     $("#ibxSearchTab").onclick = function () { if (S.detailsTab !== "search") { S.detailsTab = "search"; renderDetails(); loadExplore(false); loadExploreSenders(); } };
     function editInboxTags() {
@@ -4844,7 +4868,10 @@ export const INDEX_HTML = `<!doctype html>
     }
     function openThread(t) {
       S.cur = t; S.imgs = []; S.file = null; S.reply = null; S.jumped = false; S.exploreSeq++; S.exploreRows = []; S.exploreNext = null; S.exploreSenders = []; S.exploreQ = ""; S.exploreSender = ""; S.exploreDirection = "";
-      hideQuickSuggestions(); renderImg(); renderReply(); renderDetails(); if (S.detailsOpen && !t.virtual) { loadExplore(false); loadExploreSenders(); }
+      S.mutualSeq++; S.mutualGroups = []; S.mutualIncomplete = false; S.mutualLoading = false; S.mutualError = "";
+      if (!t.virtual && t.kind === "direct" && chInfo() && chInfo().kind === "zalo_personal") { S.detailsOpen = window.innerWidth > 1100; S.detailsTab = "profile"; }
+      else if (S.detailsTab === "profile") S.detailsTab = "info";
+      hideQuickSuggestions(); renderImg(); renderReply(); renderDetails(); if (S.detailsOpen && !t.virtual) { if (S.detailsTab === "profile") loadMutualGroups(); else { loadExplore(false); loadExploreSenders(); } }
       Array.prototype.forEach.call(document.querySelectorAll(".ibx-item"), function (n) { n.classList.remove("active"); });
       renderThreads(); renderHead();
       $("#ibxCompose").style.display = "";
