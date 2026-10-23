@@ -464,7 +464,7 @@ export class ZaloPersonalChannel implements Channel {
   private demoThreadSet: Set<string>;
   private observed = new Map<string, ZaloObservedPeer>();
   private groupNames = new Map<string, string>();
-  private mutualGroupCache: { expiresAt: number; groups: { id: string; name: string; memberIds: string[]; incomplete: boolean }[] } | null = null;
+  private mutualGroupCache: { expiresAt: number; groups: { id: string; name: string; memberIds: string[]; currentMemIds: string[]; incomplete: boolean }[] } | null = null;
   private mutualGroupLoad: Promise<NonNullable<ZaloPersonalChannel["mutualGroupCache"]>> | null = null;
   /** Kênh tắt "yêu cầu pairing" → DM mở cho mọi người; nhóm vẫn gate theo demo threads. */
   private openDirect: boolean;
@@ -732,13 +732,16 @@ export class ZaloPersonalChannel implements Channel {
         this.mutualGroupLoad = (async () => {
           const all = await api.getAllGroups();
           const ids = Object.keys(all.gridVerMap ?? {});
-          const groups: { id: string; name: string; memberIds: string[]; incomplete: boolean }[] = [];
+          const groups: { id: string; name: string; memberIds: string[]; currentMemIds: string[]; incomplete: boolean }[] = [];
           for (let i = 0; i < ids.length; i += 10) {
             const detail = await api.getGroupInfo(ids.slice(i, i + 10));
             for (const id of ids.slice(i, i + 10)) {
               const group = detail.gridInfoMap[id];
               if (!group) throw new Error("Zalo chưa trả đủ thông tin thành viên nhóm");
-              groups.push({ id, name: group.name || id, memberIds: group.memberIds ?? [], incomplete: !Array.isArray(group.memberIds) || !!group.hasMoreMember });
+              groups.push({ id, name: group.name || id,
+                memberIds: Array.isArray(group.memberIds) ? group.memberIds.map(String) : [],
+                currentMemIds: Array.isArray(group.currentMems) ? group.currentMems.map((member) => String(member.id)) : [],
+                incomplete: !Array.isArray(group.memberIds) || !!group.hasMoreMember });
             }
           }
           const result = { expiresAt: Date.now() + 2 * 60_000, groups };
@@ -749,9 +752,12 @@ export class ZaloPersonalChannel implements Channel {
       await this.mutualGroupLoad;
     }
     if (!this.mutualGroupCache) throw new ZaloNotConnectedError();
-    const groups = this.mutualGroupCache?.groups ?? [];
+    const groups = this.mutualGroupCache.groups;
+    const byMemberIds = groups.filter((group) => group.memberIds.includes(userId)).length;
+    const byCurrentMems = groups.filter((group) => group.currentMemIds.includes(userId)).length;
+    logger.info(`zalo.mutual_groups_check: groups=${groups.length} member_ids=${groups.reduce((sum, group) => sum + group.memberIds.length, 0)} current_mems=${groups.reduce((sum, group) => sum + group.currentMemIds.length, 0)} matched_member_ids=${byMemberIds} matched_current_mems=${byCurrentMems}`);
     return {
-      groups: groups.filter((group) => group.memberIds.includes(userId))
+      groups: groups.filter((group) => group.memberIds.includes(userId) || group.currentMemIds.includes(userId))
         .map(({ id, name }) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "vi")),
       incomplete: groups.some((group) => group.incomplete),
     };

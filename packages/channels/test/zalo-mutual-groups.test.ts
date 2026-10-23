@@ -11,13 +11,13 @@ describe("Zalo mutual groups", () => {
       getAllGroups: vi.fn(async () => ({ gridVerMap: { "group-1": 1, "group-2": 1 } })),
       getGroupInfo: vi.fn(async () => ({ gridInfoMap: {
         "group-1": { name: "Đại lý", memberIds: ["customer-1", "staff"], hasMoreMember: 0 },
-        "group-2": { name: "Nội bộ", memberIds: ["staff"], hasMoreMember: 0 },
+        "group-2": { name: "Nội bộ", memberIds: ["staff"], currentMems: [{ id: "customer-1" }], hasMoreMember: 0 },
       } })),
     };
     Object.assign(channel, { api });
 
     expect(await channel.mutualGroups("customer-1")).toEqual({
-      groups: [{ id: "group-1", name: "Đại lý" }], incomplete: false,
+      groups: [{ id: "group-1", name: "Đại lý" }, { id: "group-2", name: "Nội bộ" }], incomplete: false,
     });
     expect(await channel.mutualGroups("customer-2")).toEqual({ groups: [], incomplete: false });
     expect(api.getAllGroups).toHaveBeenCalledTimes(1);
