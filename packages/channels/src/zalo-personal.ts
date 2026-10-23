@@ -464,8 +464,8 @@ export class ZaloPersonalChannel implements Channel {
   private demoThreadSet: Set<string>;
   private observed = new Map<string, ZaloObservedPeer>();
   private groupNames = new Map<string, string>();
-  private mutualGroupCache: { expiresAt: number; groups: { id: string; name: string; memberIds: string[]; currentMemIds: string[]; incomplete: boolean }[] } | null = null;
-  private mutualGroupLoad: Promise<NonNullable<ZaloPersonalChannel["mutualGroupCache"]>> | null = null;
+  private mutualGroupCache = new Map<string, { expiresAt: number; groups: { id: string; name: string }[] }>();
+  private mutualGroupLoads = new Map<string, Promise<{ id: string; name: string }[]>>();
   /** Kênh tắt "yêu cầu pairing" → DM mở cho mọi người; nhóm vẫn gate theo demo threads. */
   private openDirect: boolean;
   /**
@@ -570,7 +570,7 @@ export class ZaloPersonalChannel implements Channel {
     this.currentQrId = null;
     this.stopListener();
     this.api = null;
-    this.mutualGroupCache = null;
+    this.mutualGroupCache.clear();
     await this.runner.drain(10_000);
   }
 
@@ -663,7 +663,7 @@ export class ZaloPersonalChannel implements Channel {
     this.currentQrId = null;
     this.stopListener();
     this.api = null;
-    this.mutualGroupCache = null;
+    this.mutualGroupCache.clear();
     this.account = null;
     this.credentials = null;
     this.lastError = null;
@@ -723,44 +723,36 @@ export class ZaloPersonalChannel implements Channel {
     return targets.sort((a, b) => (a.contactAlias || a.name).localeCompare(b.contactAlias || b.name, "vi"));
   }
 
-  /** Đọc thành viên nhóm từ chính tài khoản Zalo của kênh, cache ngắn để tránh gọi lại cho mỗi khách. */
+  /** Zalo trả nhóm chung theo UID riêng; getGroupInfo không cấp danh sách thành viên trên tài khoản này. */
   async mutualGroups(userId: string): Promise<{ groups: { id: string; name: string }[]; incomplete: boolean }> {
     if (!this.api) throw new ZaloNotConnectedError();
-    if (!this.mutualGroupCache || this.mutualGroupCache.expiresAt <= Date.now()) {
-      if (!this.mutualGroupLoad) {
-        const api = this.api;
-        this.mutualGroupLoad = (async () => {
-          const all = await api.getAllGroups();
-          const ids = Object.keys(all.gridVerMap ?? {});
-          const groups: { id: string; name: string; memberIds: string[]; currentMemIds: string[]; incomplete: boolean }[] = [];
-          for (let i = 0; i < ids.length; i += 10) {
-            const detail = await api.getGroupInfo(ids.slice(i, i + 10));
-            for (const id of ids.slice(i, i + 10)) {
-              const group = detail.gridInfoMap[id];
-              if (!group) throw new Error("Zalo chưa trả đủ thông tin thành viên nhóm");
-              groups.push({ id, name: group.name || id,
-                memberIds: Array.isArray(group.memberIds) ? group.memberIds.map(String) : [],
-                currentMemIds: Array.isArray(group.currentMems) ? group.currentMems.map((member) => String(member.id)) : [],
-                incomplete: !Array.isArray(group.memberIds) || !!group.hasMoreMember });
-            }
+    const cached = this.mutualGroupCache.get(userId);
+    if (cached && cached.expiresAt > Date.now()) return { groups: cached.groups, incomplete: false };
+    let load = this.mutualGroupLoads.get(userId);
+    if (!load) {
+      const api = this.api;
+      load = (async () => {
+        const related = await api.getRelatedFriendGroup(userId);
+        const ids = [...new Set(related.groupRelateds?.[userId] ?? [])];
+        const groups: { id: string; name: string }[] = [];
+        for (let i = 0; i < ids.length; i += 10) {
+          const batch = ids.slice(i, i + 10);
+          const detail = await api.getGroupInfo(batch);
+          for (const id of batch) {
+            const name = detail.gridInfoMap[id]?.name || this.groupNames.get(id) || id;
+            if (name !== id) this.groupNames.set(id, name);
+            groups.push({ id, name });
           }
-          const result = { expiresAt: Date.now() + 2 * 60_000, groups };
-          if (this.api === api) this.mutualGroupCache = result;
-          return result;
-        })().finally(() => { this.mutualGroupLoad = null; });
-      }
-      await this.mutualGroupLoad;
+        }
+        groups.sort((a, b) => a.name.localeCompare(b.name, "vi"));
+        if (this.api === api) this.mutualGroupCache.set(userId, { expiresAt: Date.now() + 2 * 60_000, groups });
+        return groups;
+      })().finally(() => { this.mutualGroupLoads.delete(userId); });
+      this.mutualGroupLoads.set(userId, load);
     }
-    if (!this.mutualGroupCache) throw new ZaloNotConnectedError();
-    const groups = this.mutualGroupCache.groups;
-    const byMemberIds = groups.filter((group) => group.memberIds.includes(userId)).length;
-    const byCurrentMems = groups.filter((group) => group.currentMemIds.includes(userId)).length;
-    logger.info(`zalo.mutual_groups_check: groups=${groups.length} member_ids=${groups.reduce((sum, group) => sum + group.memberIds.length, 0)} current_mems=${groups.reduce((sum, group) => sum + group.currentMemIds.length, 0)} matched_member_ids=${byMemberIds} matched_current_mems=${byCurrentMems}`);
-    return {
-      groups: groups.filter((group) => group.memberIds.includes(userId) || group.currentMemIds.includes(userId))
-        .map(({ id, name }) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, "vi")),
-      incomplete: groups.some((group) => group.incomplete),
-    };
+    const groups = await load;
+    if (!this.api) throw new ZaloNotConnectedError();
+    return { groups, incomplete: false };
   }
 
   /** Đã đăng nhập Zalo và sẵn sàng gửi. */
@@ -1122,7 +1114,7 @@ export class ZaloPersonalChannel implements Channel {
     const profile = info.profile;
     this.stopListener();
     this.api = api;
-    this.mutualGroupCache = null;
+    this.mutualGroupCache.clear();
     this.account = {
       id: String(profile.userId),
       name: profile.displayName || profile.zaloName || String(profile.userId),
