@@ -48,6 +48,56 @@ describe("orchid stem report", () => {
     ]);
   });
 
+  it("counts a later quote of the sender's own unnumbered photo once on the photo day", () => {
+    const photo = { msgId: "photo-1", senderId: "worker", senderName: "Lộc", text: "", contentType: "photo",
+      sentAt: "2026-10-18T16:55:00.000Z", inRange: true };
+    const report = buildOrchidStemReport([
+      photo,
+      { msgId: "quote-1", senderId: "worker", senderName: "Lộc", text: "8c", quotedMsgId: "photo-1",
+        quoteOwnerId: "worker", sentAt: "2026-10-19T00:05:00.000Z", inRange: true },
+      { msgId: "quote-2", senderId: "worker", senderName: "Lộc", text: "8 cành", quotedMsgId: "photo-1",
+        quoteOwnerId: "worker", sentAt: "2026-10-19T00:06:00.000Z", inRange: true },
+    ]);
+    expect(report.entries).toMatchObject([{ msgId: "quote-1", quotedPhotoMsgId: "photo-1",
+      senderId: "worker", stems: 8, day: "2026-10-18" }]);
+    expect(report.monthly).toMatchObject([{ stems: 8, jobs: 1 }]);
+  });
+
+  it("uses a quote after the requested period for a photo inside it", () => {
+    const report = buildOrchidStemReport([
+      { msgId: "photo", senderId: "worker", senderName: "Lộc", text: "", contentType: "photo",
+        sentAt: "2026-10-31T12:00:00.000Z", inRange: true },
+      { msgId: "quote", senderId: "worker", senderName: "Lộc", text: "8 cành", quotedMsgId: "photo",
+        quoteOwnerId: "worker", sentAt: "2026-11-01T03:00:00.000Z", inRange: false },
+    ]);
+    expect(report.daily).toMatchObject([{ day: "2026-10-31", stems: 8 }]);
+  });
+
+  it("does not credit another sender or an already numbered photo", () => {
+    const at = "2026-10-18T10:00:00.000Z";
+    const report = buildOrchidStemReport([
+      { msgId: "blank", senderId: "worker", senderName: "Lộc", text: "", contentType: "photo", sentAt: at },
+      { msgId: "other", senderId: "boss", senderName: "Anh Nam", text: "8c", quotedMsgId: "blank",
+        quoteOwnerId: "worker", sentAt: at },
+      { msgId: "numbered", senderId: "worker", senderName: "Lộc", text: "Khách Hoa 5c", contentType: "photo", sentAt: at },
+      { msgId: "again", senderId: "worker", senderName: "Lộc", text: "5c", quotedMsgId: "numbered",
+        quoteOwnerId: "worker", sentAt: at },
+    ]);
+    expect(report.monthly).toMatchObject([{ senderId: "worker", stems: 5, jobs: 1 }]);
+    expect(report.review.map(x => x.msgId)).toContain("other");
+  });
+
+  it("holds conflicting quotes of the same photo for review", () => {
+    const at = "2026-10-18T10:00:00.000Z";
+    const report = buildOrchidStemReport([
+      { msgId: "photo", senderId: "worker", senderName: "Lộc", text: "", contentType: "photo", sentAt: at },
+      { msgId: "first", senderId: "worker", senderName: "Lộc", text: "8c", quotedMsgId: "photo", quoteOwnerId: "worker", sentAt: at },
+      { msgId: "second", senderId: "worker", senderName: "Lộc", text: "9c", quotedMsgId: "photo", quoteOwnerId: "worker", sentAt: at },
+    ]);
+    expect(report.entries).toEqual([]);
+    expect(report.review.map(x => x.msgId)).toEqual(["first", "second"]);
+  });
+
   it("multiplies cành by vòi in daily and monthly totals instead of sending these captions to review", () => {
     const at = "2026-10-18T08:00:00.000Z";
     const report = buildOrchidStemReport([

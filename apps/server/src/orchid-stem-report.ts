@@ -11,6 +11,7 @@ export interface OrchidStemEntry extends OrchidStemMessage {
   customerName: string;
   stems: number;
   day: string;
+  quotedPhotoMsgId?: string;
 }
 
 function stemCustomerName(prefix: string): string | null {
@@ -91,7 +92,24 @@ export function buildOrchidStemReport(messages: OrchidStemMessage[]) {
   const entries: OrchidStemEntry[] = [];
   const review: OrchidStemMessage[] = [];
   const latestCustomer = new Map<string, { name: string; at: number }>();
+  const photos = new Map(messages.filter(m => m.contentType === "photo").map(m => [m.msgId, m]));
+  const photoQuotes = new Map<string, Array<{ photo: OrchidStemMessage; quote: OrchidStemMessage; stems: number }>>();
   for (const message of messages) {
+    const photo = message.quotedMsgId ? photos.get(message.quotedMsgId) : undefined;
+    if (photo) {
+      // A quote identifies the exact photo. Only the photo's own sender may add its count.
+      const sameSender = message.quoteOwnerId
+        ? message.quoteOwnerId === message.senderId
+        : photo.senderId === message.senderId;
+      const stems = quantityOnly(message.text);
+      if (sameSender && stems && !/\d/.test(photo.text)) {
+        const candidates = photoQuotes.get(photo.msgId) ?? [];
+        candidates.push({ photo, quote: message, stems });
+        photoQuotes.set(photo.msgId, candidates);
+      } else if (message.inRange !== false && /\d/.test(message.text)) review.push(message);
+      continue; // Never count the same quoted message again as a standalone report.
+    }
+    if (message.inRange === false) continue;
     const senderName = senderLabel(message.senderName);
     const source = { ...message, senderName };
     let parsed = parseOrchidStemText(message.text);
@@ -111,6 +129,18 @@ export function buildOrchidStemReport(messages: OrchidStemMessage[]) {
         latestCustomer.set(senderName, { name, at: new Date(message.sentAt).getTime() });
       }
     }
+  }
+  for (const candidates of photoQuotes.values()) {
+    const { photo } = candidates[0]!;
+    if (photo.inRange === false) continue;
+    if (new Set(candidates.map(x => x.stems)).size !== 1) {
+      review.push(...candidates.map(x => x.quote));
+      continue;
+    }
+    const { quote, stems } = candidates[0]!;
+    entries.push({ ...photo, msgId: quote.msgId, text: quote.text,
+      customerName: "Ảnh báo cáo", stems, day: orchidStemDay(photo.sentAt),
+      quotedPhotoMsgId: photo.msgId });
   }
   const daily = new Map<string, { day: string; senderId: string; senderName: string; stems: number; jobs: number }>();
   const monthly = new Map<string, { senderId: string; senderName: string; stems: number; jobs: number }>();
@@ -141,9 +171,9 @@ export function orchidStemWorkbook(report: ReturnType<typeof buildOrchidStemRepo
       ["Điều kiện", "Giá trị"], ["Từ ngày", filter.from], ["Đến ngày", filter.to],
       ["Nhân viên", filter.sender || "Tất cả"],
     ] }] : []),
-    { name: "Chi tiết", widths: [20, 25, 24, 30, 12, 48, 22], rows: [
-      ["Ngày", "Người gửi", "UID người gửi", "Tên khách", "Số cành tính", "Tin gốc", "Mã tin Zalo"],
-      ...report.entries.map(e => [e.day, e.senderName, e.senderId, e.customerName, e.stems, e.text, e.msgId]),
+    { name: "Chi tiết", widths: [20, 25, 24, 30, 12, 48, 22, 22], rows: [
+      ["Ngày", "Người gửi", "UID người gửi", "Tên khách", "Số cành tính", "Tin gốc", "Mã tin Zalo", "Mã ảnh trích dẫn"],
+      ...report.entries.map(e => [e.day, e.senderName, e.senderId, e.customerName, e.stems, e.text, e.msgId, e.quotedPhotoMsgId ?? ""]),
     ] },
     { name: "Theo ngày", widths: [20, 25, 24, 16, 16], rows: [
       ["Ngày", "Người gửi", "UID người gửi", "Số lượt", "Tổng cành tính"],

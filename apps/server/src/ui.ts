@@ -1005,13 +1005,13 @@ export const INDEX_HTML = `<!doctype html>
       '<label>Nhân viên<select id="stemSender"><option value="">Tất cả nhân viên</option></select></label>' +
       '<div class="row"><button id="stemLoad">Áp dụng lọc</button></div></div>' +
       '<p class="muted" style="margin:7px 0 0">File Excel dùng đúng khoảng ngày và nhân viên đang chọn.</p>' +
-      '<div class="stem-guide"><strong>Cách ghi để được cộng vào báo cáo</strong><b>c = cành, v = vòi.</b> Ví dụ <b>C Chi (8c) Lộc</b> tính 8 cành cho C Chi; chữ sau ngoặc là ghi chú. Với chậu nhiều vòi, lấy số cành nhân số vòi: <b>Hà cii (3c 2v) = 6 cành</b>, <b>A trung. Cảnh 5 2v = 10 cành</b>. Cũng có thể gửi tên khách rồi số cành bằng tin tiếp theo trong 5 phút, cùng tài khoản. Tin có nhiều số nhưng không rõ cành/vòi, giá hoặc phí ship sẽ nằm ở “Tin cần kiểm tra”.</div>' +
+      '<div class="stem-guide"><strong>Cách ghi để được cộng vào báo cáo</strong><b>c = cành, v = vòi.</b> Ví dụ <b>C Chi (8c) Lộc</b> tính 8 cành cho C Chi; chữ sau ngoặc là ghi chú. Với chậu nhiều vòi, lấy số cành nhân số vòi: <b>Hà cii (3c 2v) = 6 cành</b>, <b>A trung. Cảnh 5 2v = 10 cành</b>. Cũng có thể gửi tên khách rồi số cành bằng tin tiếp theo trong 5 phút, cùng tài khoản. Nếu gửi ảnh chưa ghi số cành, chính người gửi ảnh trích dẫn ảnh đó và nhắn <b>8c</b> hoặc <b>8 cành</b>; ảnh được cộng một lần theo ngày gửi ảnh. Tin có nhiều số nhưng không rõ cành/vòi, giá hoặc phí ship sẽ nằm ở “Tin cần kiểm tra”.</div>' +
       '<div id="stemSummary" aria-live="polite">Đang tải...</div>' +
       '<section class="stem-section"><h3>Theo người gửi</h3><p class="muted stem-section-note">Xếp theo tổng số cành trong khoảng ngày đã chọn.</p><div id="stemMonthly"></div></section>' +
       '<section class="stem-section"><h3>Theo ngày</h3><p class="muted stem-section-note">Mỗi ngày có tổng riêng; bấm vào ngày để xem từng người.</p><div id="stemDaily"></div></section>' +
       '<details class="stem-detail"><summary id="stemDetailTitle">Chi tiết từng tin</summary><div id="stemDetail" class="stem-scroll"></div></details>' +
       '<details class="stem-detail" id="stemReviewSection"><summary id="stemReviewTitle">Tin cần kiểm tra</summary><p class="muted">Tin này chưa được cộng vào báo cáo. Đối chiếu trước khi chốt số liệu.</p><div id="stemReview" class="stem-scroll"></div></details>' +
-      '<p class="muted">Một lượt là một tin đủ tên khách và số cành (kể cả hai tin liền nhau). Tin Zalo trùng mã chỉ tính một lần. Dữ liệu từ nhóm Bao Cao Cam hoa 42 DBP.</p>';
+      '<p class="muted">Một lượt là một tin đủ tên khách và số cành (kể cả hai tin liền nhau), hoặc một ảnh được chính người gửi trích dẫn báo số cành. Tin Zalo trùng mã chỉ tính một lần. Dữ liệu từ nhóm Bao Cao Cam hoa 42 DBP.</p>';
     function number(n) { return Number(n || 0).toLocaleString("vi-VN"); }
     function dayLabel(day) {
       var parts = day.split("-");
@@ -1098,7 +1098,7 @@ export const INDEX_HTML = `<!doctype html>
         $("#stemDetailTitle", c).textContent = "Chi tiết từng tin (" + number(r.entries.length) + ")";
         var entries = r.entries.slice().sort(function (a, b) { return b.sentAt.localeCompare(a.sentAt); });
         var et = table(["Ngày", "Người gửi", "Khách", "Cành tính", "Tin gốc"], entries, function (x) {
-          var tr = el("tr"); tr.innerHTML = '<td>' + dayLabel(x.day) + '</td><td>' + esc(x.senderName) + '</td><td>' + esc(x.customerName) + '</td><td class="stem-num">' + number(x.stems) + '</td><td>' + esc(x.text) + '</td>'; return tr;
+          var tr = el("tr"); tr.innerHTML = '<td>' + dayLabel(x.day) + '</td><td>' + esc(x.senderName) + '</td><td>' + esc(x.customerName) + '</td><td class="stem-num">' + number(x.stems) + '</td><td>' + esc(x.text) + (x.quotedPhotoMsgId ? '<div class="muted">Trích dẫn ảnh ' + esc(x.quotedPhotoMsgId) + '</div>' : '') + '</td>'; return tr;
         }); et.className = "stem-table"; detail.appendChild(et);
         var review = $("#stemReview", c); review.innerHTML = "";
         $("#stemReviewTitle", c).textContent = "Tin cần kiểm tra (" + number(r.review.length) + ")";
