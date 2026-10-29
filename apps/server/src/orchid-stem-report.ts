@@ -138,7 +138,7 @@ export function buildOrchidStemReport(messages: OrchidStemMessage[]) {
       continue;
     }
     const { quote, stems } = candidates[0]!;
-    entries.push({ ...photo, msgId: quote.msgId, text: quote.text,
+    entries.push({ ...photo, senderName: senderLabel(photo.senderName), msgId: quote.msgId, text: quote.text,
       customerName: "Ảnh báo cáo", stems, day: orchidStemDay(photo.sentAt),
       quotedPhotoMsgId: photo.msgId });
   }

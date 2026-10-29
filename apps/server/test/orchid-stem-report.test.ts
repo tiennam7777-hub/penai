@@ -73,6 +73,17 @@ describe("orchid stem report", () => {
     expect(report.daily).toMatchObject([{ day: "2026-10-31", stems: 8 }]);
   });
 
+  it("uses the existing Hot 6 display name for quoted photo totals", () => {
+    const at = "2026-10-18T10:00:00.000Z";
+    const report = buildOrchidStemReport([
+      { msgId: "photo", senderId: "six", senderName: "Lan Hồ Điệp Orchids World S", text: "", contentType: "photo", sentAt: at },
+      { msgId: "quote", senderId: "six", senderName: "Lan Hồ Điệp Orchids World S", text: "8c", quotedMsgId: "photo",
+        quoteOwnerId: "six", sentAt: at },
+      { msgId: "named", senderId: "six", senderName: "Lan Hồ Điệp Orchids World S", text: "Khách Hoa 5c", sentAt: at },
+    ]);
+    expect(report.monthly).toMatchObject([{ senderName: "Lan Hồ Điệp Orchids World VI", stems: 13, jobs: 2 }]);
+  });
+
   it("does not credit another sender or an already numbered photo", () => {
     const at = "2026-10-18T10:00:00.000Z";
     const report = buildOrchidStemReport([
