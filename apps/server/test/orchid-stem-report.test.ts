@@ -87,6 +87,17 @@ describe("orchid stem report", () => {
     expect(report.review.map(x => x.msgId)).toContain("other");
   });
 
+  it("keeps existing nearby-name reports when someone quotes another worker's photo", () => {
+    const at = "2026-10-18T10:00:00.000Z";
+    const report = buildOrchidStemReport([
+      { msgId: "photo", senderId: "worker", senderName: "Lộc", text: "", contentType: "photo", sentAt: at },
+      { msgId: "name", senderId: "boss", senderName: "Anh Nam", text: "Khách Hoa", sentAt: at },
+      { msgId: "quote", senderId: "boss", senderName: "Anh Nam", text: "8c", quotedMsgId: "photo",
+        quoteOwnerId: "worker", sentAt: "2026-10-18T10:01:00.000Z" },
+    ]);
+    expect(report.entries).toMatchObject([{ msgId: "quote", senderId: "boss", stems: 8 }]);
+  });
+
   it("holds conflicting quotes of the same photo for review", () => {
     const at = "2026-10-18T10:00:00.000Z";
     const report = buildOrchidStemReport([

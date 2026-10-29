@@ -106,8 +106,8 @@ export function buildOrchidStemReport(messages: OrchidStemMessage[]) {
         const candidates = photoQuotes.get(photo.msgId) ?? [];
         candidates.push({ photo, quote: message, stems });
         photoQuotes.set(photo.msgId, candidates);
-      } else if (message.inRange !== false && /\d/.test(message.text)) review.push(message);
-      continue; // Never count the same quoted message again as a standalone report.
+        continue; // Count this quote only through its original photo.
+      }
     }
     if (message.inRange === false) continue;
     const senderName = senderLabel(message.senderName);
