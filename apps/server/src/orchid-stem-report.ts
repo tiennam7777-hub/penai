@@ -110,6 +110,9 @@ export function buildOrchidStemReport(messages: OrchidStemMessage[]) {
       }
     }
     if (message.inRange === false) continue;
+    // An unnumbered photo is not a report or a customer-name hint. It becomes
+    // one report only when its sender later quotes that exact photo with a count.
+    if (message.contentType === "photo" && !/\d/.test(message.text)) continue;
     const senderName = senderLabel(message.senderName);
     const source = { ...message, senderName };
     let parsed = parseOrchidStemText(message.text);

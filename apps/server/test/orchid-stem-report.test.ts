@@ -63,6 +63,20 @@ describe("orchid stem report", () => {
     expect(report.monthly).toMatchObject([{ stems: 8, jobs: 1 }]);
   });
 
+  it("does not treat an unnumbered photo as a report or a hint for a later bare count", () => {
+    const at = "2026-10-18T10:00:00.000Z";
+    const report = buildOrchidStemReport([
+      { msgId: "photo", senderId: "worker", senderName: "Lộc", text: "Chị Lan",
+        contentType: "photo", sentAt: at },
+      { msgId: "bare", senderId: "worker", senderName: "Lộc", text: "8c",
+        sentAt: "2026-10-18T10:01:00.000Z" },
+    ]);
+    expect(report.entries).toEqual([]);
+    expect(report.monthly).toEqual([]);
+    expect(report.daily).toEqual([]);
+    expect(report.review.map(x => x.msgId)).toEqual(["bare"]);
+  });
+
   it("uses a quote after the requested period for a photo inside it", () => {
     const report = buildOrchidStemReport([
       { msgId: "photo", senderId: "worker", senderName: "Lộc", text: "", contentType: "photo",
