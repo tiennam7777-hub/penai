@@ -107,12 +107,36 @@ describe("orchid stem report", () => {
     expect(report.monthly).toMatchObject([{ senderName: "Lan Hồ Điệp Orchids World VI", stems: 13, jobs: 2 }]);
   });
 
-  it("does not credit another sender or an already numbered photo", () => {
+  it("credits a colleague's quoted count to the photo sender on the photo day", () => {
+    const report = buildOrchidStemReport([
+      { msgId: "photo", senderId: "worker", senderName: "Duy Khánh", text: "", contentType: "photo",
+        sentAt: "2026-10-10T03:00:00.000Z" },
+      { msgId: "quote", senderId: "colleague", senderName: "Lộc Nguyễn", text: "@Duy Khánh 5c",
+        quotedMsgId: "photo", quoteOwnerId: "worker", sentAt: "2026-10-15T03:00:00.000Z" },
+    ]);
+    expect(report.entries).toMatchObject([{ msgId: "quote", quotedPhotoMsgId: "photo",
+      senderId: "worker", senderName: "Duy Khánh", stems: 5, day: "2026-10-10" }]);
+    expect(report.monthly).toMatchObject([{ senderName: "Duy Khánh", stems: 5, jobs: 1 }]);
+  });
+
+  it("credits a colleague's Hot 6 mention without adding it to the colleague's total", () => {
+    const report = buildOrchidStemReport([
+      { msgId: "photo", senderId: "six", senderName: "Lan Hồ Điệp Orchids World S", text: "",
+        contentType: "photo", sentAt: "2026-10-21T02:30:00.000Z" },
+      { msgId: "quote", senderId: "loc", senderName: "Lộc Nguyễn",
+        text: "@Lan Hồ Điệp Orchids World S 8cây", quotedMsgId: "photo", quoteOwnerId: "six",
+        sentAt: "2026-10-29T11:28:00.000Z" },
+    ]);
+    expect(report.monthly).toMatchObject([{ senderName: "Lan Hồ Điệp Orchids World VI", stems: 8, jobs: 1 }]);
+    expect(report.daily).toMatchObject([{ day: "2026-10-21", senderName: "Lan Hồ Điệp Orchids World VI", stems: 8 }]);
+  });
+
+  it("does not credit a mismatched photo owner or count an already numbered photo twice", () => {
     const at = "2026-10-18T10:00:00.000Z";
     const report = buildOrchidStemReport([
       { msgId: "blank", senderId: "worker", senderName: "Lộc", text: "", contentType: "photo", sentAt: at },
       { msgId: "other", senderId: "boss", senderName: "Anh Nam", text: "8c", quotedMsgId: "blank",
-        quoteOwnerId: "worker", sentAt: at },
+        quoteOwnerId: "someone-else", sentAt: at },
       { msgId: "numbered", senderId: "worker", senderName: "Lộc", text: "Khách Hoa 5c", contentType: "photo", sentAt: at },
       { msgId: "again", senderId: "worker", senderName: "Lộc", text: "5c", quotedMsgId: "numbered",
         quoteOwnerId: "worker", sentAt: at },
@@ -121,7 +145,7 @@ describe("orchid stem report", () => {
     expect(report.review.map(x => x.msgId)).toContain("other");
   });
 
-  it("keeps existing nearby-name reports when someone quotes another worker's photo", () => {
+  it("uses the photo owner instead of a nearby name from the colleague who quotes it", () => {
     const at = "2026-10-18T10:00:00.000Z";
     const report = buildOrchidStemReport([
       { msgId: "photo", senderId: "worker", senderName: "Lộc", text: "", contentType: "photo", sentAt: at },
@@ -129,7 +153,8 @@ describe("orchid stem report", () => {
       { msgId: "quote", senderId: "boss", senderName: "Anh Nam", text: "8c", quotedMsgId: "photo",
         quoteOwnerId: "worker", sentAt: "2026-10-18T10:01:00.000Z" },
     ]);
-    expect(report.entries).toMatchObject([{ msgId: "quote", senderId: "boss", stems: 8 }]);
+    expect(report.entries).toMatchObject([{ msgId: "quote", senderId: "worker",
+      customerName: "Ảnh báo cáo", stems: 8 }]);
   });
 
   it("holds conflicting quotes of the same photo for review", () => {

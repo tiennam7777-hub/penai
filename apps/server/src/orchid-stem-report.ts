@@ -63,6 +63,19 @@ function quantityOnly(text: string): number | null {
   return stems >= 1 && stems <= 200 ? stems : null;
 }
 
+function quotedPhotoQuantity(text: string, photoSenderName: string): number | null {
+  const clean = text.replace(/\s+/g, " ").trim();
+  const names = new Set([photoSenderName, senderLabel(photoSenderName)]);
+  for (const name of names) {
+    const mention = `@${name}`;
+    if (clean.toLocaleLowerCase("vi").startsWith(mention.toLocaleLowerCase("vi")) &&
+        /^\s/.test(clean.slice(mention.length))) {
+      return quantityOnly(clean.slice(mention.length));
+    }
+  }
+  return quantityOnly(clean);
+}
+
 function senderLabel(name: string): string {
   // Zalo currently reports the Hot 6 account as “… S”; shop calls this account “… VI”.
   return name === "Lan Hồ Điệp Orchids World S" ? "Lan Hồ Điệp Orchids World VI" : name;
@@ -107,12 +120,13 @@ export function buildOrchidStemReport(messages: OrchidStemMessage[]) {
   for (const message of messages) {
     const photo = message.quotedMsgId ? photos.get(message.quotedMsgId) : undefined;
     if (photo) {
-      // A quote identifies the exact photo. Only the photo's own sender may add its count.
-      const sameSender = message.quoteOwnerId
-        ? message.quoteOwnerId === message.senderId
+      // A quote identifies the exact photo. Attribute the count to its original
+      // sender, even when a colleague posts the correction with an @mention.
+      const ownerMatchesPhoto = message.quoteOwnerId
+        ? message.quoteOwnerId === photo.senderId
         : photo.senderId === message.senderId;
-      const stems = quantityOnly(message.text);
-      if (sameSender && stems && !/\d/.test(photo.text)) {
+      const stems = quotedPhotoQuantity(message.text, photo.senderName);
+      if (ownerMatchesPhoto && stems && !/\d/.test(photo.text)) {
         const candidates = photoQuotes.get(photo.msgId) ?? [];
         candidates.push({ photo, quote: message, stems });
         photoQuotes.set(photo.msgId, candidates);
