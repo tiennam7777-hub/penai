@@ -1,8 +1,33 @@
 import { describe, expect, it } from "vitest";
-import { buildOrchidStemReport, filterOrchidStemReport, orchidStemDateBounds, orchidStemRefreshMonths, orchidStemTime, parseOrchidStemText } from "../src/orchid-stem-report.js";
+import { addOrchidWorkPlanCounts, buildOrchidStemReport, filterOrchidStemReport, orchidStemDateBounds, orchidStemRefreshMonths, orchidStemTime, parseOrchidStemText, parseOrchidWorkPlanCount } from "../src/orchid-stem-report.js";
 import { INDEX_HTML } from "../src/ui.js";
 
 describe("orchid stem report", () => {
+  it("reads completed daily self reports without taking tomorrow's plan", () => {
+    const at = "2026-10-29T13:00:00.000Z";
+    expect(parseOrchidWorkPlanCount("báo cáo cv\ntổng cắm 124c\nKh 30/10 cắm đơn", at))
+      .toEqual({ day: "2026-10-29", stems: 124 });
+    expect(parseOrchidWorkPlanCount("Bccv\nCắm 107\nKh 30/10 cắm hoa", at)?.stems).toBe(107);
+    expect(parseOrchidWorkPlanCount("Bccv\n- tổng cắm 10₫(70 cây)\n-kh30/10", at)?.stems).toBe(70);
+    expect(parseOrchidWorkPlanCount("Bccv: cắm 12 đơn 105 cây. Kh 30/10", at)?.stems).toBe(105);
+    expect(parseOrchidWorkPlanCount("28/10\nCắm 56 cây\n29/10\nCắm 100 cây nếu có đơn", at))
+      .toEqual({ day: "2026-10-28", stems: 56 });
+    expect(parseOrchidWorkPlanCount("KH 30/10\nCắm 100 cây", at)).toBeNull();
+  });
+
+  it("matches NVBC by sender ID and original day, keeping missing reports blank", () => {
+    const report = buildOrchidStemReport([
+      { msgId: "one", senderId: "uid-1", senderName: "Trung Toàn", text: "Khách Hoa 5c", sentAt: "2026-10-29T03:00:00.000Z" },
+      { msgId: "two", senderId: "uid-2", senderName: "Lộc Nguyễn", text: "Khách Lan 8c", sentAt: "2026-10-29T03:00:00.000Z" },
+    ]);
+    const joined = addOrchidWorkPlanCounts(report, [
+      { msgId: "a", senderId: "uid-1", senderName: "Trung Toàn", text: "Bccv\ntổng cắm 110c", sentAt: "2026-10-29T12:00:00.000Z" },
+      { msgId: "b", senderId: "uid-1", senderName: "Trung Toàn", text: "Bccv\ntổng cắm 124c", sentAt: "2026-10-29T16:00:00.000Z" },
+      { msgId: "c", senderId: "other-uid", senderName: "Lộc Nguyễn", text: "Bccv\nCắm 107", sentAt: "2026-10-29T16:00:00.000Z" },
+    ]);
+    expect(joined.daily.map(x => x.nvbc)).toEqual([124, null]);
+    expect(joined.monthly.map(x => x.nvbc)).toEqual([124, null]);
+  });
   it("reads the actual group caption formats", () => {
     expect(parseOrchidStemText("C hong (9c)")).toEqual({ customerName: "C hong", stems: 9 });
     expect(parseOrchidStemText("C Chi (8c) Lộc")).toEqual({ customerName: "C Chi", stems: 8 });
@@ -221,7 +246,7 @@ describe("orchid stem report", () => {
       { msgId: "b", senderId: "two", senderName: "Trung Toàn", text: "Chị Lan 8c", sentAt },
       { msgId: "c", senderId: "one", senderName: "Văn Hoàng", text: "Khách 8 9", sentAt },
     ]);
-    const selected = filterOrchidStemReport(report, "Văn Hoàng");
+    const selected = filterOrchidStemReport(addOrchidWorkPlanCounts(report, []), "Văn Hoàng");
     expect(selected.entries.map(x => x.msgId)).toEqual(["a"]);
     expect(selected.monthly.map(x => x.stems)).toEqual([6]);
     expect(selected.daily.map(x => x.stems)).toEqual([6]);

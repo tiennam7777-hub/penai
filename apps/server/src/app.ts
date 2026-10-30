@@ -73,6 +73,7 @@ import {
   saveMisaCredentials,
   listMisaInvoiceDrafts,
   listOrchidStemMessages,
+  listOrchidWorkPlanMessages,
   getSavedMisaDraftSource,
 } from "@penai/db";
 import {
@@ -293,7 +294,7 @@ import {
 import { registerLibraryRoutes } from "./library.js";
 import { registerInboxRoutes } from "./inbox.js";
 import { buildXlsx, type XlsxCell } from "./xlsx.js";
-import { buildOrchidStemReport, filterOrchidStemReport, orchidStemDateBounds, orchidStemWorkbook, refreshOrchidStemFile } from "./orchid-stem-report.js";
+import { addOrchidWorkPlanCounts, buildOrchidStemReport, filterOrchidStemReport, orchidStemDateBounds, orchidStemWorkbook, refreshOrchidStemFile } from "./orchid-stem-report.js";
 import { isMcpPublicPath, registerMcpServerRoutes } from "./mcp-server.js";
 import { registerBrowserRoutes } from "./browser-runtime.js";
 
@@ -1226,11 +1227,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (!channel) { reply.code(404).send({ error: "Chưa cấu hình nhóm báo cáo cắm hoa" }); return null; }
     const group = String((channel.config as Record<string, unknown>)["orchid_stem_report_group"]);
     if (!/^group:\d+$/.test(group)) { reply.code(500).send({ error: "ID nhóm báo cáo không hợp lệ" }); return null; }
-    const messages = await listOrchidStemMessages(db, req.authCtx, channel.id, group.slice(6), bounds.start, bounds.end);
+    const [messages, plans] = await Promise.all([
+      listOrchidStemMessages(db, req.authCtx, channel.id, group.slice(6), bounds.start, bounds.end),
+      listOrchidWorkPlanMessages(db, req.authCtx, channel.id, bounds.start,
+        new Date(bounds.end.getTime() + 8 * 3600_000)),
+    ]);
     if (from.slice(0, 7) === to.slice(0, 7)) {
       await refreshOrchidStemFile(db, req.authCtx, channel.id, group.slice(6), from.slice(0, 7), deps.config.dataDir);
     }
-    const all = buildOrchidStemReport(messages);
+    const all = addOrchidWorkPlanCounts(buildOrchidStemReport(messages), plans);
     const senders = [...new Set([...all.monthly.map(x => x.senderName), ...all.review.map(x => x.senderName)])]
       .sort((a, b) => a.localeCompare(b, "vi"));
     const filtered = filterOrchidStemReport(all, sender);

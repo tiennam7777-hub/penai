@@ -1009,7 +1009,7 @@ export const INDEX_HTML = `<!doctype html>
       '<p class="muted" style="margin:7px 0 0">File Excel dùng đúng khoảng ngày và nhân viên đang chọn.</p>' +
       '<div class="stem-guide"><strong>Cách ghi để được cộng vào báo cáo</strong><b>c = cành, v = vòi.</b> Ví dụ <b>C Chi (8c) Lộc</b> tính 8 cành cho C Chi; chữ sau ngoặc là ghi chú. Với chậu nhiều vòi, lấy số cành nhân số vòi: <b>Hà cii (3c 2v) = 6 cành</b>, <b>A trung. Cảnh 5 2v = 10 cành</b>. Cũng có thể gửi tên khách rồi số cành bằng tin tiếp theo trong 5 phút, cùng tài khoản. <b>Ảnh không ghi số cành không phải báo cáo cắm hoa.</b> Khi có tin trích dẫn đúng ảnh và nhắn <b>8c</b>, <b>8 cành</b> hoặc <b>@tên người gửi ảnh 8c</b>, ảnh được cộng một lần cho người gửi ảnh gốc, theo ngày gửi ảnh gốc. Ví dụ gửi ảnh ngày 10, đến ngày 15 mới trích dẫn báo <b>5 cành</b> thì cộng 5 cành vào <b>ngày 10</b>, không cộng ngày 15. Tin có nhiều số nhưng không rõ cành/vòi, giá hoặc phí ship sẽ nằm ở “Tin cần kiểm tra”.</div>' +
       '<div id="stemSummary" aria-live="polite">Đang tải...</div>' +
-      '<section class="stem-section"><h3>Theo người gửi</h3><p class="muted stem-section-note">Xếp theo tổng số cành trong khoảng ngày đã chọn.</p><div id="stemMonthly"></div></section>' +
+      '<section class="stem-section"><h3>Theo người gửi</h3><p class="muted stem-section-note">Xếp theo tổng số cành trong khoảng ngày đã chọn. NVBC là số cành nhân viên tự báo trong nhóm Kế Hoạch 5 phút Làm Việc; dấu — là chưa đối chiếu được đúng người gửi. Với nhiều ngày, NVBC cộng các ngày có báo cáo.</p><div id="stemMonthly"></div></section>' +
       '<section class="stem-section"><h3>Theo ngày</h3><p class="muted stem-section-note">Mỗi ngày có tổng riêng; bấm vào ngày để xem từng người.</p><div id="stemDaily"></div></section>' +
       '<details class="stem-detail"><summary id="stemDetailTitle">Chi tiết từng tin</summary><label class="stem-detail-filter">Lọc theo người gửi<select id="stemDetailSender"><option value="">Tất cả người gửi</option></select></label><div id="stemDetail" class="stem-scroll"></div></details>' +
       '<details class="stem-detail" id="stemReviewSection"><summary id="stemReviewTitle">Tin cần kiểm tra</summary><p class="muted">Tin này chưa được cộng vào báo cáo. Đối chiếu trước khi chốt số liệu.</p><div id="stemReview" class="stem-scroll"></div></details>' +
@@ -1083,18 +1083,20 @@ export const INDEX_HTML = `<!doctype html>
           '<div class="stem-metric"><strong>' + number(dayRows.length) + '</strong><span>Ngày có dữ liệu</span></div>' +
           '<div class="stem-metric"><strong>' + number(r.review.length) + '</strong><span>Tin cần kiểm tra</span></div></div>';
         var monthly = $("#stemMonthly", c); monthly.innerHTML = "";
-        var mt = table(["", "Người gửi", "Lượt", "Cành tính"], monthlyRows, function (x) {
+        var mt = table(["", "Người gửi", "Lượt", "Cành tính", "NVBC"], monthlyRows, function (x) {
           var tr = el("tr");
           var rank = monthlyRows.indexOf(x) + 1;
           var percent = total ? Math.round(x.stems / total * 100) : 0;
           tr.innerHTML = '<td class="stem-rank">' + rank + '</td><td>' + esc(x.senderName) +
             '<div class="stem-bar" aria-label="' + percent + '% tổng số cành"><i style="width:' + percent + '%"></i></div></td>' +
-            '<td class="stem-num">' + number(x.jobs) + '</td><td class="stem-num"><strong>' + number(x.stems) + '</strong></td>';
+            '<td class="stem-num">' + number(x.jobs) + '</td><td class="stem-num"><strong>' + number(x.stems) + '</strong></td>' +
+            '<td class="stem-num" title="' + esc(x.nvbcDays + '/' + x.countedDays + ' ngày có NVBC') + '">' + (x.nvbc === null ? '—' : number(x.nvbc)) + '</td>';
           return tr;
         });
         mt.className = "stem-table";
         mt.querySelectorAll("th")[2].className = "stem-num";
         mt.querySelectorAll("th")[3].className = "stem-num";
+        mt.querySelectorAll("th")[4].className = "stem-num";
         monthly.appendChild(mt);
         var daily = $("#stemDaily", c); daily.innerHTML = "";
         if (!dayRows.length) daily.innerHTML = '<p class="muted">Chưa có dữ liệu theo bộ lọc này.</p>';
@@ -1103,12 +1105,13 @@ export const INDEX_HTML = `<!doctype html>
           if (i === 0) group.open = true;
           group.innerHTML = '<summary><strong>' + dayLabel(d.day) + '</strong><span class="stem-num">' + number(d.jobs) + ' lượt</span><span class="stem-num"><strong>' + number(d.stems) + ' cành</strong></span></summary>';
           d.people.sort(function (a, b) { return b.stems - a.stems || a.senderName.localeCompare(b.senderName, "vi"); });
-          var dt = table(["Người gửi", "Lượt", "Cành tính"], d.people, function (x) {
-            var tr = el("tr"); tr.innerHTML = '<td>' + esc(x.senderName) + '</td><td class="stem-num">' + number(x.jobs) + '</td><td class="stem-num"><strong>' + number(x.stems) + '</strong></td>'; return tr;
+          var dt = table(["Người gửi", "Lượt", "Cành tính", "NVBC"], d.people, function (x) {
+            var tr = el("tr"); tr.innerHTML = '<td>' + esc(x.senderName) + '</td><td class="stem-num">' + number(x.jobs) + '</td><td class="stem-num"><strong>' + number(x.stems) + '</strong></td><td class="stem-num">' + (x.nvbc === null ? '—' : number(x.nvbc)) + '</td>'; return tr;
           });
           dt.className = "stem-table";
           dt.querySelectorAll("th")[1].className = "stem-num";
           dt.querySelectorAll("th")[2].className = "stem-num";
+          dt.querySelectorAll("th")[3].className = "stem-num";
           group.appendChild(dt); daily.appendChild(group);
         });
         detailEntries = r.entries.slice().sort(function (a, b) { return b.sentAt.localeCompare(a.sentAt); });
