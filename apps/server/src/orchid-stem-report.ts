@@ -122,12 +122,23 @@ export function parseOrchidWorkPlanCount(text: string, sentAt: string): { day: s
   const lines = text.replace(/\r/g, "").split("\n");
   if (!/(?:bccv|báo cáo|bao cao|\b\d{1,2}\/\d{1,2}\b)/iu.test(lines.slice(0, 3).join(" "))) return null;
   const first = lines[0] + (/^\s*\d{1,2}\/\d{1,2}(?:\/20\d{2})?\s*$/u.test(lines[1] ?? "") ? ` ${lines[1]}` : "");
-  const dateMatch = /(?:^|\b)(\d{1,2})\/(\d{1,2})(?:\/(20\d{2}))?/u.exec(first);
+  const dateMatch = /^\s*(?:(?:bccv|báo cáo(?:\s+cv)?|bao cao(?:\s+cv)?)\s*[:.\-]?\s*)?(\d{1,2})\/(\d{1,2})(?:\/(20\d{2}))?/iu.exec(first);
   let day = orchidStemDay(sentAt);
   if (dateMatch) {
     const year = Number(dateMatch[3] ?? day.slice(0, 4));
     const candidate = `${year}-${String(dateMatch[2]).padStart(2, "0")}-${String(dateMatch[1]).padStart(2, "0")}`;
     if (orchidStemDateBounds(candidate, candidate)) day = candidate;
+  } else {
+    // Reports just after midnight often end with "Kh 19/10", meaning work on 18/10.
+    const plan = /\bkh(?:nm|cv)?\s*(\d{1,2})\/(\d{1,2})(?:\/(20\d{2}))?/iu.exec(text);
+    if (plan) {
+      const year = Number(plan[3] ?? day.slice(0, 4));
+      const planDay = `${year}-${String(plan[2]).padStart(2, "0")}-${String(plan[1]).padStart(2, "0")}`;
+      if (orchidStemDateBounds(planDay, planDay)) {
+        const prior = new Date(Date.parse(`${planDay}T00:00:00Z`) - 86400_000).toISOString().slice(0, 10);
+        if (day === planDay || day === prior) day = prior;
+      }
+    }
   }
   const completed: string[] = [];
   for (const line of lines) {
@@ -151,11 +162,11 @@ export function parseOrchidWorkPlanCount(text: string, sentAt: string): { day: s
 }
 
 export function addOrchidWorkPlanCounts(report: ReturnType<typeof buildOrchidStemReport>,
-  messages: OrchidStemMessage[]) {
+  messages: OrchidStemMessage[], from?: string, to?: string) {
   const byDaySender = new Map<string, { stems: number; sentAt: string }>();
   for (const message of messages) {
     const parsed = parseOrchidWorkPlanCount(message.text, message.sentAt);
-    if (!parsed) continue;
+    if (!parsed || (from && parsed.day < from) || (to && parsed.day > to)) continue;
     const key = `${parsed.day}:${message.senderId}`;
     const prior = byDaySender.get(key);
     // A later complete report is a correction; repeated copies do not add twice.
@@ -163,13 +174,22 @@ export function addOrchidWorkPlanCounts(report: ReturnType<typeof buildOrchidSte
   }
   const daily = report.daily.map(row => ({ ...row,
     nvbc: byDaySender.get(`${row.day}:${row.senderId}`)?.stems ?? null }));
+  const names = new Map(report.monthly.map(row => [row.senderId, row.senderName]));
+  const existing = new Set(daily.map(row => `${row.day}:${row.senderId}`));
+  for (const [key, value] of byDaySender) {
+    if (existing.has(key)) continue;
+    const [day, senderId] = key.split(":");
+    const senderName = names.get(senderId!);
+    if (senderName) daily.push({ day: day!, senderId: senderId!, senderName,
+      stems: 0, jobs: 0, nvbc: value.stems });
+  }
   const monthly = report.monthly.map(row => {
-    const days = daily.filter(d => d.senderName === row.senderName);
+    const days = daily.filter(d => d.senderId === row.senderId);
     const reported = days.filter(d => d.nvbc !== null);
     return { ...row, nvbc: reported.length ? reported.reduce((sum, d) => sum + d.nvbc!, 0) : null,
       nvbcDays: reported.length, countedDays: days.length };
   });
-  return { ...report, daily, monthly };
+  return { ...report, daily: daily.sort((a, b) => a.day.localeCompare(b.day) || a.senderName.localeCompare(b.senderName, "vi")), monthly };
 }
 
 export function buildOrchidStemReport(messages: OrchidStemMessage[]) {
@@ -280,7 +300,7 @@ export function orchidStemWorkbook(report: ReturnType<typeof addOrchidWorkPlanCo
     ] },
     { name: "Theo nhân viên", widths: [25, 24, 16, 16, 16, 20], rows: [
       ["Người gửi", "UID người gửi", "Số lượt", "Tổng cành tính", "NVBC", "Ngày có NVBC"],
-      ...report.monthly.map(m => [m.senderName, m.senderId, m.jobs, m.stems, m.nvbc ?? "", `${m.nvbcDays}/${m.countedDays}`]),
+      ...report.monthly.map(m => [m.senderName, m.senderId, m.jobs, m.stems, m.nvbc ?? "", m.nvbcDays]),
     ] },
     { name: "Cần kiểm tra", widths: [22, 25, 24, 50, 22], rows: [
       ["Thời điểm", "Người gửi", "UID người gửi", "Tin chưa cộng", "Mã tin Zalo"],
@@ -304,7 +324,8 @@ export function refreshOrchidStemFile(db: Db, ctx: WorkspaceContext, channelId: 
       listOrchidStemMessages(db, ctx, channelId, threadId, start, end),
       listOrchidWorkPlanMessages(db, ctx, channelId, start, new Date(end.getTime() + 8 * 3600_000)),
     ]);
-    const report = addOrchidWorkPlanCounts(buildOrchidStemReport(messages), plans);
+    const report = addOrchidWorkPlanCounts(buildOrchidStemReport(messages), plans,
+      `${month}-01`, new Date(Date.UTC(year!, mon!, 0)).toISOString().slice(0, 10));
     const dir = join(sharedDirFor(dataDir, ctx.workspaceId), "bao-cao-cam-hoa");
     await mkdir(dir, { recursive: true });
     const file = join(dir, `bao-cao-cam-hoa-${month}.xlsx`);
