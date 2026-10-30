@@ -356,10 +356,10 @@ it("câu hỏi giá trích dẫn ảnh đã gửi vẫn tới Agent và được
     type: ThreadType.User, threadId: "customer", isSelf: false,
     data: { msgId: "question-1", cliMsgId: "cli-1", uidFrom: "customer", dName: "Khách",
       content: "Mẫu này, 8 cành bao nhiêu", msgType: "chat.text", ts: String(Date.now()),
-      quote: { globalMsgId: 8367577646050, cliMsgType: 32 } },
+      quote: { globalMsgId: 8367577646050, cliMsgId: 1793266190761, cliMsgType: 32 } },
   });
   expect(inbound?.text).toBe("Mẫu này, 8 cành bao nhiêu");
-  expect(inbound?.quoted).toEqual({ msgId: "8367577646050", kind: "photo" });
+  expect(inbound?.quoted).toEqual({ msgId: "8367577646050", cliMsgId: "1793266190761", kind: "photo" });
   expect(sent).toEqual(["Chậu 8 cành giá 1.600.000đ."]);
 });
 
@@ -439,6 +439,20 @@ describe("Reaction: tự thả cảm xúc + thả tay", () => {
     const { logs, inbound } = setup({});
     await inbound("u-7", "m1");
     expect(logs[0]?.meta).toMatchObject({ cliMsgId: "cm1" });
+  });
+
+  it("lưu cliMsgId của ảnh trích dẫn khi Zalo trả globalMsgId bằng 0", async () => {
+    const logs: Array<{ meta?: Record<string, unknown> }> = [];
+    const channel = new ZaloPersonalChannel({ id: "zp-quote-zero", name: "Zalo", token: "{}", config: {}, requirePairing: true,
+      onInbound: async () => ({ kind: "ignore" }),
+      onMessageLog: (message) => { logs.push(message); },
+    });
+    await (channel as unknown as { logListenerMessage: (m: unknown, kind: string, thread: string, sender: string, name: string) => Promise<void> }).logListenerMessage({
+      type: ThreadType.Group, threadId: "group", isSelf: false,
+      data: { msgId: "quote", uidFrom: "worker", dName: "Lộc Nguyễn", content: "20c", msgType: "webchat", ts: String(Date.now()),
+        quote: { globalMsgId: 0, cliMsgId: 1793266190761, ownerId: "worker", cliMsgType: 32, ts: 1793266190761, msg: "" } },
+    }, "group", "group", "worker", "Lộc Nguyễn");
+    expect(logs[0]?.meta).toMatchObject({ quote: { msgId: "0", cliMsgId: "1793266190761", ownerId: "worker", kind: "photo" } });
   });
 
   it("mặc định TẮT: không tự thả", async () => {

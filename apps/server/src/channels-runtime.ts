@@ -19,6 +19,7 @@ import {
   getInboxThreadAgentBlock,
   resumeAgentAfterCustomerRequest,
   getInboxMessageByMsgId,
+  getInboxMessageByCliMsgId,
   listInboxMessages,
   getInboxThread,
   claimOrchidOrderDispatch,
@@ -840,7 +841,11 @@ export function makeInboundHandler(
         channel.config["orchid_stem_report_group"] === msg.chatKey && /\d/.test(msg.text)) {
       const threadId = msg.chatKey.slice(6);
       const originalPhoto = msg.quoted?.kind === "photo"
-        ? await getInboxMessageByMsgId(db, ctx, channel.id, threadId, msg.quoted.msgId).catch(() => null)
+        ? (msg.quoted.msgId !== "0"
+          ? await getInboxMessageByMsgId(db, ctx, channel.id, threadId, msg.quoted.msgId).catch(() => null)
+          : null) ?? (msg.quoted.cliMsgId
+          ? await getInboxMessageByCliMsgId(db, ctx, channel.id, threadId, msg.quoted.cliMsgId).catch(() => null)
+          : null)
         : null;
       const months = orchidStemRefreshMonths((msg.sentAt ?? new Date()).toISOString(), originalPhoto);
       for (const month of months) {

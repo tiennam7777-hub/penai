@@ -1097,8 +1097,10 @@ export const INDEX_HTML = `<!doctype html>
         var detail = $("#stemDetail", c); detail.innerHTML = "";
         $("#stemDetailTitle", c).textContent = "Chi tiết từng tin (" + number(r.entries.length) + ")";
         var entries = r.entries.slice().sort(function (a, b) { return b.sentAt.localeCompare(a.sentAt); });
-        var et = table(["Ngày", "Người gửi", "Khách", "Cành tính", "Tin gốc"], entries, function (x) {
-          var tr = el("tr"); tr.innerHTML = '<td>' + dayLabel(x.day) + '</td><td>' + esc(x.senderName) + '</td><td>' + esc(x.customerName) + '</td><td class="stem-num">' + number(x.stems) + '</td><td>' + esc(x.text) + (x.quotedPhotoMsgId ? '<div class="muted">Trích dẫn ảnh ' + esc(x.quotedPhotoMsgId) + '</div>' : '') + '</td>'; return tr;
+        var et = table(["Ngày", "Giờ gửi", "Người gửi", "Khách", "Cành tính", "Tin gốc"], entries, function (x) {
+          var sentTime = new Date(x.sentAt).toLocaleTimeString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", hour12: false });
+          var quoteTime = x.quoteSentAt ? new Date(x.quoteSentAt).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour12: false }) : "";
+          var tr = el("tr"); tr.innerHTML = '<td>' + dayLabel(x.day) + '</td><td>' + esc(sentTime) + '</td><td>' + esc(x.senderName) + '</td><td>' + esc(x.customerName) + '</td><td class="stem-num">' + number(x.stems) + '</td><td>' + esc(x.text) + (x.quotedPhotoMsgId ? '<div class="muted">Trích dẫn ảnh ' + esc(x.quotedPhotoMsgId) + (quoteTime ? ' · Báo lại ' + esc(quoteTime) : '') + '</div>' : '') + '</td>'; return tr;
         }); et.className = "stem-table"; detail.appendChild(et);
         var review = $("#stemReview", c); review.innerHTML = "";
         $("#stemReviewTitle", c).textContent = "Tin cần kiểm tra (" + number(r.review.length) + ")";

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildOrchidStemReport, filterOrchidStemReport, orchidStemDateBounds, orchidStemRefreshMonths, parseOrchidStemText } from "../src/orchid-stem-report.js";
+import { buildOrchidStemReport, filterOrchidStemReport, orchidStemDateBounds, orchidStemRefreshMonths, orchidStemTime, parseOrchidStemText } from "../src/orchid-stem-report.js";
 import { INDEX_HTML } from "../src/ui.js";
 
 describe("orchid stem report", () => {
@@ -59,8 +59,21 @@ describe("orchid stem report", () => {
         quoteOwnerId: "worker", sentAt: "2026-10-19T00:06:00.000Z", inRange: true },
     ]);
     expect(report.entries).toMatchObject([{ msgId: "quote-1", quotedPhotoMsgId: "photo-1",
-      senderId: "worker", stems: 8, day: "2026-10-18" }]);
+      senderId: "worker", stems: 8, day: "2026-10-18",
+      sentAt: "2026-10-18T16:55:00.000Z", quoteSentAt: "2026-10-19T00:05:00.000Z" }]);
     expect(report.monthly).toMatchObject([{ stems: 8, jobs: 1 }]);
+    expect(orchidStemTime(report.entries[0]!.sentAt)).toBe("23:55");
+  });
+
+  it("matches a quoted photo by Zalo cliMsgId when globalMsgId is zero", () => {
+    const report = buildOrchidStemReport([
+      { msgId: "photo", cliMsgId: "1793266190761", senderId: "worker", senderName: "Lộc Nguyễn",
+        text: "", contentType: "photo", sentAt: "2026-10-29T09:29:51.266Z" },
+      { msgId: "quote", quotedMsgId: "0", quotedCliMsgId: "1793266190761", quoteOwnerId: "worker",
+        senderId: "worker", senderName: "Lộc Nguyễn", text: "20c", sentAt: "2026-10-29T16:34:37.417Z" },
+    ]);
+    expect(report.entries).toMatchObject([{ senderName: "Lộc Nguyễn", stems: 20,
+      day: "2026-10-29", quotedPhotoMsgId: "photo" }]);
   });
 
   it("does not treat an unnumbered photo as a report or a hint for a later bare count", () => {

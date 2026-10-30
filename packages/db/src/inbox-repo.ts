@@ -696,6 +696,21 @@ export async function getInboxMessageByMsgId(
   return r ? mapMessage(r) : null;
 }
 
+/** Resolve a Zalo quote when the platform reports globalMsgId=0 for a photo. */
+export async function getInboxMessageByCliMsgId(
+  db: Db, ctx: WorkspaceContext, channelId: string, threadId: string, cliMsgId: string,
+): Promise<InboxMessageRow | null> {
+  if (!/^\d{1,30}$/.test(cliMsgId) || cliMsgId === "0") return null;
+  const res = await withWorkspace(db, ctx, tx => tx.execute(sql`
+    SELECT m.*, u.name AS web_user_name FROM inbox_messages m
+    LEFT JOIN users u ON u.id = m.web_user_id
+    WHERE m.channel_id = ${channelId} AND m.thread_id = ${threadId}
+      AND m.meta->>'cliMsgId' = ${cliMsgId} AND m.content_type = 'photo'
+    ORDER BY m.id DESC LIMIT 1`));
+  const row = res.rows[0] as Raw | undefined;
+  return row ? mapMessage(row) : null;
+}
+
 /** Giữ tin trong Inbox nhưng đánh dấu trạng thái sau khi Zalo xác nhận xóa/thu hồi. */
 export async function markInboxMessageRemoved(
   db: Db, ctx: WorkspaceContext, channelId: string, threadId: string,

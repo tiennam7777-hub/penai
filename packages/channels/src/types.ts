@@ -30,7 +30,7 @@ export interface InboundMessage {
   peerKind: "direct" | "group";
   media?: InboundMedia[];
   /** Tin Zalo được khách trích dẫn; mã ảnh dùng để đối chiếu đúng ảnh đã gửi. */
-  quoted?: { msgId: string; kind: "photo" | "other" };
+  quoted?: { msgId: string; kind: "photo" | "other"; cliMsgId?: string };
   /**
    * Group: người gửi có @mention/reply/lệnh nhắm vào bot không. Adapter set khi
    * pass-through mọi tin (zalo_personal) để runtime gate theo require_mention.

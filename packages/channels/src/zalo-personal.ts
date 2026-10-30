@@ -1306,7 +1306,8 @@ export class ZaloPersonalChannel implements Channel {
     const quote = message.data.quote;
     const quotedMsgId = quote?.globalMsgId != null ? String(quote.globalMsgId) : "";
     const quoted = quotedMsgId
-      ? { msgId: quotedMsgId, kind: Number(quote?.cliMsgType) === 32 ? "photo" as const : "other" as const }
+      ? { msgId: quotedMsgId, kind: Number(quote?.cliMsgType) === 32 ? "photo" as const : "other" as const,
+          ...(quote?.cliMsgId != null ? { cliMsgId: String(quote.cliMsgId) } : {}) }
       : undefined;
     if (!text.trim() && media.length === 0) return;
     const threadType = message.type;
@@ -1475,13 +1476,15 @@ export class ZaloPersonalChannel implements Channel {
       const meta: Record<string, unknown> = {};
       const data = message.data as unknown as {
         mentions?: Array<{ uid: unknown }>;
-        quote?: { msg?: unknown; ownerId?: unknown; globalMsgId?: unknown; cliMsgType?: unknown };
+        quote?: { msg?: unknown; ownerId?: unknown; globalMsgId?: unknown; cliMsgId?: unknown; ts?: unknown; cliMsgType?: unknown };
       };
       if (data.quote) {
         meta.quote = {
           ownerId: String(data.quote.ownerId ?? ""),
           text: typeof data.quote.msg === "string" ? data.quote.msg.slice(0, 300) : "",
           msgId: data.quote.globalMsgId == null ? "" : String(data.quote.globalMsgId),
+          cliMsgId: data.quote.cliMsgId == null ? "" : String(data.quote.cliMsgId),
+          ts: Number.isFinite(Number(data.quote.ts)) ? Number(data.quote.ts) : null,
           kind: Number(data.quote.cliMsgType) === 32 ? "photo" : "other",
         };
       }

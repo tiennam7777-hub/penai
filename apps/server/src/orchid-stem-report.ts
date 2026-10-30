@@ -12,6 +12,7 @@ export interface OrchidStemEntry extends OrchidStemMessage {
   stems: number;
   day: string;
   quotedPhotoMsgId?: string;
+  quoteSentAt?: string;
 }
 
 function stemCustomerName(prefix: string): string | null {
@@ -85,6 +86,10 @@ export function orchidStemDay(iso: string): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Ho_Chi_Minh", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
 }
 
+export function orchidStemTime(iso: string): string {
+  return new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(iso));
+}
+
 /** A late quoted count must also refresh the saved file for the photo's month. */
 export function orchidStemRefreshMonths(quoteAt: string,
   originalPhoto?: { contentType: string; text: string; sentAt: string } | null): string[] {
@@ -116,9 +121,13 @@ export function buildOrchidStemReport(messages: OrchidStemMessage[]) {
   const review: OrchidStemMessage[] = [];
   const latestCustomer = new Map<string, { name: string; at: number }>();
   const photos = new Map(messages.filter(m => m.contentType === "photo").map(m => [m.msgId, m]));
+  const photosByCliId = new Map(messages.filter(m => m.contentType === "photo" && m.cliMsgId)
+    .map(m => [`${m.senderId}:${m.cliMsgId}`, m]));
   const photoQuotes = new Map<string, Array<{ photo: OrchidStemMessage; quote: OrchidStemMessage; stems: number }>>();
   for (const message of messages) {
-    const photo = message.quotedMsgId ? photos.get(message.quotedMsgId) : undefined;
+    const photo = (message.quotedMsgId && message.quotedMsgId !== "0" ? photos.get(message.quotedMsgId) : undefined)
+      ?? (message.quoteOwnerId && message.quotedCliMsgId
+        ? photosByCliId.get(`${message.quoteOwnerId}:${message.quotedCliMsgId}`) : undefined);
     if (photo) {
       // A quote identifies the exact photo. Attribute the count to its original
       // sender, even when a colleague posts the correction with an @mention.
@@ -135,7 +144,7 @@ export function buildOrchidStemReport(messages: OrchidStemMessage[]) {
     }
     if (message.inRange === false) continue;
     // An unnumbered photo is not a report or a customer-name hint. It becomes
-    // one report only when its sender later quotes that exact photo with a count.
+    // one report only when a later quote identifies that photo and gives a count.
     if (message.contentType === "photo" && !/\d/.test(message.text)) continue;
     const senderName = senderLabel(message.senderName);
     const source = { ...message, senderName };
@@ -167,7 +176,7 @@ export function buildOrchidStemReport(messages: OrchidStemMessage[]) {
     const { quote, stems } = candidates[0]!;
     entries.push({ ...photo, senderName: senderLabel(photo.senderName), msgId: quote.msgId, text: quote.text,
       customerName: "Ảnh báo cáo", stems, day: orchidStemDay(photo.sentAt),
-      quotedPhotoMsgId: photo.msgId });
+      quotedPhotoMsgId: photo.msgId, quoteSentAt: quote.sentAt });
   }
   const daily = new Map<string, { day: string; senderId: string; senderName: string; stems: number; jobs: number }>();
   const monthly = new Map<string, { senderId: string; senderName: string; stems: number; jobs: number }>();
@@ -198,9 +207,9 @@ export function orchidStemWorkbook(report: ReturnType<typeof buildOrchidStemRepo
       ["Điều kiện", "Giá trị"], ["Từ ngày", filter.from], ["Đến ngày", filter.to],
       ["Nhân viên", filter.sender || "Tất cả"],
     ] }] : []),
-    { name: "Chi tiết", widths: [20, 25, 24, 30, 12, 48, 22, 22], rows: [
-      ["Ngày", "Người gửi", "UID người gửi", "Tên khách", "Số cành tính", "Tin gốc", "Mã tin Zalo", "Mã ảnh trích dẫn"],
-      ...report.entries.map(e => [e.day, e.senderName, e.senderId, e.customerName, e.stems, e.text, e.msgId, e.quotedPhotoMsgId ?? ""]),
+    { name: "Chi tiết", widths: [20, 12, 25, 24, 30, 12, 48, 22, 22, 20], rows: [
+      ["Ngày", "Giờ gửi ảnh/tin gốc", "Người gửi", "UID người gửi", "Tên khách", "Số cành tính", "Tin gốc", "Mã tin Zalo", "Mã ảnh trích dẫn", "Giờ báo lại"],
+      ...report.entries.map(e => [e.day, orchidStemTime(e.sentAt), e.senderName, e.senderId, e.customerName, e.stems, e.text, e.msgId, e.quotedPhotoMsgId ?? "", e.quoteSentAt ? new Date(e.quoteSentAt) : ""]),
     ] },
     { name: "Theo ngày", widths: [20, 25, 24, 16, 16], rows: [
       ["Ngày", "Người gửi", "UID người gửi", "Số lượt", "Tổng cành tính"],

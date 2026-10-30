@@ -10,7 +10,9 @@ export interface OrchidStemMessage {
   text: string;
   sentAt: string;
   contentType?: string;
+  cliMsgId?: string;
   quotedMsgId?: string;
+  quotedCliMsgId?: string;
   quoteOwnerId?: string;
   inRange?: boolean;
 }
@@ -43,17 +45,27 @@ export async function listOrchidStemMessages(db: Db, ctx: WorkspaceContext, chan
       WHERE sent_at >= ${start.toISOString()} AND sent_at < ${end.toISOString()}
     ), photo_ids AS (
       SELECT DISTINCT msg_id FROM dated WHERE content_type = 'photo'
+    ), photo_cli_ids AS (
+      SELECT DISTINCT meta->>'cliMsgId' AS cli_msg_id FROM dated
+      WHERE content_type = 'photo' AND NULLIF(meta->>'cliMsgId', '') IS NOT NULL
     ), quote_targets AS (
       SELECT DISTINCT meta->'quote'->>'msgId' AS msg_id FROM dated
-      WHERE meta->'quote'->>'msgId' IS NOT NULL
+      WHERE NULLIF(NULLIF(meta->'quote'->>'msgId', '0'), '') IS NOT NULL
+    ), quote_cli_targets AS (
+      SELECT DISTINCT meta->'quote'->>'cliMsgId' AS cli_msg_id FROM dated
+      WHERE NULLIF(NULLIF(meta->'quote'->>'cliMsgId', '0'), '') IS NOT NULL
     ), selected AS (
       SELECT * FROM group_messages m
       WHERE (m.sent_at >= ${start.toISOString()} AND m.sent_at < ${end.toISOString()})
          OR (m.content_type = 'photo' AND m.msg_id IN (SELECT msg_id FROM quote_targets))
+         OR (m.content_type = 'photo' AND m.meta->>'cliMsgId' IN (SELECT cli_msg_id FROM quote_cli_targets))
          OR (m.meta->'quote'->>'msgId' IN (SELECT msg_id FROM photo_ids))
+         OR (m.meta->'quote'->>'cliMsgId' IN (SELECT cli_msg_id FROM photo_cli_ids))
     )
     SELECT DISTINCT ON (m.msg_id) m.msg_id, m.sender_id, m.sender_name, m.text, m.sent_at,
-      m.content_type, m.meta->'quote'->>'msgId' AS quoted_msg_id,
+      m.content_type, m.meta->>'cliMsgId' AS cli_msg_id,
+      m.meta->'quote'->>'msgId' AS quoted_msg_id,
+      m.meta->'quote'->>'cliMsgId' AS quoted_cli_msg_id,
       m.meta->'quote'->>'ownerId' AS quote_owner_id,
       (m.sent_at >= ${start.toISOString()} AND m.sent_at < ${end.toISOString()}) AS in_range
     FROM selected m
@@ -63,7 +75,9 @@ export async function listOrchidStemMessages(db: Db, ctx: WorkspaceContext, chan
     senderName: String(row.sender_name), text: String(row.text),
     sentAt: new Date(String(row.sent_at)).toISOString(),
     contentType: String(row.content_type ?? ""),
+    cliMsgId: String(row.cli_msg_id ?? ""),
     quotedMsgId: String(row.quoted_msg_id ?? ""),
+    quotedCliMsgId: String(row.quoted_cli_msg_id ?? ""),
     quoteOwnerId: String(row.quote_owner_id ?? ""),
     inRange: row.in_range === true,
   })).sort((a, b) => a.sentAt.localeCompare(b.sentAt) || a.msgId.localeCompare(b.msgId));
