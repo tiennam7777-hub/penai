@@ -208,7 +208,7 @@ describe("Inbox: ghi tin đi/đến + bỏ bản dội lại", () => {
     expect(logs[0]).toMatchObject({ direction: "in", source: "zalo", senderName: "Anh B", threadName: "Anh B", threadId: "u-5" });
   });
 
-  it("chỉ chuyển DM qua chính sách ngoài giờ khi server cho phép; nhóm vẫn bị chặn", async () => {
+  it("mở DM khách chưa duyệt khi bật ngoài giờ, đóng lại khi tắt; nhóm vẫn bị chặn", async () => {
     const received: string[] = [];
     const checked: string[] = [];
     let allowed = false;
@@ -229,8 +229,10 @@ describe("Inbox: ghi tin đi/đến + bỏ bản dội lại", () => {
     await vi.waitFor(() => expect(received).toEqual(["direct:customer-2"]));
     await handle({ type: ThreadType.Group, threadId: "group-1", isSelf: false,
       data: { msgId: "g-1", uidFrom: "customer-3", content: "Đặt hoa", msgType: "webchat", ts: String(Date.now()) } });
+    allowed = false;
+    await handle(dm("customer-4"));
     expect(received).toEqual(["direct:customer-2"]);
-    expect(checked).toEqual(["customer-1", "customer-2"]);
+    expect(checked).toEqual(["customer-1", "customer-2", "customer-4"]);
   });
 
   it("findUserByPhone trả null khi không có", async () => {

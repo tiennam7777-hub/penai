@@ -939,8 +939,9 @@ export function makeInboundHandler(
     );
 
     // Duyệt nhóm theo thread; không bắt từng thành viên ghép nối lần nữa.
-    // DM vẫn phải có pairing đã duyệt.
-    if (channel.requirePairing && !staffDelegation && !silentPhoto && !(msg.channelKind === "zalo_personal" && msg.peerKind === "group")) {
+    // Ngoài giờ: chỉ DM ba Hot được tạm tiếp nhận cả khách chưa duyệt.
+    // Không tạo pairing/duyệt vĩnh viễn; tắt nút sẽ áp dụng lại cổng này.
+    if (channel.requirePairing && !afterHours.active && !staffDelegation && !silentPhoto && !(msg.channelKind === "zalo_personal" && msg.peerKind === "group")) {
       const paired = await isPaired(db, ctx, channel.id, msg.senderId);
       if (!paired) {
         const pairing = await createPairing(db, ctx, channel.id, genPairingCode(), msg.senderId);
@@ -1912,10 +1913,10 @@ function buildChannel(
       onInbound: handler,
       ...(ch.kind === "zalo_personal" && ORCHID_SALES_CHANNEL_IDS.has(ch.id) &&
         ch.agentId === ORCHID_SALES_AGENT_ID
-        ? { allowDirectMessage: async (threadId: string) => {
+        ? { allowDirectMessage: async (_threadId: string) => {
             const ctx = systemContext(ch.workspaceId);
             const state = await getOrchidAfterHours(rt.db.db, ctx);
-            return state.active && (!ch.requirePairing || await isPaired(rt.db.db, ctx, ch.id, threadId));
+            return state.active;
           } } : {}),
       onCallback: async (cb) => {
         for (const cbHandler of channelCallbackHandlers) {
