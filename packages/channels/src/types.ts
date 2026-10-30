@@ -123,6 +123,8 @@ export interface ChannelDeps {
   requirePairing: boolean;
   /** Xử lý inbound (server inject): resolve session, chạy agent, trả text. */
   onInbound: InboundHandler;
+  /** Allow an approved direct customer through an additional, temporary server policy. */
+  allowDirectMessage?: (threadId: string) => Promise<boolean>;
   /** Xử lý bấm nút inline (nếu adapter hỗ trợ) — trả text hiển thị cho người bấm. */
   onCallback?: (cb: ChannelCallback) => Promise<CallbackResult | undefined | void>;
   onError?: (err: Error) => void;

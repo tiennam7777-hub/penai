@@ -208,6 +208,31 @@ describe("Inbox: ghi tin đi/đến + bỏ bản dội lại", () => {
     expect(logs[0]).toMatchObject({ direction: "in", source: "zalo", senderName: "Anh B", threadName: "Anh B", threadId: "u-5" });
   });
 
+  it("chỉ chuyển DM qua chính sách ngoài giờ khi server cho phép; nhóm vẫn bị chặn", async () => {
+    const received: string[] = [];
+    const checked: string[] = [];
+    let allowed = false;
+    const channel = new ZaloPersonalChannel({
+      id: "zp-after-hours", name: "Hot 1", token: "{}", config: {}, requirePairing: true,
+      onInbound: async (message) => { received.push(message.chatKey); return { kind: "ignore" }; },
+      onMessageLog: () => {},
+      allowDirectMessage: async (threadId) => { checked.push(threadId); return allowed; },
+    });
+    (channel as unknown as { api: unknown }).api = { sendMessage: async () => ({ message: { msgId: "sent-1" } }) };
+    const handle = (channel as unknown as { handleMessage: (m: unknown) => Promise<void> }).handleMessage.bind(channel);
+    const dm = (id: string) => ({ type: ThreadType.User, threadId: id, isSelf: false,
+      data: { msgId: `msg-${id}`, uidFrom: id, content: "Đặt hoa", msgType: "webchat", ts: String(Date.now()) } });
+    await handle(dm("customer-1"));
+    expect(received).toEqual([]);
+    allowed = true;
+    await handle(dm("customer-2"));
+    await vi.waitFor(() => expect(received).toEqual(["direct:customer-2"]));
+    await handle({ type: ThreadType.Group, threadId: "group-1", isSelf: false,
+      data: { msgId: "g-1", uidFrom: "customer-3", content: "Đặt hoa", msgType: "webchat", ts: String(Date.now()) } });
+    expect(received).toEqual(["direct:customer-2"]);
+    expect(checked).toEqual(["customer-1", "customer-2"]);
+  });
+
   it("findUserByPhone trả null khi không có", async () => {
     const { channel } = setup();
     expect(await channel.findUserByPhone("0900000001")).toMatchObject({ uid: "u-1", name: "Chị A" });

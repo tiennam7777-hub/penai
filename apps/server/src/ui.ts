@@ -4316,12 +4316,12 @@ export const INDEX_HTML = `<!doctype html>
 
   PAGES.inbox = function () {
     var m = page("Inbox", "Nhiều người cùng xem và trả lời khách trên Zalo cá nhân, WhatsApp cá nhân. Nhân viên trả lời thì AI tự tạm im trong hội thoại đó.");
-    var S = { channels: [], canManage: false, ch: null, threads: [], total: 0, tags: [], tag: "", quick: [], quickMatches: [], quickToken: null, quickIndex: 0, hidden: false, cur: null, msgs: [], filter: "", kind: "", imgs: [], loadingAttach: false, file: null, reply: null, es: null, seq: 0, lastStaffSent: null,
+    var S = { channels: [], canManage: false, afterHours: null, ch: null, threads: [], total: 0, tags: [], tag: "", quick: [], quickMatches: [], quickToken: null, quickIndex: 0, hidden: false, cur: null, msgs: [], filter: "", kind: "", imgs: [], loadingAttach: false, file: null, reply: null, es: null, seq: 0, lastStaffSent: null,
       detailsOpen: false, detailsTab: "info", detailsCategory: "media", exploreRows: [], exploreNext: null, exploreSeq: 0, exploreQ: "", exploreSender: "", exploreDirection: "", exploreSenders: [], jumped: false,
       mutualGroups: [], mutualIncomplete: false, mutualLoading: false, mutualError: "", mutualSeq: 0 };
     var top = el("div", { "class": "row", style: "margin-bottom:10px" });
     top.innerHTML = '<select id="ibxCh" style="max-width:260px"></select><span id="ibxSt" class="muted"></span><span style="flex:1"></span>' +
-      '<button class="ghost sm" id="ibxQuick">⚡ Tin nhắn nhanh</button><button class="ghost sm" id="ibxFriend" style="display:none">＋ Kết bạn</button><button class="ghost sm" id="ibxNew">＋ Nhắn tin mới</button><button class="ghost sm" id="ibxSync" style="display:none">🔄 Đồng bộ danh bạ</button><button class="ghost sm" id="ibxSet" style="display:none">⚙️ Cài đặt</button>';
+      '<button class="ghost sm" id="ibxAfterHours" style="display:none" title="Bật cho Hot 1/4/6 khi nhân viên ra về; tắt khi vào ca. Chỉ trả lời khách nhắn mới trong DM được phép; giữ nguyên chat đã tắt AI riêng.">🌙 Bật trợ lý ngoài giờ</button><button class="ghost sm" id="ibxQuick">⚡ Tin nhắn nhanh</button><button class="ghost sm" id="ibxFriend" style="display:none">＋ Kết bạn</button><button class="ghost sm" id="ibxNew">＋ Nhắn tin mới</button><button class="ghost sm" id="ibxSync" style="display:none">🔄 Đồng bộ danh bạ</button><button class="ghost sm" id="ibxSet" style="display:none">⚙️ Cài đặt</button>';
     m.appendChild(top);
     var wrap = el("div", { "class": "ibx" });
     wrap.innerHTML = '<div class="ibx-list"><div class="row" style="padding:8px"><input id="ibxQ" placeholder="Tìm tên, uid, SĐT…"><select id="ibxKind" style="flex:0 0 auto;min-width:0"><option value="">Tất cả</option><option value="direct">Cá nhân</option><option value="group">Nhóm</option><option value="unread">Chưa đọc</option></select></div><div class="row" style="padding:0 8px 8px;gap:6px"><select id="ibxTag" style="flex:1;min-width:0"><option value="">Mọi nhãn Inbox</option></select><select id="ibxHidden" style="flex:0 0 auto;min-width:0" title="Xem hội thoại đang hiện hoặc đã ẩn"><option value="0">Đang hiện</option><option value="1">Đã ẩn</option></select></div><div id="ibxThreads" class="ibx-threads"></div></div>' +
@@ -4346,6 +4346,10 @@ export const INDEX_HTML = `<!doctype html>
       $("#ibxFriend").style.display = c.kind === "zalo_personal" ? "" : "none";
       $("#ibxFriend").disabled = !c.connected;
       $("#ibxDelegate").style.display = ["cdf2a276-fa3d-4fe3-a46b-3ce1162a7678", "657116ed-7570-4f2e-8550-a3d323618724", "6bc2dc02-3d10-4737-931d-a37532bcabb2"].indexOf(S.ch) >= 0 ? "" : "none";
+      var afterBtn = $("#ibxAfterHours");
+      afterBtn.style.display = S.canManage && S.channels.some(function (x) { return ["cdf2a276-fa3d-4fe3-a46b-3ce1162a7678", "657116ed-7570-4f2e-8550-a3d323618724", "6bc2dc02-3d10-4737-931d-a37532bcabb2"].indexOf(x.id) >= 0; }) ? "" : "none";
+      afterBtn.textContent = S.afterHours && S.afterHours.active ? "🌙 Tắt trợ lý ngoài giờ" : "🌙 Bật trợ lý ngoài giờ";
+      afterBtn.className = S.afterHours && S.afterHours.active ? "sm" : "ghost sm";
     }
     function hideQuickSuggestions() {
       S.quickMatches = []; S.quickToken = null; S.quickIndex = 0;
@@ -5142,6 +5146,15 @@ export const INDEX_HTML = `<!doctype html>
         .then(function (j) { toast("Đã đồng bộ " + j.friends + " bạn bè, " + j.groups + " nhóm"); setTimeout(loadThreads, 1500); })
         .catch(function (e) { toast(e.message, true); }).then(function () { b.disabled = false; });
     };
+    $("#ibxAfterHours").onclick = function () {
+      var btn = this; btn.disabled = true;
+      api("/v1/inbox/orchid-after-hours").then(function (current) {
+        return api("/v1/inbox/orchid-after-hours", { method: "PUT", body: { active: !current.active } });
+      }).then(function (result) {
+        S.afterHours = result; renderStatus();
+        toast(result.active ? "Đã bật trợ lý ngoài giờ cho Hot 1/4/6. Chỉ trả lời khi khách nhắn mới." : "Đã tắt trợ lý ngoài giờ; trở về cấu hình AI ban ngày.");
+      }).catch(function (e) { toast(e.message, true); }).then(function () { btn.disabled = false; });
+    };
     $("#ibxSet").onclick = function () {
       var c = chInfo(); if (!c) return;
       var dlg = el("dialog", { style: "width:460px;padding:20px" });
@@ -5281,6 +5294,7 @@ export const INDEX_HTML = `<!doctype html>
       sel.value = S.ch;
       sel.addEventListener("change", function () { try { localStorage.setItem("penai_ibx_ch", S.ch); } catch (e) {} });
       renderStatus(); loadTags(); loadQuickReplies(); loadThreads(); connectEs();
+      if (S.canManage) api("/v1/inbox/orchid-after-hours").then(function (j) { S.afterHours = j; renderStatus(); }).catch(function () {});
     }).catch(function (e) { wrap.innerHTML = '<div class="card err">' + esc(e.message) + "</div>"; });
   };
 

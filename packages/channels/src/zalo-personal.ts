@@ -1274,7 +1274,9 @@ export class ZaloPersonalChannel implements Channel {
       this.recordObservation(chatKey, threadId, peerKind, senderId, senderName);
     }
     if (message.isSelf) return;
-    if (!this.isThreadEnabled(chatKey)) return;
+    if (!this.isThreadEnabled(chatKey) &&
+        !(peerKind === "direct" && this.deps.allowDirectMessage &&
+          await this.deps.allowDirectMessage(threadId).catch(() => false))) return;
 
     // Trong thread demo, KHÔNG chặn theo mention ở adapter nữa: runtime cần
     // thấy mọi tin (bộ điều phối quy trình đọc phản hồi trong nhóm). Cờ

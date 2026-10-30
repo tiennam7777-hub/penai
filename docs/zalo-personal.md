@@ -59,6 +59,12 @@ Tắt AI **cho một người/nhóm** thay vì cả kênh: Inbox → mở hội 
 
 ## 3. Inbox Zalo
 
+### Trợ lý ngoài giờ cho Hot 1/4/6
+
+Người trực Inbox có thể bấm **🌙 Bật trợ lý ngoài giờ** lúc ra về và **🌙 Tắt trợ lý ngoài giờ** khi vào ca. Nút áp dụng chung cho ba kênh kinh doanh Hot 1/4/6, không cần đặt giờ cố định. Khi bật, khách đã được duyệt có thể nhắn DM mới cho Agent kinh doanh kể cả khi DM chưa được chỉ định demo; nếu kênh đã tắt yêu cầu pairing thì mọi DM đều có thể vào. Nhóm Zalo không được mở thêm.
+
+AI chỉ xử lý tin khách gửi sau khi bật. Lần đầu mỗi khách nhắn trong lượt bật, PenAI gửi một lời giới thiệu ngoài giờ kèm số 0938699916, rồi Agent tiếp tục tư vấn đặt hoa. Tắt rồi bật lại bắt đầu một lượt mới. Hội thoại đã chọn **Tắt AI** riêng vẫn tắt; tạm dừng do nhân viên vừa trả lời được bỏ qua trong lúc trực ngoài giờ. Khi tắt nút, kênh trở về công tắc **Agent tự trả lời** và trạng thái từng chat trước đó. Nút không gửi tin hàng loạt và không thay đổi trạng thái duyệt khách.
+
 Từ 1.11.0, danh sách chờ duyệt cũng ưu tiên tên danh bạ giống Inbox. Khi khách gửi ảnh không có yêu cầu, Zalo mặc định chỉ xác nhận **“Đã nhận hình ạ.”** ở ảnh đầu; ảnh tiếp theo của cùng người trong cùng hội thoại cách ảnh trước dưới 30 giây không được xác nhận lặp. Yêu cầu bằng chữ bắt đầu lượt mới. Trong **Inbox → Cài đặt → Khi khách chỉ gửi ảnh**, có thể chọn **Im lặng, chỉ lưu ảnh**. Cài đặt áp dụng ngay và không vượt qua chế độ an toàn, pairing hoặc công tắc AI của kênh. File tài liệu vẫn có xác nhận riêng. Tín hiệu kết thúc cuộc gọi không chạy AI hoặc tự thả cảm xúc.
 
 Ảnh JPG/PNG/WebP được AI chọn trong cùng lượt trả lời sẽ gửi thành bộ (tối đa 20 ảnh mỗi bộ, tùy giới hạn tài khoản); GIF/video/tài liệu tách riêng. AI vẫn có thể gọi `send_file` cho từng ảnh: PenAI gom danh sách trước khi giao cho Zalo. Các ảnh được điều tiết gửi theo tài khoản với khoảng cách tối thiểu 0,5 giây. Nếu bộ ảnh gửi lỗi giữa chừng, PenAI ghi nhận từng ảnh đã xác nhận và dừng lượt giao, không tự gửi lại cả bộ. Đây là gửi bộ ảnh, không phải một yêu cầu mạng duy nhất và không bảo đảm tránh được giới hạn tài khoản của Zalo.

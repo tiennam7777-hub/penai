@@ -29,3 +29,4 @@ export * from "./kiotviet-repo.js";
 export * from "./kiotviet-order-repo.js";
 export * from "./misa-repo.js";
 export * from "./misa-accounting-repo.js";
+export * from "./orchid-after-hours-repo.js";

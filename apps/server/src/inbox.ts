@@ -48,6 +48,8 @@ import {
   applyMisaAccountingReply,
   pendingMisaAccountingRequest,
   getMisaCredentials,
+  getOrchidAfterHours,
+  setOrchidAfterHours,
   markInboxThreadRead,
   markAgentMessageRecalled,
   markInboxMessageRemoved,
@@ -935,6 +937,22 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
   }
 
   const kindOf = (channelId: string): string => channelHandlers.get(channelId)?.channel.kind ?? "zalo_personal";
+
+  // Một nút trực ngoài giờ cho ba kênh kinh doanh. Không đổi pairing hoặc ai_mode từng chat.
+  app.get("/v1/inbox/orchid-after-hours", async (req, reply) => {
+    if (!hasRole(req.authCtx.role, "operator") && req.authCtx.role !== "moderator")
+      return reply.code(403).send({ error: "Cần quyền trực Inbox" });
+    return getOrchidAfterHours(db, req.authCtx);
+  });
+  app.put("/v1/inbox/orchid-after-hours", async (req, reply) => {
+    if (!hasRole(req.authCtx.role, "operator") && req.authCtx.role !== "moderator")
+      return reply.code(403).send({ error: "Cần quyền trực Inbox" });
+    const parsed = z.object({ active: z.boolean() }).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "Trạng thái trực ngoài giờ không hợp lệ" });
+    const state = await setOrchidAfterHours(db, req.authCtx, parsed.data.active);
+    await recordAudit(db, req.authCtx, "orchid.after_hours_toggle", { active: state.active }).catch(() => {});
+    return state;
+  });
 
   // /v1/inbox/… là địa chỉ chung; /v1/zalo-inbox/… giữ nguyên cho tích hợp đã có (cùng một bộ xử lý)
   for (const base of ["/v1/inbox", "/v1/zalo-inbox"]) {

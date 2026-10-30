@@ -23,6 +23,7 @@ describe("moderator capability boundary", () => {
       ["GET", "/v1/contacts"], ["PUT", "/v1/contacts/abc/profile"],
       ["POST", "/v1/contact-tags"],
       ["GET", "/v1/orchid-stem-report"], ["GET", "/v1/orchid-stem-report.xlsx"],
+      ["GET", "/v1/inbox/orchid-after-hours"], ["PUT", "/v1/inbox/orchid-after-hours"],
     ]) expect(moderatorAllowed(method!, path!)).toBe(true);
     for (const [method, path] of [
       ["GET", "/v1/channels"], ["POST", "/v1/channels"],
@@ -32,6 +33,7 @@ describe("moderator capability boundary", () => {
       ["GET", "/v1/users"], ["GET", "/v1/vault"],
       ["PATCH", "/v1/agents/abc"],
       ["POST", "/v1/orchid-stem-report"],
+      ["POST", "/v1/inbox/orchid-after-hours"],
     ]) expect(moderatorAllowed(method!, path!)).toBe(false);
   });
 

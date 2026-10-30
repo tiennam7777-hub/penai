@@ -33,6 +33,10 @@ import {
   finishKiotVietBillImage,
   getKiotVietCredentials,
   getMisaCredentials,
+  getOrchidAfterHours,
+  claimOrchidAfterHoursGreeting,
+  finishOrchidAfterHoursGreeting,
+  getOrchidAfterHoursGreetingStatus,
   claimMisaInvoiceDraft,
   finishMisaInvoiceDraft,
   claimMisaAccountingNotice,
@@ -64,6 +68,7 @@ import {
   trustedZaloMediaUrl,
 } from "@penai/channels";
 import { forgetInboxChannel, inboxHooks } from "./inbox.js";
+import { ORCHID_SALES_AGENT_ID, ORCHID_SALES_CHANNEL_IDS } from "./orchid-staff-delegation.js";
 import { isPersonalChannel, isPersonalChannelKind } from "@penai/channels";
 import { classifyOrchidSalesScope } from "./orchid-sales-scope.js";
 import { hasPersonalAddressMismatch, requiresPersonalAddressGuard } from "./persona-reply-guard.js";
@@ -885,9 +890,14 @@ export function makeInboundHandler(
       }
     }
 
+    const afterHours = channel.kind === "zalo_personal" &&
+      ORCHID_SALES_CHANNEL_IDS.has(channel.id) && channel.agentId === ORCHID_SALES_AGENT_ID &&
+      msg.peerKind === "direct" && !staffDelegation
+      ? await getOrchidAfterHours(db, ctx) : { active: false, activationId: null };
+
     // Công tắc "Agent tự trả lời" của kênh (Channels → Sửa). Bỏ tick = kênh vẫn
     // kết nối + Inbox vẫn lưu tin, chỉ agent không trả lời. Lịch hẹn vẫn gửi (đi đường khác).
-    if (channel.config["agent_reply"] === false) return { kind: "ignore" };
+    if (channel.config["agent_reply"] === false && !afterHours.active) return { kind: "ignore" };
 
     // Inbox Zalo: nhân viên đã tắt AI cho hội thoại này, hoặc vừa trả lời tay
     // (web/điện thoại) → AI im trong lúc tạm dừng.
@@ -903,7 +913,7 @@ export function makeInboundHandler(
           db, ctx, channel.id, threadId, msg.sentAt ?? new Date(),
         ).catch(() => false);
         if (!resumed) return { kind: "ignore" };
-      } else if (block) return { kind: "ignore" };
+      } else if (block && !(afterHours.active && block === "paused")) return { kind: "ignore" };
     }
 
     // Nhóm Zalo chỉ kích hoạt khi được tag/reply/gọi lệnh, kể cả khi cấu hình cũ
@@ -1110,6 +1120,34 @@ export function makeInboundHandler(
 
     const agent = await getAgentById(db, ctx, channel.agentId);
     if (!agent) return { kind: "reply", text: "⚠️ Agent chưa được cấu hình." };
+
+    if (afterHours.active && afterHours.activationId &&
+        agent.key === "nhan-vien-kinh-doanh-orchids-world") {
+      const threadId = msg.chatKey.slice(msg.chatKey.indexOf(":") + 1);
+      const input = { activationId: afterHours.activationId, channelId: channel.id, threadId };
+      if (await claimOrchidAfterHoursGreeting(db, ctx, input)) {
+        try {
+          const runtime = channelHandlers.get(channel.id)?.channel;
+          if (!isPersonalChannel(runtime) || !runtime.isConnected()) throw new Error("Zalo chưa kết nối");
+          const ids = await runtime.sendManual({ threadId, peerKind: "direct", source: "agent",
+            text: "Hiện đã hết giờ làm việc, em là trợ lý cửa hàng và em sẽ hỗ trợ anh/chị về các vấn đề đặt hoa. Các vấn đề khác vui lòng liên hệ sdt 0938699916." });
+          if (!ids[0]) throw new Error("Zalo không xác nhận tin giới thiệu");
+          await finishOrchidAfterHoursGreeting(db, ctx, { ...input, messageId: ids[0] });
+        } catch (error) {
+          await finishOrchidAfterHoursGreeting(db, ctx, input).catch(() => {});
+          logger.warn(`orchid.after_hours_greeting_fail: ${String(error)}`);
+          return { kind: "ignore" };
+        }
+      } else {
+        // Tin cùng khách đến dồn dập không được chạy Agent trước tin giới thiệu.
+        let status = await getOrchidAfterHoursGreetingStatus(db, ctx, input);
+        for (let attempt = 0; status === "sending" && attempt < 30; attempt++) {
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          status = await getOrchidAfterHoursGreetingStatus(db, ctx, input);
+        }
+        if (status === "sending") return { kind: "ignore" };
+      }
+    }
 
     // Kênh bán lan: lọc trước mọi text/tool của Agent. Adapter đã lưu tin vào
     // Inbox trước khi gọi handler; ignore chỉ ngăn AI nhắn lại cho khách.
@@ -1667,9 +1705,12 @@ export function makeInboundHandler(
       }
     }
     if (complaintReply) return { kind: "reply", text: complaintReply };
-    const userMessage = handoffContext || dispatchContext || kiotContext || shippingContext || deliveryContext || paymentContext
+    const userMessageBase = handoffContext || dispatchContext || kiotContext || shippingContext || deliveryContext || paymentContext
       ? `${handoffContext}\n\n${dispatchContext ? `${dispatchContext}\n\n` : ""}${kiotContext ? `${kiotContext}\n\n` : ""}${deliveryContext ? `${deliveryContext}\n\n` : ""}${shippingContext ? `${shippingContext}\n\n` : ""}${paymentContext ? `${paymentContext}\n\n` : ""}[YÊU CẦU MỚI NHẤT CẦN TRẢ LỜI]\n${latestUserMessage}`
       : latestUserMessage;
+    const userMessage = afterHours.active && !staffDelegation
+      ? `[CHẾ ĐỘ TRỢ LÝ NGOÀI GIỜ] Chỉ hỗ trợ các vấn đề đặt hoa. Với vấn đề khác, mời khách liên hệ 0938699916. Hệ thống đã gửi lời giới thiệu ngoài giờ riêng, không lặp lại lời đó.\n\n${userMessageBase}`
+      : userMessageBase;
     // Vision = ảnh lượt này + các ảnh gần đây của session (đọc lại từ đĩa) —
     // người dùng gửi ảnh trước, nhắn yêu cầu sau thì model vẫn "nhìn thấy" ảnh.
     let userImages = quotedPhotoDataUrl ? [quotedPhotoDataUrl] : await recentImagesAsDataUrls(sessionId);
@@ -1869,6 +1910,13 @@ function buildChannel(
       config: ch.config,
       requirePairing: ch.requirePairing,
       onInbound: handler,
+      ...(ch.kind === "zalo_personal" && ORCHID_SALES_CHANNEL_IDS.has(ch.id) &&
+        ch.agentId === ORCHID_SALES_AGENT_ID
+        ? { allowDirectMessage: async (threadId: string) => {
+            const ctx = systemContext(ch.workspaceId);
+            const state = await getOrchidAfterHours(rt.db.db, ctx);
+            return state.active && (!ch.requirePairing || await isPaired(rt.db.db, ctx, ch.id, threadId));
+          } } : {}),
       onCallback: async (cb) => {
         for (const cbHandler of channelCallbackHandlers) {
           try {
