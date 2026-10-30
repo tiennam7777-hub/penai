@@ -18,19 +18,25 @@ export interface OrchidStemMessage {
   inRange?: boolean;
 }
 
-/** Reports from the same Zalo account view as the flower report, so sender IDs are comparable. */
+/** Prefer Hot 1's view, as the flower report also prefers its sender IDs. */
 export async function listOrchidWorkPlanMessages(db: Db, ctx: WorkspaceContext, channelId: string,
   start: Date, end: Date): Promise<OrchidStemMessage[]> {
   const result = await withWorkspace(db, ctx, tx => tx.execute(sql`
-    SELECT m.msg_id, m.sender_id, m.sender_name, m.text, m.sent_at
-    FROM inbox_messages m JOIN inbox_threads t
-      ON t.workspace_id = m.workspace_id AND t.channel_id = m.channel_id AND t.thread_id = m.thread_id
-    WHERE m.workspace_id = ${ctx.workspaceId} AND m.channel_id = ${channelId}
-      AND t.kind = 'group' AND t.name = 'Kế Hoạch 5 phút Làm Việc'
+    WITH views AS (
+      SELECT t.channel_id, t.thread_id,
+        CASE WHEN c.name = 'NV Bán Hàng Hot 1' THEN 0
+             WHEN t.channel_id = ${channelId} THEN 1 ELSE 2 END AS priority
+      FROM inbox_threads t JOIN channels c ON c.id = t.channel_id
+      WHERE t.workspace_id = ${ctx.workspaceId} AND t.kind = 'group'
+        AND t.name = 'Kế Hoạch 5 phút Làm Việc' AND c.kind = 'zalo_personal'
+    )
+    SELECT DISTINCT ON (m.msg_id) m.msg_id, m.sender_id, m.sender_name, m.text, m.sent_at
+    FROM inbox_messages m JOIN views v ON v.channel_id = m.channel_id AND v.thread_id = m.thread_id
+    WHERE m.workspace_id = ${ctx.workspaceId} AND m.msg_id <> ''
       AND m.direction IN ('in', 'out') AND m.source IN ('zalo', 'app', 'web', 'mcp')
       AND COALESCE(m.meta->>'removed', '') = '' AND m.text <> ''
       AND m.sent_at >= ${start.toISOString()} AND m.sent_at < ${end.toISOString()}
-    ORDER BY m.sent_at, m.id`));
+    ORDER BY m.msg_id, v.priority, m.id`));
   return result.rows.map(row => ({
     msgId: String(row.msg_id), senderId: String(row.sender_id),
     senderName: String(row.sender_name), text: String(row.text),
