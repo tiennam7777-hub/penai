@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildOrchidStemReport, filterOrchidStemReport, orchidStemDateBounds, parseOrchidStemText } from "../src/orchid-stem-report.js";
+import { buildOrchidStemReport, filterOrchidStemReport, orchidStemDateBounds, orchidStemRefreshMonths, parseOrchidStemText } from "../src/orchid-stem-report.js";
 import { INDEX_HTML } from "../src/ui.js";
 
 describe("orchid stem report", () => {
@@ -85,6 +85,15 @@ describe("orchid stem report", () => {
         quoteOwnerId: "worker", sentAt: "2026-11-01T03:00:00.000Z", inRange: false },
     ]);
     expect(report.daily).toMatchObject([{ day: "2026-10-31", stems: 8 }]);
+  });
+
+  it("refreshes the original photo's saved month for a quote in a later month", () => {
+    expect(orchidStemRefreshMonths("2026-11-15T03:00:00.000Z", {
+      contentType: "photo", text: "", sentAt: "2026-10-10T03:00:00.000Z",
+    })).toEqual(["2026-11", "2026-10"]);
+    expect(orchidStemRefreshMonths("2026-10-15T03:00:00.000Z", {
+      contentType: "photo", text: "", sentAt: "2026-10-10T03:00:00.000Z",
+    })).toEqual(["2026-10"]);
   });
 
   it("uses the existing Hot 6 display name for quoted photo totals", () => {

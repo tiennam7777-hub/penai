@@ -79,7 +79,7 @@ import {
   orchidDeliveryCorrection,
 } from "./orchid-order-dispatch.js";
 import { stemCountForPhoto } from "./orchid-photo-count.js";
-import { orchidStemDay, refreshOrchidStemFile } from "./orchid-stem-report.js";
+import { orchidStemDay, orchidStemRefreshMonths, refreshOrchidStemFile } from "./orchid-stem-report.js";
 import { knownOrchidShippingHint, orchidShippingHintContext, completeOrchidShippingReply, orchidDeliveryPriorityContext } from "./orchid-shipping-reply.js";
 import { orchidCompanyPaymentContext } from "./orchid-payment-context.js";
 import { classifyOrchidFlowerComplaint, formatOrchidFlowerComplaintDispatch, orchidFlowerComplaintFingerprint } from "./orchid-flower-complaint.js";
@@ -838,9 +838,15 @@ export function makeInboundHandler(
     const ctx = systemContext(channel.workspaceId);
     if (msg.channelKind === "zalo_personal" && msg.peerKind === "group" &&
         channel.config["orchid_stem_report_group"] === msg.chatKey && /\d/.test(msg.text)) {
-      const month = orchidStemDay((msg.sentAt ?? new Date()).toISOString()).slice(0, 7);
-      await refreshOrchidStemFile(db, ctx, channel.id, msg.chatKey.slice(6), month, rt.config.dataDir)
-        .catch(error => logger.warn(`Không cập nhật file báo cáo cắm hoa: ${String(error)}`));
+      const threadId = msg.chatKey.slice(6);
+      const originalPhoto = msg.quoted?.kind === "photo"
+        ? await getInboxMessageByMsgId(db, ctx, channel.id, threadId, msg.quoted.msgId).catch(() => null)
+        : null;
+      const months = orchidStemRefreshMonths((msg.sentAt ?? new Date()).toISOString(), originalPhoto);
+      for (const month of months) {
+        await refreshOrchidStemFile(db, ctx, channel.id, threadId, month, rt.config.dataDir)
+          .catch(error => logger.warn(`Không cập nhật file báo cáo cắm hoa ${month}: ${String(error)}`));
+      }
     }
     const staffDelegation = orchidStaffDelegations.get(msg);
     const hasPhoto = (msg.media ?? []).some((m) => m.kind === "photo");

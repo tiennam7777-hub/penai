@@ -72,6 +72,16 @@ export function orchidStemDay(iso: string): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Ho_Chi_Minh", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
 }
 
+/** A late quoted count must also refresh the saved file for the photo's month. */
+export function orchidStemRefreshMonths(quoteAt: string,
+  originalPhoto?: { contentType: string; text: string; sentAt: string } | null): string[] {
+  const months = new Set([orchidStemDay(quoteAt).slice(0, 7)]);
+  if (originalPhoto?.contentType === "photo" && !/\d/.test(originalPhoto.text)) {
+    months.add(orchidStemDay(originalPhoto.sentAt).slice(0, 7));
+  }
+  return [...months];
+}
+
 /** Inclusive local calendar dates, converted to a half-open UTC interval. */
 export function orchidStemDateBounds(from: string, to: string): { start: Date; end: Date } | null {
   const valid = (value: string) => {
