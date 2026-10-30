@@ -93,6 +93,8 @@ export const INDEX_HTML = `<!doctype html>
   .stem-report .stem-day .stem-table tr:last-child td { border-bottom:0; }
   .stem-report .stem-detail { margin-top:22px; }
   .stem-report .stem-detail summary { cursor:pointer; font-weight:600; padding:9px 0; }
+  .stem-report .stem-detail-filter { display:block; max-width:300px; margin:4px 0 12px; }
+  .stem-report .stem-detail-filter select { display:block; width:100%; margin-top:5px; }
   .stem-report .stem-scroll { overflow-x:auto; }
   .stem-report .stem-scroll .stem-table { min-width:650px; }
   @media (max-width:850px) { .stem-report .stem-toolbar { grid-template-columns:repeat(2,minmax(0,1fr)); } }
@@ -1009,7 +1011,7 @@ export const INDEX_HTML = `<!doctype html>
       '<div id="stemSummary" aria-live="polite">Đang tải...</div>' +
       '<section class="stem-section"><h3>Theo người gửi</h3><p class="muted stem-section-note">Xếp theo tổng số cành trong khoảng ngày đã chọn.</p><div id="stemMonthly"></div></section>' +
       '<section class="stem-section"><h3>Theo ngày</h3><p class="muted stem-section-note">Mỗi ngày có tổng riêng; bấm vào ngày để xem từng người.</p><div id="stemDaily"></div></section>' +
-      '<details class="stem-detail"><summary id="stemDetailTitle">Chi tiết từng tin</summary><div id="stemDetail" class="stem-scroll"></div></details>' +
+      '<details class="stem-detail"><summary id="stemDetailTitle">Chi tiết từng tin</summary><label class="stem-detail-filter">Lọc theo người gửi<select id="stemDetailSender"><option value="">Tất cả người gửi</option></select></label><div id="stemDetail" class="stem-scroll"></div></details>' +
       '<details class="stem-detail" id="stemReviewSection"><summary id="stemReviewTitle">Tin cần kiểm tra</summary><p class="muted">Tin này chưa được cộng vào báo cáo. Đối chiếu trước khi chốt số liệu.</p><div id="stemReview" class="stem-scroll"></div></details>' +
       '<p class="muted">Một lượt là một tin đủ tên khách và số cành (kể cả hai tin liền nhau), hoặc một ảnh được trích dẫn báo số cành và tính cho người gửi ảnh gốc. Tin Zalo trùng mã chỉ tính một lần. Dữ liệu từ nhóm Bao Cao Cam hoa 42 DBP.</p>';
     function number(n) { return Number(n || 0).toLocaleString("vi-VN"); }
@@ -1017,6 +1019,20 @@ export const INDEX_HTML = `<!doctype html>
       var parts = day.split("-");
       return parts.length === 3 ? parts[2] + "/" + parts[1] + "/" + parts[0] : day;
     }
+    var detailEntries = [];
+    function renderDetail() {
+      var sender = $("#stemDetailSender", c).value;
+      var entries = sender ? detailEntries.filter(function (x) { return x.senderName === sender; }) : detailEntries;
+      var detail = $("#stemDetail", c); detail.innerHTML = "";
+      $("#stemDetailTitle", c).textContent = "Chi tiết từng tin (" + number(entries.length) + ")";
+      if (!entries.length) { detail.innerHTML = '<p class="muted">Chưa có tin của người gửi này trong khoảng ngày đã chọn.</p>'; return; }
+      var et = table(["Ngày", "Giờ gửi", "Người gửi", "Khách", "Cành tính", "Tin gốc"], entries, function (x) {
+        var sentTime = new Date(x.sentAt).toLocaleTimeString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", hour12: false });
+        var quoteTime = x.quoteSentAt ? new Date(x.quoteSentAt).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour12: false }) : "";
+        var tr = el("tr"); tr.innerHTML = '<td>' + dayLabel(x.day) + '</td><td>' + esc(sentTime) + '</td><td>' + esc(x.senderName) + '</td><td>' + esc(x.customerName) + '</td><td class="stem-num">' + number(x.stems) + '</td><td>' + esc(x.text) + (x.quotedPhotoMsgId ? '<div class="muted">Trích dẫn ảnh ' + esc(x.quotedPhotoMsgId) + (quoteTime ? ' · Báo lại ' + esc(quoteTime) : '') + '</div>' : '') + '</td>'; return tr;
+      }); et.className = "stem-table"; detail.appendChild(et);
+    }
+    $("#stemDetailSender", c).onchange = renderDetail;
     if (selectedSender) {
       var initialOption = document.createElement("option");
       initialOption.value = selectedSender; initialOption.textContent = selectedSender;
@@ -1094,14 +1110,14 @@ export const INDEX_HTML = `<!doctype html>
           dt.querySelectorAll("th")[2].className = "stem-num";
           group.appendChild(dt); daily.appendChild(group);
         });
-        var detail = $("#stemDetail", c); detail.innerHTML = "";
-        $("#stemDetailTitle", c).textContent = "Chi tiết từng tin (" + number(r.entries.length) + ")";
-        var entries = r.entries.slice().sort(function (a, b) { return b.sentAt.localeCompare(a.sentAt); });
-        var et = table(["Ngày", "Giờ gửi", "Người gửi", "Khách", "Cành tính", "Tin gốc"], entries, function (x) {
-          var sentTime = new Date(x.sentAt).toLocaleTimeString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", hour12: false });
-          var quoteTime = x.quoteSentAt ? new Date(x.quoteSentAt).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour12: false }) : "";
-          var tr = el("tr"); tr.innerHTML = '<td>' + dayLabel(x.day) + '</td><td>' + esc(sentTime) + '</td><td>' + esc(x.senderName) + '</td><td>' + esc(x.customerName) + '</td><td class="stem-num">' + number(x.stems) + '</td><td>' + esc(x.text) + (x.quotedPhotoMsgId ? '<div class="muted">Trích dẫn ảnh ' + esc(x.quotedPhotoMsgId) + (quoteTime ? ' · Báo lại ' + esc(quoteTime) : '') + '</div>' : '') + '</td>'; return tr;
-        }); et.className = "stem-table"; detail.appendChild(et);
+        detailEntries = r.entries.slice().sort(function (a, b) { return b.sentAt.localeCompare(a.sentAt); });
+        var detailSelect = $("#stemDetailSender", c), detailChosen = detailSelect.value;
+        detailSelect.innerHTML = '<option value="">Tất cả người gửi</option>';
+        [...new Set(detailEntries.map(function (x) { return x.senderName; }))].sort(function (a, b) { return a.localeCompare(b, "vi"); }).forEach(function (name) {
+          var option = document.createElement("option"); option.value = name; option.textContent = name; detailSelect.appendChild(option);
+        });
+        detailSelect.value = detailEntries.some(function (x) { return x.senderName === detailChosen; }) ? detailChosen : "";
+        renderDetail();
         var review = $("#stemReview", c); review.innerHTML = "";
         $("#stemReviewTitle", c).textContent = "Tin cần kiểm tra (" + number(r.review.length) + ")";
         var rt = table(["Thời điểm", "Người gửi", "Tin chưa cộng"], r.review, function (x) {
