@@ -1027,9 +1027,10 @@ export const INDEX_HTML = `<!doctype html>
       $("#stemDetailTitle", c).textContent = "Chi tiết từng tin (" + number(entries.length) + ")";
       if (!entries.length) { detail.innerHTML = '<p class="muted">Chưa có tin của người gửi này trong khoảng ngày đã chọn.</p>'; return; }
       var et = table(["Ngày", "Giờ gửi", "Người gửi", "Khách", "Cành tính", "Tin gốc"], entries, function (x) {
-        var sentTime = new Date(x.sentAt).toLocaleTimeString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", hour12: false });
+        var sentTime = x.originalDayConfirmed ? "—" : new Date(x.sentAt).toLocaleTimeString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", hour12: false });
         var quoteTime = x.quoteSentAt ? new Date(x.quoteSentAt).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour12: false }) : "";
-        var tr = el("tr"); tr.innerHTML = '<td>' + dayLabel(x.day) + '</td><td>' + esc(sentTime) + '</td><td>' + esc(x.senderName) + '</td><td>' + esc(x.customerName) + '</td><td class="stem-num">' + number(x.stems) + '</td><td>' + esc(x.text) + (x.quotedPhotoMsgId ? '<div class="muted">Trích dẫn ảnh ' + esc(x.quotedPhotoMsgId) + (quoteTime ? ' · Báo lại ' + esc(quoteTime) : '') + '</div>' : '') + '</td>'; return tr;
+        var note = x.quotedPhotoMsgId ? 'Trích dẫn ảnh ' + esc(x.quotedPhotoMsgId) : x.originalDayConfirmed ? 'Ngày ảnh gốc do chủ shop xác nhận' : '';
+        var tr = el("tr"); tr.innerHTML = '<td>' + dayLabel(x.day) + '</td><td>' + esc(sentTime) + '</td><td>' + esc(x.senderName) + '</td><td>' + esc(x.customerName) + '</td><td class="stem-num">' + number(x.stems) + '</td><td>' + esc(x.text) + (note ? '<div class="muted">' + note + (quoteTime ? ' · Báo lại ' + esc(quoteTime) : '') + '</div>' : '') + '</td>'; return tr;
       }); et.className = "stem-table"; detail.appendChild(et);
     }
     $("#stemDetailSender", c).onchange = renderDetail;

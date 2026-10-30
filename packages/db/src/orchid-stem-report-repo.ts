@@ -14,12 +14,18 @@ export interface OrchidStemMessage {
   quotedMsgId?: string;
   quotedCliMsgId?: string;
   quoteOwnerId?: string;
+  originalPhotoDay?: string;
   inRange?: boolean;
 }
 
 /** Read the durable Inbox log. Its (channel_id, msg_id) uniqueness prevents duplicate Zalo events. */
 export async function listOrchidStemMessages(db: Db, ctx: WorkspaceContext, channelId: string,
   threadId: string, start: Date, end: Date): Promise<OrchidStemMessage[]> {
+  const localDay = (date: Date) => new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Ho_Chi_Minh", year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(date);
+  const fromDay = localDay(start);
+  const toDay = localDay(end);
   const result = await withWorkspace(db, ctx, tx => tx.execute(sql`
     WITH report_group AS (
       SELECT name FROM inbox_threads
@@ -57,6 +63,8 @@ export async function listOrchidStemMessages(db: Db, ctx: WorkspaceContext, chan
     ), selected AS (
       SELECT * FROM group_messages m
       WHERE (m.sent_at >= ${start.toISOString()} AND m.sent_at < ${end.toISOString()})
+         OR (m.meta->>'orchidStemOriginalDay' >= ${fromDay}
+           AND m.meta->>'orchidStemOriginalDay' < ${toDay})
          OR (m.content_type = 'photo' AND m.msg_id IN (SELECT msg_id FROM quote_targets))
          OR (m.content_type = 'photo' AND m.meta->>'cliMsgId' IN (SELECT cli_msg_id FROM quote_cli_targets))
          OR (m.meta->'quote'->>'msgId' IN (SELECT msg_id FROM photo_ids))
@@ -67,7 +75,12 @@ export async function listOrchidStemMessages(db: Db, ctx: WorkspaceContext, chan
       m.meta->'quote'->>'msgId' AS quoted_msg_id,
       m.meta->'quote'->>'cliMsgId' AS quoted_cli_msg_id,
       m.meta->'quote'->>'ownerId' AS quote_owner_id,
-      (m.sent_at >= ${start.toISOString()} AND m.sent_at < ${end.toISOString()}) AS in_range
+      m.meta->>'orchidStemOriginalDay' AS original_photo_day,
+      CASE WHEN m.meta->>'orchidStemOriginalDay' IS NOT NULL
+        THEN (m.meta->>'orchidStemOriginalDay' >= ${fromDay}
+          AND m.meta->>'orchidStemOriginalDay' < ${toDay})
+        ELSE (m.sent_at >= ${start.toISOString()} AND m.sent_at < ${end.toISOString()})
+      END AS in_range
     FROM selected m
     ORDER BY m.msg_id, m.priority, m.id`));
   return result.rows.map(row => ({
@@ -79,6 +92,7 @@ export async function listOrchidStemMessages(db: Db, ctx: WorkspaceContext, chan
     quotedMsgId: String(row.quoted_msg_id ?? ""),
     quotedCliMsgId: String(row.quoted_cli_msg_id ?? ""),
     quoteOwnerId: String(row.quote_owner_id ?? ""),
+    originalPhotoDay: String(row.original_photo_day ?? ""),
     inRange: row.in_range === true,
   })).sort((a, b) => a.sentAt.localeCompare(b.sentAt) || a.msgId.localeCompare(b.msgId));
 }

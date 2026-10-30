@@ -76,6 +76,17 @@ describe("orchid stem report", () => {
       day: "2026-10-29", quotedPhotoMsgId: "photo" }]);
   });
 
+  it("places an owner-confirmed legacy quote on the original photo day without inventing its time", () => {
+    const report = buildOrchidStemReport([
+      { msgId: "quote", quotedMsgId: "0", quoteOwnerId: "worker", senderId: "worker",
+        senderName: "Trung Toàn", text: "cen 20c", originalPhotoDay: "2026-10-28",
+        sentAt: "2026-10-29T11:25:44.497Z", inRange: true },
+    ]);
+    expect(report.entries).toMatchObject([{ day: "2026-10-28", sentAt: "2026-10-29T11:25:44.497Z",
+      quoteSentAt: "2026-10-29T11:25:44.497Z", originalDayConfirmed: true, stems: 20 }]);
+    expect(report.daily).toMatchObject([{ day: "2026-10-28", stems: 20 }]);
+  });
+
   it("does not treat an unnumbered photo as a report or a hint for a later bare count", () => {
     const at = "2026-10-18T10:00:00.000Z";
     const report = buildOrchidStemReport([

@@ -13,6 +13,7 @@ export interface OrchidStemEntry extends OrchidStemMessage {
   day: string;
   quotedPhotoMsgId?: string;
   quoteSentAt?: string;
+  originalDayConfirmed?: boolean;
 }
 
 function stemCustomerName(prefix: string): string | null {
@@ -156,7 +157,12 @@ export function buildOrchidStemReport(messages: OrchidStemMessage[]) {
         parsed = { customerName: prior.name, stems };
       }
     }
-    if (parsed) entries.push({ ...source, ...parsed, day: orchidStemDay(message.sentAt) });
+    if (parsed) {
+      const confirmedDay = /^20\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(message.originalPhotoDay ?? "")
+        ? message.originalPhotoDay : undefined;
+      entries.push({ ...source, ...parsed, day: confirmedDay ?? orchidStemDay(message.sentAt),
+        ...(confirmedDay ? { quoteSentAt: message.sentAt, originalDayConfirmed: true } : {}) });
+    }
     else if (/\d/.test(message.text)) review.push(source);
     else {
       const name = message.text.replace(/\s+/g, " ").trim();
@@ -207,9 +213,11 @@ export function orchidStemWorkbook(report: ReturnType<typeof buildOrchidStemRepo
       ["Điều kiện", "Giá trị"], ["Từ ngày", filter.from], ["Đến ngày", filter.to],
       ["Nhân viên", filter.sender || "Tất cả"],
     ] }] : []),
-    { name: "Chi tiết", widths: [20, 12, 25, 24, 30, 12, 48, 22, 22, 20], rows: [
-      ["Ngày", "Giờ gửi ảnh/tin gốc", "Người gửi", "UID người gửi", "Tên khách", "Số cành tính", "Tin gốc", "Mã tin Zalo", "Mã ảnh trích dẫn", "Giờ báo lại"],
-      ...report.entries.map(e => [e.day, orchidStemTime(e.sentAt), e.senderName, e.senderId, e.customerName, e.stems, e.text, e.msgId, e.quotedPhotoMsgId ?? "", e.quoteSentAt ? new Date(e.quoteSentAt) : ""]),
+    { name: "Chi tiết", widths: [20, 12, 25, 24, 30, 12, 48, 22, 22, 20, 34], rows: [
+      ["Ngày", "Giờ gửi ảnh/tin gốc", "Người gửi", "UID người gửi", "Tên khách", "Số cành tính", "Tin gốc", "Mã tin Zalo", "Mã ảnh trích dẫn", "Giờ báo lại", "Ghi chú ngày tính"],
+      ...report.entries.map(e => [e.day, e.originalDayConfirmed ? "" : orchidStemTime(e.sentAt),
+        e.senderName, e.senderId, e.customerName, e.stems, e.text, e.msgId, e.quotedPhotoMsgId ?? "",
+        e.quoteSentAt ? new Date(e.quoteSentAt) : "", e.originalDayConfirmed ? "Chủ shop xác nhận ngày ảnh gốc" : ""]),
     ] },
     { name: "Theo ngày", widths: [20, 25, 24, 16, 16], rows: [
       ["Ngày", "Người gửi", "UID người gửi", "Số lượt", "Tổng cành tính"],
