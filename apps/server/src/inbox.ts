@@ -938,14 +938,21 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
 
   const kindOf = (channelId: string): string => channelHandlers.get(channelId)?.channel.kind ?? "zalo_personal";
 
+  async function canToggleOrchidAfterHours(req: FastifyRequest): Promise<boolean> {
+    if (hasRole(req.authCtx.role, "operator") || req.authCtx.role === "moderator") return true;
+    if (req.authCtx.role !== "member") return false;
+    const channelIds = await allowedInboxChannelIds(db, req.authCtx);
+    return channelIds.some((id) => ORCHID_SALES_CHANNEL_IDS.has(id));
+  }
+
   // Một nút trực ngoài giờ cho ba kênh kinh doanh. Không đổi pairing hoặc ai_mode từng chat.
   app.get("/v1/inbox/orchid-after-hours", async (req, reply) => {
-    if (!hasRole(req.authCtx.role, "operator") && req.authCtx.role !== "moderator")
+    if (!(await canToggleOrchidAfterHours(req)))
       return reply.code(403).send({ error: "Cần quyền trực Inbox" });
     return getOrchidAfterHours(db, req.authCtx);
   });
   app.put("/v1/inbox/orchid-after-hours", async (req, reply) => {
-    if (!hasRole(req.authCtx.role, "operator") && req.authCtx.role !== "moderator")
+    if (!(await canToggleOrchidAfterHours(req)))
       return reply.code(403).send({ error: "Cần quyền trực Inbox" });
     const parsed = z.object({ active: z.boolean() }).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: "Trạng thái trực ngoài giờ không hợp lệ" });

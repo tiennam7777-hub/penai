@@ -75,4 +75,11 @@ describe("moderator capability boundary", () => {
       expect(moderatorAllowed("POST", `${base}/not-an-inbox-channel/quick-replies`)).toBe(false);
     }
   });
+
+  it("thành viên được gọi API bật tắt trợ lý ngoài giờ, không được gọi API quản trị Inbox", () => {
+    expect(memberAllowed("GET", "/v1/inbox/orchid-after-hours")).toBe(true);
+    expect(memberAllowed("PUT", "/v1/inbox/orchid-after-hours")).toBe(true);
+    expect(memberAllowed("POST", "/v1/inbox/orchid-after-hours")).toBe(false);
+    expect(memberAllowed("PUT", "/v1/inbox/orchid-after-hours/other")).toBe(false);
+  });
 });

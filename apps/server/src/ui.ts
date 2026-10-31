@@ -4347,7 +4347,7 @@ export const INDEX_HTML = `<!doctype html>
       $("#ibxFriend").disabled = !c.connected;
       $("#ibxDelegate").style.display = ["cdf2a276-fa3d-4fe3-a46b-3ce1162a7678", "657116ed-7570-4f2e-8550-a3d323618724", "6bc2dc02-3d10-4737-931d-a37532bcabb2"].indexOf(S.ch) >= 0 ? "" : "none";
       var afterBtn = $("#ibxAfterHours");
-      afterBtn.style.display = S.canManage && S.channels.some(function (x) { return ["cdf2a276-fa3d-4fe3-a46b-3ce1162a7678", "657116ed-7570-4f2e-8550-a3d323618724", "6bc2dc02-3d10-4737-931d-a37532bcabb2"].indexOf(x.id) >= 0; }) ? "" : "none";
+      afterBtn.style.display = S.channels.some(function (x) { return ["cdf2a276-fa3d-4fe3-a46b-3ce1162a7678", "657116ed-7570-4f2e-8550-a3d323618724", "6bc2dc02-3d10-4737-931d-a37532bcabb2"].indexOf(x.id) >= 0; }) ? "" : "none";
       afterBtn.textContent = S.afterHours && S.afterHours.active ? "🌙 Tắt trợ lý ngoài giờ" : "🌙 Bật trợ lý ngoài giờ";
       afterBtn.className = S.afterHours && S.afterHours.active ? "sm" : "ghost sm";
     }
@@ -5294,7 +5294,7 @@ export const INDEX_HTML = `<!doctype html>
       sel.value = S.ch;
       sel.addEventListener("change", function () { try { localStorage.setItem("penai_ibx_ch", S.ch); } catch (e) {} });
       renderStatus(); loadTags(); loadQuickReplies(); loadThreads(); connectEs();
-      if (S.canManage) api("/v1/inbox/orchid-after-hours").then(function (j) { S.afterHours = j; renderStatus(); }).catch(function () {});
+      if ($("#ibxAfterHours").style.display !== "none") api("/v1/inbox/orchid-after-hours").then(function (j) { S.afterHours = j; renderStatus(); }).catch(function () {});
     }).catch(function (e) { wrap.innerHTML = '<div class="card err">' + esc(e.message) + "</div>"; });
   };
 

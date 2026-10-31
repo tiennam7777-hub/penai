@@ -61,7 +61,7 @@ Tắt AI **cho một người/nhóm** thay vì cả kênh: Inbox → mở hội 
 
 ### Trợ lý ngoài giờ cho Hot 1/4/6
 
-Người trực Inbox có thể bấm **🌙 Bật trợ lý ngoài giờ** lúc ra về và **🌙 Tắt trợ lý ngoài giờ** khi vào ca. Nút áp dụng chung cho ba kênh kinh doanh Hot 1/4/6, không cần đặt giờ cố định. Khi bật, mọi khách nhắn DM mới, kể cả khách chưa duyệt, đều có thể vào Agent kinh doanh. Nút chỉ tạm bỏ qua cổng pairing trong ca ngoài giờ; không duyệt khách vĩnh viễn. Nhóm Zalo không được mở thêm.
+Người trực Inbox, gồm Người kiểm duyệt và Thành viên được phân công ít nhất một kênh Hot 1/4/6, có thể bấm **🌙 Bật trợ lý ngoài giờ** lúc ra về và **🌙 Tắt trợ lý ngoài giờ** khi vào ca. Nút áp dụng chung cho ba kênh kinh doanh Hot 1/4/6, không cần đặt giờ cố định. Khi bật, mọi khách nhắn DM mới, kể cả khách chưa duyệt, đều có thể vào Agent kinh doanh. Nút chỉ tạm bỏ qua cổng pairing trong ca ngoài giờ; không duyệt khách vĩnh viễn. Nhóm Zalo không được mở thêm.
 
 AI chỉ xử lý tin khách gửi sau khi bật. Lần đầu mỗi khách nhắn trong lượt bật, PenAI gửi một lời giới thiệu ngoài giờ kèm số 0938699916, rồi Agent tiếp tục tư vấn đặt hoa. Tắt rồi bật lại bắt đầu một lượt mới. Hội thoại đã chọn **Tắt AI** riêng vẫn tắt; tạm dừng do nhân viên vừa trả lời được bỏ qua trong lúc trực ngoài giờ. Khi tắt nút, kênh trở về công tắc **Agent tự trả lời**, trạng thái từng chat và cổng duyệt trước đó. Nút không gửi tin hàng loạt và không thay đổi trạng thái duyệt khách.
 
