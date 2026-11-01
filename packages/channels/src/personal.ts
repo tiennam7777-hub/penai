@@ -11,7 +11,7 @@ import type {
 } from "./zalo-personal.js";
 
 /** Loại kênh "tài khoản cá nhân" có Inbox trực chat + chế độ an toàn + đăng nhập bằng mã QR. */
-export const PERSONAL_CHANNEL_KINDS = ["zalo_personal", "whatsapp_personal"] as const;
+export const PERSONAL_CHANNEL_KINDS = ["zalo_personal", "whatsapp_personal", "facebook_page"] as const;
 export type PersonalChannelKind = (typeof PERSONAL_CHANNEL_KINDS)[number];
 
 export function isPersonalChannelKind(kind: string): kind is PersonalChannelKind {
@@ -22,6 +22,7 @@ export function isPersonalChannelKind(kind: string): kind is PersonalChannelKind
 export const PERSONAL_PLATFORM_LABEL: Record<PersonalChannelKind, string> = {
   zalo_personal: "Zalo",
   whatsapp_personal: "WhatsApp",
+  facebook_page: "Facebook Messenger",
 };
 
 export function personalPlatformLabel(kind: string): string {

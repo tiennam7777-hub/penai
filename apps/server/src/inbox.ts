@@ -526,10 +526,12 @@ export function forgetInboxChannel(channelId: string): void {
 
 /** Quyền Inbox theo từng người; quyền MCP được gán riêng. */
 export async function allowedInboxChannelIds(db: Db, ctx: WorkspaceContext, scope: "inbox" | "mcp" = "inbox"): Promise<string[]> {
-  if (ctx.role === "ws_admin" || (scope === "mcp" && hasRole(ctx.role, "operator"))) {
-    return (await listChannels(db, ctx)).filter((c) => isPersonalChannelKind(c.kind)).map((c) => c.id);
+  if (ctx.role === "ws_admin" || (scope === "inbox" && (ctx.role === "moderator" || ctx.role === "operator")) ||
+      (scope === "mcp" && hasRole(ctx.role, "operator"))) {
+    return (await listChannels(db, ctx)).filter((c) => isPersonalChannelKind(c.kind) &&
+      (scope === "inbox" || c.kind !== "facebook_page")).map((c) => c.id);
   }
-  if (scope === "inbox" && (ctx.role === "member" || ctx.role === "moderator" || ctx.role === "operator"))
+  if (scope === "inbox" && ctx.role === "member")
     return listUserInboxAccessIds(db, ctx, ctx.userId);
   if (scope === "mcp" && (ctx.role === "member" || ctx.role === "moderator")) return listUserInboxChannelIds(db, ctx, ctx.userId);
   return [];

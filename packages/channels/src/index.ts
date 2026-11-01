@@ -7,6 +7,7 @@ export * from "./telegram.js";
 export * from "./discord.js";
 export * from "./slack.js";
 export * from "./whatsapp.js";
+export * from "./facebook-page.js";
 export * from "./zalo.js";
 export * from "./zalo-personal.js";
 export * from "./whatsapp-personal.js";

@@ -956,7 +956,7 @@ export async function setUserInboxAccess(db: Db, ctx: WorkspaceContext, userId: 
   return withWorkspace(db, ctx, async (tx) => {
     const ids = [...new Set(channelIds.filter((x) => /^[0-9a-f-]{36}$/i.test(x)))];
     const valid = ids.length
-      ? ((await tx.execute(sql`SELECT id FROM channels WHERE kind IN ('zalo_personal', 'whatsapp_personal')
+      ? ((await tx.execute(sql`SELECT id FROM channels WHERE kind IN ('zalo_personal', 'whatsapp_personal', 'facebook_page')
           AND id IN (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)})`)).rows as Raw[]).map((r) => String(r.id))
       : [];
     await tx.execute(sql`DELETE FROM inbox_user_access WHERE user_id = ${userId}`);

@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 import { decryptSecret, encryptSecret, logger } from "@penai/shared";
@@ -47,6 +47,7 @@ import {
   type EnabledChannel,
   type InboxMessageRow,
   recordTraceSafe,
+  createPublishedFile,
 } from "@penai/db";
 import { Scheduler, gatedProvider, runAgent } from "@penai/core";
 import { CodexProvider } from "@penai/providers";
@@ -68,6 +69,7 @@ import {
   trustedZaloMediaUrl,
 } from "@penai/channels";
 import { forgetInboxChannel, inboxHooks } from "./inbox.js";
+import { contentTypeOf } from "./agent-runtime.js";
 import { ORCHID_SALES_AGENT_ID, ORCHID_SALES_CHANNEL_IDS } from "./orchid-staff-delegation.js";
 import { isPersonalChannel, isPersonalChannelKind } from "@penai/channels";
 import { classifyOrchidSalesScope } from "./orchid-sales-scope.js";
@@ -1930,6 +1932,24 @@ function buildChannel(
         return undefined;
       },
       onError: (e) => logger.error(`Channel "${ch.name}" lỗi: ${e.message}`),
+      ...(ch.kind === "facebook_page" ? { publishMediaUrl: async (absPath: string) => {
+        const publicBase = (process.env.PENAI_PUBLIC_URL ?? "").replace(/\/$/, "");
+        if (!publicBase.startsWith("https://")) throw new Error("Fanpage gửi ảnh cần PENAI_PUBLIC_URL HTTPS");
+        const target = resolve(absPath);
+        const root = resolve(rt.config.dataDir);
+        if (!target.startsWith(root + (process.platform === "win32" ? "\\" : "/")))
+          throw new Error("Ảnh Fanpage phải nằm trong thư mục dữ liệu PenAI");
+        const info = await stat(target);
+        if (!info.isFile() || info.size === 0 || info.size > 10 * 1024 * 1024 || !contentTypeOf(target).startsWith("image/"))
+          throw new Error("Fanpage chỉ gửi ảnh hợp lệ tối đa 10 MB");
+        const token = randomBytes(32).toString("base64url");
+        await createPublishedFile(rt.db.db, systemContext(ch.workspaceId), {
+          tokenHash: createHash("sha256").update(token).digest("hex"), absPath: target,
+          fileName: absPath.split(/[\\/]/).pop() || "anh.jpg", contentType: contentTypeOf(absPath),
+          createdBy: `facebook_page:${ch.id}`, expiresAt: new Date(Date.now() + 15 * 60_000),
+        });
+        return `${publicBase}/f/${token}`;
+      } } : {}),
       onSecretChanged: async (secret) => {
         await updateChannel(rt.db.db, systemContext(ch.workspaceId), ch.id, {
           tokenEncrypted: encryptSecret(secret),

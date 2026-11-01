@@ -190,6 +190,7 @@ import {
   listAudit,
 } from "@penai/db";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { Readable } from "node:stream";
 import {
   describeSchedule,
   formatInZone,
@@ -206,6 +207,8 @@ import {
   isChannelKindSupported,
   supportedChannelKinds,
   parseWhatsappWebhook,
+  FacebookPageChannel,
+  parseFacebookPageCredentials,
   parseZaloWebhook,
   parseFeishuWebhook,
   isPersonalChannel,
@@ -834,6 +837,50 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   });
 
   // ===== WhatsApp Cloud API webhook =====
+  // Messenger Page: Meta ký HMAC trên byte gốc, không dùng JSON.stringify(req.body).
+  const facebookRawBodies = new WeakMap<FastifyRequest, Buffer>();
+  const facebookChannels = () => [...channelHandlers.values()].map((entry) => entry.channel)
+    .filter((channel): channel is FacebookPageChannel => channel instanceof FacebookPageChannel && channel.isRunning());
+  app.get("/webhooks/facebook", async (req, reply) => {
+    const query = req.query as Record<string, string | undefined>;
+    if (query["hub.mode"] !== "subscribe" || !query["hub.verify_token"] ||
+        !facebookChannels().some((channel) => channel.verifyToken(query["hub.verify_token"]!))) {
+      return reply.code(403).send("forbidden");
+    }
+    return reply.type("text/plain").send(query["hub.challenge"] ?? "");
+  });
+  app.post("/webhooks/facebook", {
+    bodyLimit: 1024 * 1024,
+    preParsing: async (req, _reply, payload) => {
+      const chunks: Buffer[] = [];
+      let size = 0;
+      for await (const chunk of payload) {
+        const part = Buffer.from(chunk);
+        size += part.length;
+        if (size > 1024 * 1024) throw new Error("Meta webhook vượt giới hạn 1 MB");
+        chunks.push(part);
+      }
+      const raw = Buffer.concat(chunks);
+      facebookRawBodies.set(req, raw);
+      const replay = Readable.from(raw) as Readable & { receivedEncodedLength: number };
+      replay.receivedEncodedLength = raw.length;
+      return replay;
+    },
+  }, async (req, reply) => {
+    const signature = req.headers["x-hub-signature-256"];
+    const raw = facebookRawBodies.get(req) ?? Buffer.alloc(0);
+    const validChannels = facebookChannels().filter((channel) => channel.verifySignature(raw,
+      typeof signature === "string" ? signature : undefined));
+    if (!validChannels.length) {
+      return reply.code(403).send({ error: "Chữ ký Meta không hợp lệ" });
+    }
+    for (const channel of validChannels) {
+      void channel.acceptWebhook(req.body).catch((error: unknown) =>
+        app.log.error({ err: error, channelId: channel.id }, "Messenger webhook xử lý lỗi"));
+    }
+    return reply.send({ ok: true });
+  });
+
   // GET: xác minh (hub.challenge). POST: nhận tin → route qua onInbound → reply.
   app.get("/webhooks/whatsapp/:channelId", async (req, reply) => {
     const q = req.query as Record<string, string>;
@@ -1915,6 +1962,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       supportedKinds: supportedChannelKinds(),
     };
   });
+  app.get("/v1/channels/:id/facebook/verify", async (req, reply) => {
+    if (!requireRole(req, reply, "ws_admin")) return;
+    const { id } = req.params as { id: string };
+    const row = await getChannelById(db, req.authCtx, id);
+    if (!row || row.kind !== "facebook_page") return reply.code(404).send({ error: "Không có kênh Fanpage này" });
+    const channel = channelHandlers.get(id)?.channel;
+    if (!(channel instanceof FacebookPageChannel)) return reply.code(409).send({ error: "Kênh Fanpage chưa chạy" });
+    return { page: await channel.verifyPage() };
+  });
 
   // Chỉ tên/ID kênh Zalo để lọc danh sách chờ; không lộ cấu hình danh sách kênh.
   app.get("/v1/channels/pending-sources", async (req, reply) => {
@@ -1964,6 +2020,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (!isPersonalChannelKind(body.kind) && !body.token.trim()) {
       return reply.code(400).send({ error: "Channel này cần token / credential" });
     }
+    if (body.kind === "facebook_page") {
+      if (!/^\d{1,30}$/.test(String(body.config?.["pageId"] ?? "")))
+        return reply.code(400).send({ error: "Fanpage cần Page ID dạng số" });
+      try { parseFacebookPageCredentials(body.token); }
+      catch (error) { return reply.code(400).send({ error: (error as Error).message }); }
+      // Nối Page chỉ để quan sát trước; quản trị bật AI sau khi thử tin Inbox.
+      body.config = { ...body.config, agent_reply: false };
+      body.requirePairing = false;
+    }
     if (body.kind === "msteams" && !String(body.config?.["appId"] ?? "").trim()) {
       return reply.code(400).send({ error: "Kênh Teams cần Microsoft App ID (config.appId)" });
     }
@@ -1996,6 +2061,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const b = parsed.data;
     const existing = await getChannelById(db, req.authCtx, id);
     if (!existing) return reply.code(404).send({ error: "Channel không tồn tại" });
+    if (existing.kind === "facebook_page") {
+      if (!/^\d{1,30}$/.test(String(b.config?.["pageId"] ??
+          (existing.config as Record<string, unknown> | null)?.["pageId"] ?? "")))
+        return reply.code(400).send({ error: "Fanpage cần Page ID dạng số" });
+      if (b.token) {
+        try { parseFacebookPageCredentials(b.token); }
+        catch (error) { return reply.code(400).send({ error: (error as Error).message }); }
+      }
+      if (b.requirePairing === true) return reply.code(400).send({ error: "Fanpage không dùng pairing" });
+    }
     if (!validAiReplyDelay(b.config) ||
       (b.config?.["ai_reply_delay_seconds"] !== undefined && existing.kind !== "zalo_personal")) {
       return reply.code(400).send({ error: "Thời gian chờ trả lời AI chỉ dành cho Zalo cá nhân: 0, 5, 10, 15, 20, 25, 30, 35 hoặc 40 giây" });

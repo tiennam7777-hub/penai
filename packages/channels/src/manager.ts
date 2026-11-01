@@ -4,6 +4,7 @@ import { TelegramChannel } from "./telegram.js";
 import { DiscordChannel } from "./discord.js";
 import { SlackChannel } from "./slack.js";
 import { WhatsappChannel } from "./whatsapp.js";
+import { FacebookPageChannel } from "./facebook-page.js";
 import { ZaloOaChannel } from "./zalo.js";
 import { ZaloPersonalChannel } from "./zalo-personal.js";
 import { WhatsappPersonalChannel } from "./whatsapp-personal.js";
@@ -18,6 +19,7 @@ const FACTORIES: Record<string, ChannelFactory> = {
   discord: (d) => new DiscordChannel(d),
   slack: (d) => new SlackChannel(d),
   whatsapp: (d) => new WhatsappChannel(d),
+  facebook_page: (d) => new FacebookPageChannel(d),
   zalo: (d) => new ZaloOaChannel(d),
   zalo_personal: (d) => new ZaloPersonalChannel(d),
   whatsapp_personal: (d) => new WhatsappPersonalChannel(d),

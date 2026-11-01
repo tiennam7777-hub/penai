@@ -1766,12 +1766,13 @@ export const INDEX_HTML = `<!doctype html>
     zalo: "Access token Zalo Official Account.",
     zalo_personal: "Zalo cá nhân qua zca-js (unofficial). Không cần token; tạo kênh xong bấm Kết nối QR. Mọi tin nhắn được lưu vào Inbox để nhân viên cùng xem/trả lời (tắt được trong Inbox → Cài đặt). AI chỉ tự trả lời trong thread được chỉ định demo (hoặc mọi tin riêng nếu tắt pairing).",
     whatsapp_personal: "WhatsApp cá nhân (kết nối không chính thức, kiểu thiết bị đã liên kết). Không cần token; tạo kênh xong bấm Kết nối QR. Điện thoại vẫn dùng WhatsApp bình thường. Mọi tin nhắn được lưu vào Inbox để nhân viên cùng xem/trả lời. AI chỉ tự trả lời trong hội thoại được chỉ định (hoặc mọi tin riêng nếu tắt pairing). Nên dùng số dành riêng — WhatsApp có thể khóa số gửi dồn cho người lạ.",
+    facebook_page: "Messenger Fanpage chính thức. Điền Page ID, Page access token, App Secret và Verify token. Kênh mới chỉ lưu tin vào Inbox; AI mặc định tắt đến khi quản trị thử và bật trong phần Sửa. Meta chỉ cho trả lời theo chính sách cửa sổ nhắn tin.",
     feishu: "App credentials Feishu/Lark (app_id:app_secret).",
     msteams: "Bot Microsoft Teams qua Azure Bot. Token = <b>client secret</b> của App Registration; điền thêm App ID + Tenant ID bên dưới. Azure Bot → Configuration → Messaging endpoint phải trỏ: <code>" + location.origin + "/webhooks/teams</code>."
   };
 
   // Tên hiển thị của loại kênh: mã "zalo" là Zalo Official Account — ghi rõ để khỏi nhầm với zalo_personal
-  function channelKindLabel(k) { return k === "zalo" ? "Zalo OA" : k; }
+  function channelKindLabel(k) { return k === "zalo" ? "Zalo OA" : k === "facebook_page" ? "Facebook Fanpage" : k; }
   // Kênh "tài khoản cá nhân": đăng nhập bằng mã QR, có Inbox trực chat và chế độ an toàn
   var PERSONAL_KINDS = { zalo_personal: "Zalo", whatsapp_personal: "WhatsApp" };
   function isPersonalKind(k) { return !!PERSONAL_KINDS[k]; }
@@ -1803,6 +1804,9 @@ export const INDEX_HTML = `<!doctype html>
       '<label style="margin-top:10px">Agent trả lời trên kênh này *</label><div class="row">' + agentSelectHtml("cAgent") + "</div>" +
       '<div id="cTokenWrap"><label style="margin-top:10px">Token / credential' + (isEdit ? ' <span class="muted">(bỏ trống = giữ token cũ)</span>' : " *") + "</label>" +
       '<input id="cToken" placeholder="bot token..." style="width:100%"></div>' +
+      '<div id="cFacebookWrap" style="display:none"><label>Page ID *</label><input id="cPageId" inputmode="numeric" placeholder="ID số của Fanpage" style="width:100%" value="' + (isEdit ? esc((existing.config || {}).pageId || "") : "") + '">' +
+      '<label>App Secret *</label><input id="cFbAppSecret" type="password" autocomplete="off" placeholder="App Secret" style="width:100%">' +
+      '<label>Verify token *</label><input id="cFbVerifyToken" type="password" autocomplete="off" placeholder="Chuỗi ngẫu nhiên tự đặt ở Meta" style="width:100%"></div>' +
       '<div id="cTeamsWrap" style="display:none"><div class="row" style="margin-top:8px">' +
       '<div style="flex:1"><label>Microsoft App ID *</label><input id="cAppId" placeholder="00000000-0000-0000-0000-000000000000" style="width:100%" value="' + (isEdit ? esc((existing.config || {}).appId || "") : "") + '"></div>' +
       '<div style="flex:1"><label>Tenant ID <span class="muted">(bot Single Tenant; Multi Tenant để trống)</span></label><input id="cTenant" placeholder="35ee052b-..." style="width:100%" value="' + (isEdit ? esc((existing.config || {}).tenantId || "") : "") + '"></div></div></div>' +
@@ -1824,8 +1828,13 @@ export const INDEX_HTML = `<!doctype html>
       $("#cHint", dlg).innerHTML = CHANNEL_HINTS[kind] || "";
       $("#cTokenWrap", dlg).style.display = isPersonalKind(kind) ? "none" : "block";
       $("#cTeamsWrap", dlg).style.display = kind === "msteams" ? "block" : "none";
+      $("#cFacebookWrap", dlg).style.display = kind === "facebook_page" ? "block" : "none";
+      $("#cToken", dlg).placeholder = kind === "facebook_page" ? "Page access token" : "bot token...";
+      $("#cToken", dlg).type = kind === "facebook_page" ? "password" : "text";
       $("#cReplyDelayWrap", dlg).style.display = kind === "zalo_personal" ? "block" : "none";
       $("#cPair", dlg).disabled = false;
+      if (kind === "facebook_page") { $("#cPair", dlg).checked = false; $("#cPair", dlg).disabled = true; }
+      if (!isEdit && kind === "facebook_page") $("#cAgentReply", dlg).checked = false;
     }
     $("#cKind", dlg).onchange = showHint; showHint();
     $("#cCancel", dlg).onclick = function () { dlg.close(); dlg.remove(); };
@@ -1839,6 +1848,12 @@ export const INDEX_HTML = `<!doctype html>
       if (!agentKey) errs.push("chọn Agent (chưa có thì tạo ở trang Agents trước)");
       if (!isEdit && !token && !isPersonalKind(kind)) errs.push("nhập Token");
       if (kind === "msteams" && !$("#cAppId", dlg).value.trim()) errs.push("nhập Microsoft App ID");
+      if (kind === "facebook_page") {
+        if (!/^\d{1,30}$/.test($("#cPageId", dlg).value.trim())) errs.push("nhập Page ID dạng số");
+        if (!isEdit || token || $("#cFbAppSecret", dlg).value || $("#cFbVerifyToken", dlg).value) {
+          if (!token || !$("#cFbAppSecret", dlg).value || !$("#cFbVerifyToken", dlg).value) errs.push("nhập đủ Page access token, App Secret và Verify token");
+        }
+      }
       if (errs.length) { $("#cMsg", dlg).innerHTML = '<span class="err">' + esc(errs.join(" · ")) + "</span>"; return; }
       $("#cMsg", dlg).textContent = "Đang lưu...";
       var body;
@@ -1850,6 +1865,10 @@ export const INDEX_HTML = `<!doctype html>
       }
       if (kind === "msteams") {
         body.config = { appId: $("#cAppId", dlg).value.trim(), tenantId: $("#cTenant", dlg).value.trim() };
+      }
+      if (kind === "facebook_page") {
+        body.config = Object.assign(body.config || {}, { pageId: $("#cPageId", dlg).value.trim() });
+        if (token) body.token = JSON.stringify({ pageAccessToken: token, appSecret: $("#cFbAppSecret", dlg).value, verifyToken: $("#cFbVerifyToken", dlg).value });
       }
       body.config = Object.assign(body.config || {}, { agent_reply: $("#cAgentReply", dlg).checked });
       if (kind === "zalo_personal") body.config.ai_reply_delay_seconds = Number($("#cReplyDelay", dlg).value);
@@ -2188,6 +2207,14 @@ export const INDEX_HTML = `<!doctype html>
           if (isPersonalKind(r.kind)) {
             connect = el("button", { "class": "ghost sm" }, "Kết nối QR");
             connect.onclick = function () { openZaloPersonal(r, function () { load(); loadZaloPending(); }); };
+          }
+          if (r.kind === "facebook_page") {
+            var webhook = el("button", { "class": "ghost sm" }, "Địa chỉ webhook");
+            webhook.onclick = function () { window.prompt("Callback URL cho Meta (chọn Page object và trường messages):", location.origin + "/webhooks/facebook"); };
+            td.appendChild(webhook); td.appendChild(document.createTextNode(" "));
+            var verify = el("button", { "class": "ghost sm" }, "Kiểm tra Page token");
+            verify.onclick = function () { api("/v1/channels/" + r.id + "/facebook/verify").then(function (j) { toast("Đã xác minh: " + j.page.name + " (" + j.page.id + ")"); }).catch(function (e) { toast(e.message, 1); }); };
+            td.appendChild(verify); td.appendChild(document.createTextNode(" "));
           }
           var tog = el("button", { "class": "ghost sm" }, r.enabled ? "Tạm dừng" : "Bật");
           tog.onclick = function () {
@@ -3372,7 +3399,7 @@ export const INDEX_HTML = `<!doctype html>
     ws_admin: "Toàn quyền: cấu hình, tạo người dùng, khóa API.",
     operator: "Vận hành: chat mọi agent, kênh, cron, kho tri thức. Không tạo người dùng.",
     viewer: "Chỉ xem dữ liệu, không chat.",
-    moderator: "Chat với agent được gán; dùng Inbox theo các kênh quản trị cấp; duyệt yêu cầu, quản lý Contacts và Thư viện file. Kênh MCP gán riêng. Không xem cấu hình Channels.",
+    moderator: "Chat với agent được gán; dùng mọi kênh Inbox; duyệt yêu cầu, quản lý Contacts và Thư viện file. Kênh MCP gán riêng. Không xem cấu hình Channels.",
     member: "Chỉ thấy trang Chat và chỉ chat với các agent được gán bên dưới."
   };
   PAGES.users = function () {
@@ -3381,8 +3408,8 @@ export const INDEX_HTML = `<!doctype html>
     var addB = el("button", null, "＋ Thêm người dùng"); top.appendChild(addB);
     m.appendChild(top);
     var c = card(m);
-    var DATA = { users: [], agents: [], zaloChannels: [] };
-    function zaloName(id) { var z = DATA.zaloChannels || []; for (var i = 0; i < z.length; i++) if (z[i].id === id) return z[i].name; return id.slice(0, 6); }
+    var DATA = { users: [], agents: [], zaloChannels: [], inboxChannels: [] };
+    function zaloName(id) { var z = DATA.inboxChannels || []; for (var i = 0; i < z.length; i++) if (z[i].id === id) return z[i].name; return id.slice(0, 6); }
     function agentName(id) { for (var i = 0; i < DATA.agents.length; i++) if (DATA.agents[i].id === id) return DATA.agents[i].name; return id.slice(0, 6); }
     function load() {
       api("/v1/users").then(function (j) {
@@ -3391,14 +3418,14 @@ export const INDEX_HTML = `<!doctype html>
         c.appendChild(table(["Tên", "Email", "Vai trò", "Agent và kênh được cấp", "Đăng nhập gần nhất", "Trạng thái", ""], j.users, function (u) {
           var tr = el("tr");
           var agentsTxt = (u.role === "member" || u.role === "moderator") ? (u.agentIds.length ? u.agentIds.map(function (id) { return '<span class="pill">' + esc(agentName(id)) + "</span>"; }).join(" ") : '<span class="err">chưa gán</span>') : '<span class="muted">tất cả</span>';
-          if (u.role === "ws_admin") agentsTxt += '<div style="margin-top:3px"><span class="pill">📥 Mọi kênh Inbox</span></div>';
-          else if (u.role === "member" || u.role === "moderator" || u.role === "operator") agentsTxt += '<div style="margin-top:3px">' + ((u.inboxChannelIds || []).length ? u.inboxChannelIds.map(function (id) { return '<span class="pill">📥 ' + esc(zaloName(id)) + "</span>"; }).join(" ") : '<span class="muted">Chưa được xem Inbox</span>') + "</div>";
+          if (u.role === "ws_admin" || u.role === "moderator" || u.role === "operator") agentsTxt += '<div style="margin-top:3px"><span class="pill">📥 Mọi kênh Inbox</span></div>';
+          else if (u.role === "member") agentsTxt += '<div style="margin-top:3px">' + ((u.inboxChannelIds || []).length ? u.inboxChannelIds.map(function (id) { return '<span class="pill">📥 ' + esc(zaloName(id)) + "</span>"; }).join(" ") : '<span class="muted">Chưa được xem Inbox</span>') + "</div>";
           if ((u.role === "member" || u.role === "moderator") && (u.zaloChannelIds || []).length) agentsTxt += '<div style="margin-top:3px">' + u.zaloChannelIds.map(function (id) { return '<span class="pill">🔌 ' + esc(zaloName(id)) + "</span>"; }).join(" ") + "</div>";
           var me = state.me && state.me.user && state.me.user.id === u.id;
           tr.innerHTML = "<td>" + esc(u.name) + (me ? ' <span class="pill">bạn</span>' : "") + "</td><td>" + esc(u.email) + "</td><td><span class='role-pill'>" + esc(ROLE_LABELS[u.role] || u.role) + "</span></td><td>" + agentsTxt + "</td><td class='muted'>" + esc(u.lastLoginAt ? String(u.lastLoginAt).slice(0, 16).replace("T", " ") : "chưa") + "</td><td>" + (u.isActive ? '<span class="ok">hoạt động</span>' : '<span class="err">đã khóa</span>') + (u.mustChangePassword ? ' <span class="pill">phải đổi MK</span>' : "") + "</td>";
           var td = el("td", { style: "white-space:nowrap" });
           var ed = el("button", { "class": "ghost sm" }, "Sửa"); ed.onclick = function () { openForm(u); }; td.appendChild(ed);
-          if (u.role === "member" || u.role === "moderator" || u.role === "operator") {
+          if (u.role === "member") {
             var ib = el("button", { "class": "ghost sm", style: "margin-left:4px" }, "Quyền Inbox"); ib.onclick = function () { openInboxAccess(u); }; td.appendChild(ib);
           }
           var pw = el("button", { "class": "ghost sm", style: "margin-left:4px" }, "Đặt lại MK"); pw.onclick = function () { openReset(u); }; td.appendChild(pw);
@@ -3421,11 +3448,11 @@ export const INDEX_HTML = `<!doctype html>
         '<div id="inboxAccessMsg" style="margin-top:8px"></div>';
       document.body.appendChild(dlg);
       var box = $("#inboxAccessChecks", dlg);
-      if (!(DATA.zaloChannels || []).length) box.innerHTML = '<span class="muted">Chưa có kênh Inbox nào.</span>';
-      (DATA.zaloChannels || []).forEach(function (z) {
+      if (!(DATA.inboxChannels || []).length) box.innerHTML = '<span class="muted">Chưa có kênh Inbox nào.</span>';
+      (DATA.inboxChannels || []).forEach(function (z) {
         var lb = el("label"); var cb = el("input", { type: "checkbox", value: z.id });
         cb.checked = (u.inboxChannelIds || []).indexOf(z.id) >= 0;
-        lb.appendChild(cb); lb.appendChild(document.createTextNode(z.name + (z.kind === "whatsapp_personal" ? " (WhatsApp)" : " (Zalo)"))); box.appendChild(lb);
+        lb.appendChild(cb); lb.appendChild(document.createTextNode(z.name + (z.kind === "whatsapp_personal" ? " (WhatsApp)" : z.kind === "facebook_page" ? " (Messenger)" : " (Zalo)"))); box.appendChild(lb);
       });
       $("#inboxAccessCancel", dlg).onclick = function () { dlg.close(); dlg.remove(); };
       $("#inboxAccessSave", dlg).onclick = function () {
@@ -3528,7 +3555,7 @@ export const INDEX_HTML = `<!doctype html>
   };
 
   // ===== Contacts: hồ sơ, nhãn và chỉ dẫn cho AI theo từng người (0029) =====
-  var CH_LABELS = { telegram: "Telegram", zalo_personal: "Zalo cá nhân", whatsapp_personal: "WhatsApp cá nhân", zalo: "Zalo OA", zalo_oa: "Zalo OA", msteams: "Microsoft Teams", discord: "Discord", slack: "Slack", whatsapp: "WhatsApp", feishu: "Feishu/Lark", web: "Web" };
+  var CH_LABELS = { telegram: "Telegram", zalo_personal: "Zalo cá nhân", whatsapp_personal: "WhatsApp cá nhân", facebook_page: "Facebook Fanpage", zalo: "Zalo OA", zalo_oa: "Zalo OA", msteams: "Microsoft Teams", discord: "Discord", slack: "Slack", whatsapp: "WhatsApp", feishu: "Feishu/Lark", web: "Web" };
   var PAIR_LABELS = { da_duyet: ["Đã duyệt", "ok"], cho_duyet: ["Chờ duyệt", ""], chua_duyet: ["Chưa duyệt", "err"], khong_can: ["Không cần duyệt", ""], khong_ro: ["—", ""] };
   function chLabel(k) { return CH_LABELS[k] || k; }
   function fmtTime(s) { if (!s) return ""; var d = new Date(s); return isNaN(d.getTime()) ? "" : d.toLocaleString("vi-VN"); }
@@ -4308,14 +4335,14 @@ export const INDEX_HTML = `<!doctype html>
   }
   function ibxNl(s) { return esc(s).split(String.fromCharCode(10)).join("<br>"); }
   function ibxInitial(name) { var n = String(name || "?").trim(); return esc((n.split(" ").pop() || "?").charAt(0).toUpperCase() || "?"); }
-  var IBX_PLATFORM_ICON = { zalo_personal: "🟦 Zalo", whatsapp_personal: "🟩 WhatsApp" };
+  var IBX_PLATFORM_ICON = { zalo_personal: "🟦 Zalo", whatsapp_personal: "🟩 WhatsApp", facebook_page: "🔵 Messenger" };
   var IBX_SRC = { agent: "🤖 AI", web: "👤 Nhân viên", app: "📱 Điện thoại", mcp: "🔌 Ứng dụng AI", api: "🔌 API" };
   var IBX_RX = [["heart", "/-heart", "❤️"], ["like", "/-strong", "👍"], ["haha", ":>", "😆"], ["wow", ":o", "😮"], ["cry", ":-((", "😢"], ["angry", ":-h", "😡"]];
   function ibxRxEmoji(icon) { for (var i = 0; i < IBX_RX.length; i++) if (IBX_RX[i][1] === icon) return IBX_RX[i][2]; return icon && icon.charCodeAt(0) > 127 ? icon : "💬"; }
   var IBX_RX_SRC = { web: "nhân viên", auto: "tự thả", mcp: "ứng dụng AI", app: "điện thoại", zalo: "", peer: "" };
 
   PAGES.inbox = function () {
-    var m = page("Inbox", "Nhiều người cùng xem và trả lời khách trên Zalo cá nhân, WhatsApp cá nhân. Nhân viên trả lời thì AI tự tạm im trong hội thoại đó.");
+    var m = page("Inbox", "Nhiều người cùng xem và trả lời khách trên Zalo, WhatsApp và Messenger Fanpage. Nhân viên trả lời thì AI tự tạm im trong hội thoại đó.");
     var S = { channels: [], canManage: false, afterHours: null, ch: null, threads: [], total: 0, tags: [], tag: "", quick: [], quickMatches: [], quickToken: null, quickIndex: 0, hidden: false, cur: null, msgs: [], filter: "", kind: "", imgs: [], loadingAttach: false, file: null, reply: null, es: null, seq: 0, lastStaffSent: null,
       detailsOpen: false, detailsTab: "info", detailsCategory: "media", exploreRows: [], exploreNext: null, exploreSeq: 0, exploreQ: "", exploreSender: "", exploreDirection: "", exploreSenders: [], jumped: false,
       mutualGroups: [], mutualIncomplete: false, mutualLoading: false, mutualError: "", mutualSeq: 0 };
@@ -4341,7 +4368,10 @@ export const INDEX_HTML = `<!doctype html>
         (c.mcpReadMessages ? ' · <span class="pill" title="Ứng dụng AI bên ngoài (MCP) được đọc hội thoại của kênh này">🔓 AI ngoài đọc được tin</span>' : "") +
         (c.agentReply === false ? ' · <span class="pill" title="Channels → Sửa → Agent tự trả lời">🤖 AI đang tắt</span>' : "") +
         (c.autoReaction ? ' · <span class="pill" title="Tự thả cảm xúc khi khách nhắn">' + (c.autoReaction === "like" ? "👍" : "❤️") + " tự thả</span>" : "");
-      $("#ibxSync").style.display = S.canManage ? "" : "none";
+      $("#ibxSync").style.display = S.canManage && c.kind !== "facebook_page" ? "" : "none";
+      $("#ibxNew").style.display = c.kind === "facebook_page" ? "none" : "";
+      $("#ibxAttach").style.display = "";
+      $("#ibxFile").accept = c.kind === "facebook_page" ? "image/png,image/jpeg,image/gif,image/webp" : "image/png,image/jpeg,image/gif,image/webp,.pdf,.doc,.docx,.xls,.xlsx";
       $("#ibxSet").style.display = isAdmin() || isModerator() ? "" : "none";
       $("#ibxFriend").style.display = c.kind === "zalo_personal" ? "" : "none";
       $("#ibxFriend").disabled = !c.connected;
@@ -4984,6 +5014,7 @@ export const INDEX_HTML = `<!doctype html>
       if (S.loadingAttach) { toast("Đang nạp ảnh, vui lòng chờ", true); return; }
       var images = list.every(function (f) { return /^image[/](png|jpeg|gif|webp)$/.test(f.type); });
       var documentFile = list.length === 1 && /\.(pdf|docx?|xlsx?)$/i.test(list[0].name) && !images;
+      if (chInfo() && chInfo().kind === "facebook_page" && !images) { toast("Messenger Fanpage hiện chỉ gửi ảnh", true); return; }
       if (!images && !documentFile) { toast("Chọn tối đa 6 ảnh hoặc một file PDF, Word, Excel", true); return; }
       if (list.some(function (f) { return !f.size || f.size > 10 * 1024 * 1024; })) { toast("Mỗi ảnh/file phải từ 1 byte đến 10 MB", true); return; }
       if (images && S.imgs.length + list.length > 6) { toast("Chỉ gửi tối đa 6 ảnh mỗi lần", true); return; }

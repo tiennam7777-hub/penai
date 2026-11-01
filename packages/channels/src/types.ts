@@ -171,6 +171,8 @@ export interface ChannelDeps {
   stateDir?: string;
   /** Lưu file nhận được vào thư mục Inbox của kênh → trả đường dẫn tuyệt đối (để Inbox hiển thị lại). */
   saveInboxFile?: (buf: Buffer, ext: string) => Promise<string>;
+  /** Kênh cần URL HTTPS công khai tạm để Meta tải ảnh từ thư mục dữ liệu. */
+  publishMediaUrl?: (absPath: string) => Promise<string>;
 }
 
 /** Một lượt thả/gỡ cảm xúc vào tin nhắn. icon rỗng = gỡ. */

@@ -411,7 +411,10 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
         inboxChannelIds: inboxAccess.filter((m) => m.userId === u.id).map((m) => m.channelId),
       })),
       agents: agents.map((a) => ({ id: a.id, key: a.key, name: a.name })),
-      zaloChannels: channels.filter((c) => isPersonalChannelKind(c.kind)).map((c) => ({ id: c.id, name: c.name, kind: c.kind })),
+      zaloChannels: channels.filter((c) => c.kind === "zalo_personal" || c.kind === "whatsapp_personal")
+        .map((c) => ({ id: c.id, name: c.name, kind: c.kind })),
+      inboxChannels: channels.filter((c) => isPersonalChannelKind(c.kind))
+        .map((c) => ({ id: c.id, name: c.name, kind: c.kind })),
       roles: WORKSPACE_ROLES.map((r) => ({ id: r, label: ROLE_LABELS[r] })),
     };
   });
