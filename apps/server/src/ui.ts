@@ -2215,6 +2215,13 @@ export const INDEX_HTML = `<!doctype html>
             var verify = el("button", { "class": "ghost sm" }, "Kiểm tra Page token");
             verify.onclick = function () { api("/v1/channels/" + r.id + "/facebook/verify").then(function (j) { toast("Đã xác minh: " + j.page.name + " (" + j.page.id + ")"); }).catch(function (e) { toast(e.message, 1); }); };
             td.appendChild(verify); td.appendChild(document.createTextNode(" "));
+            var vtoken = el("button", { "class": "ghost sm" }, "Verify token");
+            vtoken.onclick = function () {
+              api("/v1/channels/" + r.id + "/facebook/verify-token").then(function (j) {
+                window.prompt("Verify token của ứng dụng Meta — chỉ dùng trong cấu hình webhook:", j.verifyToken);
+              }).catch(function (e) { toast(e.message, 1); });
+            };
+            td.appendChild(vtoken); td.appendChild(document.createTextNode(" "));
           }
           var tog = el("button", { "class": "ghost sm" }, r.enabled ? "Tạm dừng" : "Bật");
           tog.onclick = function () {

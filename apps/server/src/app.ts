@@ -1971,6 +1971,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (!(channel instanceof FacebookPageChannel)) return reply.code(409).send({ error: "Kênh Fanpage chưa chạy" });
     return { page: await channel.verifyPage() };
   });
+  app.get("/v1/channels/:id/facebook/verify-token", async (req, reply) => {
+    if (!requireRole(req, reply, "ws_admin")) return;
+    const { id } = req.params as { id: string };
+    const row = await getChannelById(db, req.authCtx, id);
+    if (!row || row.kind !== "facebook_page") return reply.code(404).send({ error: "Không có kênh Fanpage này" });
+    reply.header("Cache-Control", "no-store");
+    if (!row.tokenEncrypted) return reply.code(409).send({ error: "Fanpage chưa lưu credential" });
+    const credentials = parseFacebookPageCredentials(decryptSecret(row.tokenEncrypted));
+    return { verifyToken: credentials.verifyToken };
+  });
 
   // Chỉ tên/ID kênh Zalo để lọc danh sách chờ; không lộ cấu hình danh sách kênh.
   app.get("/v1/channels/pending-sources", async (req, reply) => {
