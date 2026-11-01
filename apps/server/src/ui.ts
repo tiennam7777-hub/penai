@@ -1849,7 +1849,7 @@ export const INDEX_HTML = `<!doctype html>
       if (!isEdit && !token && !isPersonalKind(kind)) errs.push("nhập Token");
       if (kind === "msteams" && !$("#cAppId", dlg).value.trim()) errs.push("nhập Microsoft App ID");
       if (kind === "facebook_page") {
-        if (!/^\d{1,30}$/.test($("#cPageId", dlg).value.trim())) errs.push("nhập Page ID dạng số");
+        if (!/^\\d{1,30}$/.test($("#cPageId", dlg).value.trim())) errs.push("nhập Page ID dạng số");
         if (!isEdit || token || $("#cFbAppSecret", dlg).value || $("#cFbVerifyToken", dlg).value) {
           if (!token || !$("#cFbAppSecret", dlg).value || !$("#cFbVerifyToken", dlg).value) errs.push("nhập đủ Page access token, App Secret và Verify token");
         }

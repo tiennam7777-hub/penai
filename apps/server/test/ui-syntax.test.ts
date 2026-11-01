@@ -36,6 +36,10 @@ describe("Dashboard HTML", () => {
     expect(INDEX_HTML).not.toContain('{ id: "teams"');
   });
 
+  it("Page ID trên biểu mẫu Fanpage chấp nhận chữ số", () => {
+    expect(INDEX_HTML).toContain('if (!/^\\d{1,30}$/.test($("#cPageId"');
+  });
+
   it("logo mặc định là SVG theo màu theme", () => {
     const svg = defaultLogoSvg(BrandingSchema.parse({ theme: "tim" }));
     expect(svg.startsWith("<svg")).toBe(true);
