@@ -1030,7 +1030,8 @@ export const INDEX_HTML = `<!doctype html>
         var sentTime = x.originalDayConfirmed ? "—" : new Date(x.sentAt).toLocaleTimeString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", hour12: false });
         var quoteTime = x.quoteSentAt ? new Date(x.quoteSentAt).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour12: false }) : "";
         var note = x.quotedPhotoMsgId ? 'Trích dẫn ảnh ' + esc(x.quotedPhotoMsgId) : x.originalDayConfirmed ? 'Ngày ảnh gốc do chủ shop xác nhận' : '';
-        var tr = el("tr"); tr.innerHTML = '<td>' + dayLabel(x.day) + '</td><td>' + esc(sentTime) + '</td><td>' + esc(x.senderName) + '</td><td>' + esc(x.customerName) + '</td><td class="stem-num">' + number(x.stems) + '</td><td>' + esc(x.text) + (note ? '<div class="muted">' + note + (quoteTime ? ' · Báo lại ' + esc(quoteTime) : '') + '</div>' : '') + '</td>'; return tr;
+        var history = (x.countHistory || []).map(function (h, i) { return (i + 1) + '. ' + number(h.stems) + ' cành · ' + new Date(h.sentAt).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) + ' · tin ' + h.msgId; }).join('; ');
+        var tr = el("tr"); tr.innerHTML = '<td>' + dayLabel(x.day) + '</td><td>' + esc(sentTime) + '</td><td>' + esc(x.senderName) + '</td><td>' + esc(x.customerName) + '</td><td class="stem-num">' + number(x.stems) + '</td><td>' + esc(x.text) + (note ? '<div class="muted">' + note + (quoteTime ? ' · Báo lại ' + esc(quoteTime) : '') + '</div>' : '') + (history ? '<div class="muted">Lịch sử: ' + esc(history) + '</div>' : '') + '</td>'; return tr;
       }); et.className = "stem-table"; detail.appendChild(et);
     }
     $("#stemDetailSender", c).onchange = renderDetail;

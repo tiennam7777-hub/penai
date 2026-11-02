@@ -64,12 +64,18 @@ export async function listOrchidStemMessages(db: Db, ctx: WorkspaceContext, chan
       FROM inbox_threads t JOIN channels c ON c.id = t.channel_id
       WHERE t.workspace_id = ${ctx.workspaceId} AND t.kind = 'group'
         AND c.kind = 'zalo_personal' AND t.name = (SELECT name FROM report_group)
+    ), recalled_ids AS (
+      SELECT DISTINCT m.msg_id FROM inbox_messages m JOIN group_views v
+        ON v.channel_id = m.channel_id AND v.thread_id = m.thread_id
+      WHERE m.workspace_id = ${ctx.workspaceId} AND m.msg_id <> ''
+        AND m.meta->>'removed' = 'recalled'
     ), group_messages AS (
       SELECT m.*, v.priority
       FROM inbox_messages m JOIN group_views v
         ON v.channel_id = m.channel_id AND v.thread_id = m.thread_id
       WHERE m.workspace_id = ${ctx.workspaceId} AND m.msg_id <> ''
         AND COALESCE(m.meta->>'removed', '') = ''
+        AND NOT EXISTS (SELECT 1 FROM recalled_ids r WHERE r.msg_id = m.msg_id)
         AND (m.direction = 'in' OR m.direction = 'out')
         AND m.source IN ('zalo', 'app', 'web', 'mcp')
     ), dated AS (

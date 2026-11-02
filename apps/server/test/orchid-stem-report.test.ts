@@ -3,6 +3,24 @@ import { addOrchidWorkPlanCounts, buildOrchidStemReport, filterOrchidStemReport,
 import { INDEX_HTML } from "../src/ui.js";
 
 describe("orchid stem report", () => {
+  it("uses the newest surviving quote once, retains customer and correction history", () => {
+    const photo = { msgId: "photo", senderId: "worker", senderName: "Lộc", text: "Chị Hà (6c)",
+      contentType: "photo", sentAt: "2026-11-01T09:00:00.000Z" };
+    const quote = (msgId: string, text: string, sentAt: string) => ({ msgId, senderId: "worker",
+      senderName: "Lộc", text, quotedMsgId: "photo", quoteOwnerId: "worker", sentAt });
+    const first = quote("first", "10c", "2026-11-01T09:10:00.000Z");
+    const latest = quote("latest", "20c", "2026-11-02T06:37:00.000Z");
+    const report = buildOrchidStemReport([photo, first, latest]);
+    expect(report.entries).toHaveLength(1);
+    expect(report.entries[0]).toMatchObject({ customerName: "Chị Hà", stems: 20,
+      day: "2026-11-01", msgId: "latest", countHistory: [
+        { msgId: "photo", stems: 6 }, { msgId: "first", stems: 10 }, { msgId: "latest", stems: 20 },
+      ] });
+    expect(report.monthly[0]).toMatchObject({ stems: 20, jobs: 1 });
+    expect(buildOrchidStemReport([photo, first]).entries[0]?.stems).toBe(10);
+    expect(buildOrchidStemReport([photo]).entries[0]?.stems).toBe(6);
+    expect(buildOrchidStemReport([]).entries).toHaveLength(0);
+  });
   it("reads completed daily self reports without taking tomorrow's plan", () => {
     const at = "2026-10-29T13:00:00.000Z";
     expect(parseOrchidWorkPlanCount("báo cáo cv\ntổng cắm 124c\nKh 30/10 cắm đơn", at))
@@ -107,9 +125,9 @@ describe("orchid stem report", () => {
       { msgId: "quote-2", senderId: "worker", senderName: "Lộc", text: "8 cành", quotedMsgId: "photo-1",
         quoteOwnerId: "worker", sentAt: "2026-10-19T00:06:00.000Z", inRange: true },
     ]);
-    expect(report.entries).toMatchObject([{ msgId: "quote-1", quotedPhotoMsgId: "photo-1",
+    expect(report.entries).toMatchObject([{ msgId: "quote-2", quotedPhotoMsgId: "photo-1",
       senderId: "worker", stems: 8, day: "2026-10-18",
-      sentAt: "2026-10-18T16:55:00.000Z", quoteSentAt: "2026-10-19T00:05:00.000Z" }]);
+      sentAt: "2026-10-18T16:55:00.000Z", quoteSentAt: "2026-10-19T00:06:00.000Z" }]);
     expect(report.monthly).toMatchObject([{ stems: 8, jobs: 1 }]);
     expect(orchidStemTime(report.entries[0]!.sentAt)).toBe("23:55");
   });
@@ -227,18 +245,19 @@ describe("orchid stem report", () => {
         quoteOwnerId: "worker", sentAt: "2026-10-18T10:01:00.000Z" },
     ]);
     expect(report.entries).toMatchObject([{ msgId: "quote", senderId: "worker",
-      customerName: "Ảnh báo cáo", stems: 8 }]);
+      customerName: "Chưa ghi tên khách", stems: 8 }]);
   });
 
-  it("holds conflicting quotes of the same photo for review", () => {
+  it("uses the latest conflicting quote and keeps both counts in history", () => {
     const at = "2026-10-18T10:00:00.000Z";
     const report = buildOrchidStemReport([
       { msgId: "photo", senderId: "worker", senderName: "Lộc", text: "", contentType: "photo", sentAt: at },
       { msgId: "first", senderId: "worker", senderName: "Lộc", text: "8c", quotedMsgId: "photo", quoteOwnerId: "worker", sentAt: at },
       { msgId: "second", senderId: "worker", senderName: "Lộc", text: "9c", quotedMsgId: "photo", quoteOwnerId: "worker", sentAt: at },
     ]);
-    expect(report.entries).toEqual([]);
-    expect(report.review.map(x => x.msgId)).toEqual(["first", "second"]);
+    expect(report.entries).toMatchObject([{ msgId: "second", stems: 9,
+      countHistory: [{ msgId: "first", stems: 8 }, { msgId: "second", stems: 9 }] }]);
+    expect(report.monthly[0]).toMatchObject({ stems: 9, jobs: 1 });
   });
 
   it("multiplies cành by vòi in daily and monthly totals instead of sending these captions to review", () => {

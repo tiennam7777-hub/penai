@@ -63,6 +63,7 @@ import {
   upsertContact,
   getInboxMessageById,
   getInboxMessageByMsgId,
+  getInboxMessageByCliMsgId,
   latestIncomingInboxMessages,
   upsertInboxContacts,
   recordAudit,
@@ -93,6 +94,7 @@ import { expectsCurrentColorPhotos, latestDelegableStaffRow, promisedPotStemCoun
 import { readPhotoAcknowledgement } from "./photo-burst.js";
 import { inboxZaloQuote, type InboxZaloQuote } from "./inbox-quote.js";
 import { stemCountForPhoto } from "./orchid-photo-count.js";
+import { orchidStemRefreshMonths, refreshOrchidStemFile } from "./orchid-stem-report.js";
 
 // ===== Cấu hình sống theo kênh =====
 
@@ -189,6 +191,23 @@ function ctxOf(workspaceId: string): WorkspaceContext {
 function inboxRuntime(channelId: string): PersonalChannel | null {
   const ch = channelHandlers.get(channelId)?.channel;
   return isPersonalChannel(ch) ? ch : null;
+}
+
+async function refreshRecalledStemMessage(db: Db, ctx: WorkspaceContext, channelId: string,
+  threadId: string, message: InboxMessageRow | null): Promise<void> {
+  if (!message || !inboxDataDir) return;
+  const channel = await getChannelById(db, ctx, channelId);
+  if ((channel?.config as Record<string, unknown> | undefined)?.["orchid_stem_report_group"] !== `group:${threadId}`) return;
+  const quote = message.meta?.quote as { msgId?: string; cliMsgId?: string } | undefined;
+  const photoByMsg = quote?.msgId && quote.msgId !== "0"
+    ? await getInboxMessageByMsgId(db, ctx, channelId, threadId, quote.msgId)
+    : null;
+  const photo = photoByMsg ?? (quote?.cliMsgId
+    ? await getInboxMessageByCliMsgId(db, ctx, channelId, threadId, quote.cliMsgId) : null);
+  for (const month of orchidStemRefreshMonths(message.sentAt,
+    photo ? { contentType: photo.contentType, text: photo.text, sentAt: photo.sentAt } : null)) {
+    await refreshOrchidStemFile(db, ctx, channelId, threadId, month, inboxDataDir);
+  }
 }
 
 /** Tên nền tảng của kênh (Zalo, WhatsApp) để ghi vào thông báo cho người dùng. */
@@ -397,6 +416,8 @@ export function inboxHooks(
           { msgId: event.targetMsgId }, "recalled");
       }
       if (removed) {
+        await refreshRecalledStemMessage(db, ctx, ch.id, event.threadId, removed)
+          .catch(error => logger.warn(`Không cập nhật báo cáo sau thu hồi: ${String(error)}`));
         const full = await getInboxMessageById(db, ctx, ch.id, event.threadId, removed.id);
         if (full) broadcast(ch.workspaceId, ch.id, "message_update", {
           channelId: ch.id, threadId: event.threadId, message: publicMessage(full, ch.workspaceId),
@@ -1462,6 +1483,8 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
       });
       await markInboxMessageRemoved(db, req.authCtx, channelId, threadId,
         { id: messageId }, parsed.data.action);
+      await refreshRecalledStemMessage(db, req.authCtx, channelId, threadId, message)
+        .catch(error => logger.warn(`Không cập nhật báo cáo sau thu hồi: ${String(error)}`));
       const current = await getInboxMessageById(db, req.authCtx, channelId, threadId, messageId);
       if (current) broadcast(req.authCtx.workspaceId, channelId, "message_update", {
         channelId, threadId, message: publicMessage(current, req.authCtx.workspaceId),

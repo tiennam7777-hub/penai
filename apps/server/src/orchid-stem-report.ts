@@ -14,6 +14,7 @@ export interface OrchidStemEntry extends OrchidStemMessage {
   quotedPhotoMsgId?: string;
   quoteSentAt?: string;
   originalDayConfirmed?: boolean;
+  countHistory?: Array<{ msgId: string; stems: number; sentAt: string }>;
 }
 
 function stemCustomerName(prefix: string): string | null {
@@ -95,7 +96,7 @@ export function orchidStemTime(iso: string): string {
 export function orchidStemRefreshMonths(quoteAt: string,
   originalPhoto?: { contentType: string; text: string; sentAt: string } | null): string[] {
   const months = new Set([orchidStemDay(quoteAt).slice(0, 7)]);
-  if (originalPhoto?.contentType === "photo" && !/\d/.test(originalPhoto.text)) {
+  if (originalPhoto?.contentType === "photo") {
     months.add(orchidStemDay(originalPhoto.sentAt).slice(0, 7));
   }
   return [...months];
@@ -211,7 +212,7 @@ export function buildOrchidStemReport(messages: OrchidStemMessage[]) {
         ? message.quoteOwnerId === photo.senderId
         : photo.senderId === message.senderId;
       const stems = quotedPhotoQuantity(message.text, photo.senderName);
-      if (ownerMatchesPhoto && stems && !/\d/.test(photo.text)) {
+      if (ownerMatchesPhoto && stems) {
         const candidates = photoQuotes.get(photo.msgId) ?? [];
         candidates.push({ photo, quote: message, stems });
         photoQuotes.set(photo.msgId, candidates);
@@ -221,7 +222,7 @@ export function buildOrchidStemReport(messages: OrchidStemMessage[]) {
     if (message.inRange === false) continue;
     // An unnumbered photo is not a report or a customer-name hint. It becomes
     // one report only when a later quote identifies that photo and gives a count.
-    if (message.contentType === "photo" && !/\d/.test(message.text)) continue;
+    if (message.contentType === "photo" && (!/\d/.test(message.text) || photoQuotes.has(message.msgId))) continue;
     const senderName = senderLabel(message.senderName);
     const source = { ...message, senderName };
     let parsed = parseOrchidStemText(message.text);
@@ -250,25 +251,28 @@ export function buildOrchidStemReport(messages: OrchidStemMessage[]) {
   for (const candidates of photoQuotes.values()) {
     const { photo } = candidates[0]!;
     if (photo.inRange === false) continue;
-    if (new Set(candidates.map(x => x.stems)).size !== 1) {
-      review.push(...candidates.map(x => x.quote));
-      continue;
-    }
-    const { quote, stems } = candidates[0]!;
+    const ordered = candidates.sort((a, b) => a.quote.sentAt.localeCompare(b.quote.sentAt) || a.quote.msgId.localeCompare(b.quote.msgId));
+    const { quote, stems } = ordered.at(-1)!;
+    const original = parseOrchidStemText(photo.text);
+    const countHistory = [...(original ? [{ msgId: photo.msgId, stems: original.stems, sentAt: photo.sentAt }] : []),
+      ...ordered.map(x => ({ msgId: x.quote.msgId, stems: x.stems, sentAt: x.quote.sentAt }))];
     entries.push({ ...photo, senderName: senderLabel(photo.senderName), msgId: quote.msgId, text: quote.text,
-      customerName: "Ảnh báo cáo", stems, day: orchidStemDay(photo.sentAt),
-      quotedPhotoMsgId: photo.msgId, quoteSentAt: quote.sentAt });
+      customerName: original?.customerName ?? stemCustomerName(photo.text) ?? "Chưa ghi tên khách", stems, day: orchidStemDay(photo.sentAt),
+      quotedPhotoMsgId: photo.msgId, quoteSentAt: quote.sentAt, countHistory });
   }
+  // A photo with a caption and its later correction represent one job.
+  const correctedPhotos = new Set(photoQuotes.keys());
+  const uniqueEntries = entries.filter(e => !(e.contentType === "photo" && !e.quotedPhotoMsgId && correctedPhotos.has(e.msgId)));
   const daily = new Map<string, { day: string; senderId: string; senderName: string; stems: number; jobs: number }>();
   const monthly = new Map<string, { senderId: string; senderName: string; stems: number; jobs: number }>();
-  for (const entry of entries) {
+  for (const entry of uniqueEntries) {
     const dailyKey = `${entry.day}:${entry.senderName}`;
     const d = daily.get(dailyKey) ?? { day: entry.day, senderId: entry.senderId, senderName: entry.senderName, stems: 0, jobs: 0 };
     d.senderName = entry.senderName; d.stems += entry.stems; d.jobs++; daily.set(dailyKey, d);
     const m = monthly.get(entry.senderName) ?? { senderId: entry.senderId, senderName: entry.senderName, stems: 0, jobs: 0 };
     m.senderName = entry.senderName; m.stems += entry.stems; m.jobs++; monthly.set(entry.senderName, m);
   }
-  return { entries, review, daily: [...daily.values()], monthly: [...monthly.values()] };
+  return { entries: uniqueEntries, review, daily: [...daily.values()], monthly: [...monthly.values()] };
 }
 
 export function filterOrchidStemReport(report: ReturnType<typeof addOrchidWorkPlanCounts>, sender: string) {
@@ -288,11 +292,12 @@ export function orchidStemWorkbook(report: ReturnType<typeof addOrchidWorkPlanCo
       ["Điều kiện", "Giá trị"], ["Từ ngày", filter.from], ["Đến ngày", filter.to],
       ["Nhân viên", filter.sender || "Tất cả"],
     ] }] : []),
-    { name: "Chi tiết", widths: [20, 12, 25, 24, 30, 12, 48, 22, 22, 20, 34], rows: [
-      ["Ngày", "Giờ gửi ảnh/tin gốc", "Người gửi", "UID người gửi", "Tên khách", "Số cành tính", "Tin gốc", "Mã tin Zalo", "Mã ảnh trích dẫn", "Giờ báo lại", "Ghi chú ngày tính"],
+    { name: "Chi tiết", widths: [20, 12, 25, 24, 30, 12, 48, 22, 22, 20, 34, 70], rows: [
+      ["Ngày", "Giờ gửi ảnh/tin gốc", "Người gửi", "UID người gửi", "Tên khách", "Số cành tính", "Tin gốc", "Mã tin Zalo", "Mã ảnh trích dẫn", "Giờ báo lại", "Ghi chú ngày tính", "Lịch sử báo và sửa số cành"],
       ...report.entries.map(e => [e.day, e.originalDayConfirmed ? "" : orchidStemTime(e.sentAt),
         e.senderName, e.senderId, e.customerName, e.stems, e.text, e.msgId, e.quotedPhotoMsgId ?? "",
-        e.quoteSentAt ? new Date(e.quoteSentAt) : "", e.originalDayConfirmed ? "Chủ shop xác nhận ngày ảnh gốc" : ""]),
+        e.quoteSentAt ? new Date(e.quoteSentAt) : "", e.originalDayConfirmed ? "Chủ shop xác nhận ngày ảnh gốc" : "",
+        (e.countHistory ?? []).map((h, i) => `${i + 1}. ${h.stems} cành · ${new Date(h.sentAt).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })} · tin ${h.msgId}`).join("; ")]),
     ] },
     { name: "Theo ngày", widths: [20, 25, 24, 16, 16, 16], rows: [
       ["Ngày", "Người gửi", "UID người gửi", "Số lượt", "Tổng cành tính", "NVBC"],
