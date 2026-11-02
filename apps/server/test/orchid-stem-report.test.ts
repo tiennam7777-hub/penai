@@ -15,6 +15,12 @@ describe("orchid stem report", () => {
     expect(all.monthly).toMatchObject([{ stems: 12, jobs: 3 }]);
     expect(groups[1]!.monthly).toMatchObject([{ stems: 4, jobs: 1 }]);
   });
+  it("keeps unnumbered Hanoi photos visible as pending without adding stems", () => {
+    const report = buildOrchidStemReport([{ msgId: "hanoi-photo", senderId: "hi", senderName: "Hi",
+      text: "", contentType: "photo", reportGroup: "hanoi", sentAt: "2026-10-30T03:00:00.000Z" }]);
+    expect(report.entries).toEqual([]);
+    expect(report.unnumberedPhotos).toBe(1);
+  });
   it("offers group filtering in the report page", () => {
     expect(INDEX_HTML).toContain('id="stemGroup"');
     expect(INDEX_HTML).toContain('value="hanoi"');
@@ -71,6 +77,8 @@ describe("orchid stem report", () => {
     expect(parseOrchidWorkPlanCount("Bccv 7/10: cắm 8 đơn 53 cây. Kh 8/10: lấy hoa",
       "2026-10-08T01:46:00.000Z")).toEqual({ day: "2026-10-07", stems: 53 });
     expect(parseOrchidWorkPlanCount("KH 30/10\nCắm 100 cây", at)).toBeNull();
+    expect(parseOrchidWorkPlanCount("BCCV 2/10\ncắm 135 cây\nra 10 thùng hoa\nKHNM\ncắm đơn",
+      "2026-11-02T11:38:04.271Z")).toEqual({ day: "2026-11-02", stems: 135 });
   });
 
   it("matches NVBC by sender ID and original day, keeping missing reports blank", () => {

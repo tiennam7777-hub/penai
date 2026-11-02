@@ -1011,6 +1011,7 @@ export const INDEX_HTML = `<!doctype html>
       '<p class="muted" style="margin:7px 0 0">File Excel dùng đúng khoảng ngày và nhân viên đang chọn.</p>' +
       '<div class="stem-guide"><strong>Cách ghi để được cộng vào báo cáo</strong><b>c = cành, v = vòi.</b> Ví dụ <b>C Chi (8c) Lộc</b> tính 8 cành cho C Chi; chữ sau ngoặc là ghi chú. Với chậu nhiều vòi, lấy số cành nhân số vòi: <b>Hà cii (3c 2v) = 6 cành</b>, <b>A trung. Cảnh 5 2v = 10 cành</b>. Cũng có thể gửi tên khách rồi số cành bằng tin tiếp theo trong 5 phút, cùng tài khoản. <b>Ảnh không ghi số cành không phải báo cáo cắm hoa.</b> Khi có tin trích dẫn đúng ảnh và nhắn <b>8c</b>, <b>8 cành</b> hoặc <b>@tên người gửi ảnh 8c</b>, ảnh được cộng một lần cho người gửi ảnh gốc, theo ngày gửi ảnh gốc. Ví dụ gửi ảnh ngày 10, đến ngày 15 mới trích dẫn báo <b>5 cành</b> thì cộng 5 cành vào <b>ngày 10</b>, không cộng ngày 15. Tin có nhiều số nhưng không rõ cành/vòi, giá hoặc phí ship sẽ nằm ở “Tin cần kiểm tra”.</div>' +
       '<div id="stemSummary" aria-live="polite">Đang tải...</div>' +
+      '<section class="stem-section"><h3>Theo nhóm báo cáo</h3><p class="muted stem-section-note">Ảnh chưa gắn số cành được hiển thị để đối chiếu, chưa cộng vào tổng.</p><div id="stemGroups"></div></section>' +
       '<section class="stem-section"><h3>Theo người gửi</h3><p class="muted stem-section-note">Xếp theo tổng số cành trong khoảng ngày đã chọn. NVBC cộng báo cáo của nhân viên trong nhóm Kế Hoạch 5 phút Làm Việc khi xem tất cả nhóm; khi lọc một nhóm, NVBC để trống vì báo cáo công việc không chia theo nhóm. Dấu — là chưa có số đối chiếu.</p><div id="stemMonthly"></div></section>' +
       '<section class="stem-section"><h3>Theo ngày</h3><p class="muted stem-section-note">Mỗi ngày có tổng riêng; bấm vào ngày để xem từng người. Ngày có NVBC nhưng chưa có tin cắm hoa được ghi nhận sẽ hiện 0 ở Cành tính.</p><div id="stemDaily"></div></section>' +
       '<details class="stem-detail"><summary id="stemDetailTitle">Chi tiết từng tin</summary><label class="stem-detail-filter">Lọc theo người gửi<select id="stemDetailSender"><option value="">Tất cả người gửi</option></select></label><div id="stemDetail" class="stem-scroll"></div></details>' +
@@ -1088,6 +1089,12 @@ export const INDEX_HTML = `<!doctype html>
           '<div class="stem-metric"><strong>' + number(r.entries.length) + '</strong><span>Lượt ghi nhận</span></div>' +
           '<div class="stem-metric"><strong>' + number(dayRows.length) + '</strong><span>Ngày có dữ liệu</span></div>' +
           '<div class="stem-metric"><strong>' + number(r.review.length) + '</strong><span>Tin cần kiểm tra</span></div></div>';
+        var groupBox = $("#stemGroups", c); groupBox.innerHTML = "";
+        var gt = table(["Nhóm", "Lượt", "Cành tính", "Ảnh chưa gắn số"], r.groupTotals || [], function (x) {
+          var tr = el("tr");
+          tr.innerHTML = '<td>' + esc(x.key === 'hanoi' ? 'Hà Nội' : x.key === '42' ? '42 ĐBP' : x.key) + '</td><td class="stem-num">' + number(x.jobs) + '</td><td class="stem-num"><strong>' + number(x.stems) + '</strong></td><td class="stem-num">' + (x.unnumberedPhotos === null ? '—' : number(x.unnumberedPhotos)) + '</td>';
+          return tr;
+        }); gt.className = "stem-table"; groupBox.appendChild(gt);
         var monthly = $("#stemMonthly", c); monthly.innerHTML = "";
         var mt = table(["", "Người gửi", "Lượt", "Cành tính", "NVBC"], monthlyRows, function (x) {
           var tr = el("tr");

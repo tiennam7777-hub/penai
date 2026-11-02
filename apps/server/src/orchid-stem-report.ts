@@ -132,7 +132,14 @@ export function parseOrchidWorkPlanCount(text: string, sentAt: string): { day: s
   if (dateMatch) {
     const year = Number(dateMatch[3] ?? day.slice(0, 4));
     const candidate = `${year}-${String(dateMatch[2]).padStart(2, "0")}-${String(dateMatch[1]).padStart(2, "0")}`;
-    if (orchidStemDateBounds(candidate, candidate)) day = candidate;
+    if (orchidStemDateBounds(candidate, candidate)) {
+      // Staff sometimes copy yesterday's report header and leave the old month.
+      // When the day number matches the send date, use that date for the new
+      // completed-work report rather than moving it a whole month backward.
+      const sameDayNumber = candidate.slice(8) === day.slice(8);
+      const monthGap = Math.abs((year - Number(day.slice(0, 4))) * 12 + Number(dateMatch[2]) - Number(day.slice(5, 7)));
+      if (!sameDayNumber || monthGap === 0 || monthGap > 1) day = candidate;
+    }
   } else {
     // Reports just after midnight often end with "Kh 19/10", meaning work on 18/10.
     const plan = /\bkh(?:nm|cv)?\s*(\d{1,2})\/(\d{1,2})(?:\/(20\d{2}))?/iu.exec(text);
@@ -274,6 +281,10 @@ export function buildOrchidStemReport(messages: OrchidStemMessage[]) {
   // A photo with a caption and its later correction represent one job.
   const correctedPhotos = new Set(photoQuotes.keys());
   const uniqueEntries = entries.filter(e => !(e.contentType === "photo" && !e.quotedPhotoMsgId && correctedPhotos.has(e.msgId)));
+  const countedPhotoIds = new Set(uniqueEntries.filter(e => e.contentType === "photo")
+    .map(e => e.quotedPhotoMsgId ?? e.msgId));
+  const unnumberedPhotos = messages.filter(m => m.contentType === "photo" && m.inRange !== false &&
+    !countedPhotoIds.has(m.msgId)).length;
   const daily = new Map<string, { day: string; senderId: string; senderName: string; stems: number; jobs: number }>();
   const monthly = new Map<string, { senderId: string; senderName: string; stems: number; jobs: number }>();
   for (const entry of uniqueEntries) {
@@ -283,7 +294,7 @@ export function buildOrchidStemReport(messages: OrchidStemMessage[]) {
     const m = monthly.get(entry.senderName) ?? { senderId: entry.senderId, senderName: entry.senderName, stems: 0, jobs: 0 };
     m.senderName = entry.senderName; m.stems += entry.stems; m.jobs++; monthly.set(entry.senderName, m);
   }
-  return { entries: uniqueEntries, review, daily: [...daily.values()], monthly: [...monthly.values()] };
+  return { entries: uniqueEntries, review, daily: [...daily.values()], monthly: [...monthly.values()], unnumberedPhotos };
 }
 
 export function combineOrchidStemReports(reports: Array<ReturnType<typeof buildOrchidStemReport>>) {
@@ -302,12 +313,14 @@ export function combineOrchidStemReports(reports: Array<ReturnType<typeof buildO
       monthly.set(row.senderId, prior ? { ...prior, stems: prior.stems + row.stems, jobs: prior.jobs + row.jobs } : { ...row });
     }
   }
-  return { entries, review, daily: [...daily.values()], monthly: [...monthly.values()] };
+  return { entries, review, daily: [...daily.values()], monthly: [...monthly.values()],
+    unnumberedPhotos: reports.reduce((sum, r) => sum + r.unnumberedPhotos, 0) };
 }
 
 export function filterOrchidStemReport(report: ReturnType<typeof addOrchidWorkPlanCounts>, sender: string) {
   if (!sender) return report;
   return {
+    ...report,
     entries: report.entries.filter(x => x.senderName === sender),
     review: report.review.filter(x => x.senderName === sender),
     daily: report.daily.filter(x => x.senderName === sender),

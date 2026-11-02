@@ -1293,10 +1293,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       await refreshOrchidStemFile(db, req.authCtx, channel.id, "", from.slice(0, 7), deps.config.dataDir);
     }
     const all = addOrchidWorkPlanCounts(combineOrchidStemReports(reports), groupKey ? [] : plans, from, to);
+    const groupTotals = chosen.map((group, index) => {
+      const report = reports[index]!;
+      const entries = sender ? report.entries.filter(e => e.senderName === sender) : report.entries;
+      return { key: group.key, name: group.name, jobs: entries.length,
+        stems: entries.reduce((sum, entry) => sum + entry.stems, 0),
+        unnumberedPhotos: sender ? null : report.unnumberedPhotos };
+    });
     const senders = [...new Set([...all.monthly.map(x => x.senderName), ...all.review.map(x => x.senderName)])]
       .sort((a, b) => a.localeCompare(b, "vi"));
     const filtered = filterOrchidStemReport(all, sender);
-    return { month: month || from.slice(0, 7), from, to, sender, senders, group: groupKey, groups,
+    return { month: month || from.slice(0, 7), from, to, sender, senders, group: groupKey, groups, groupTotals,
       channelName: channel.name,
       libraryPath: from.slice(0, 7) === to.slice(0, 7)
         ? `shared/bao-cao-cam-hoa/bao-cao-cam-hoa-${from.slice(0, 7)}.xlsx` : null,
