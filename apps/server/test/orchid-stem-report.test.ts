@@ -33,6 +33,12 @@ describe("orchid stem report", () => {
     expect(report.entries).toMatchObject([{ customerName: "Shop giao hoa nhanh", stems: 18,
       day: "2026-11-01", countHistory: [{ stems: 20 }, { stems: 18 }] }]);
   });
+  it("does not move a removed photo's named quote onto the following day", () => {
+    const orphan = { msgId: "quote", senderId: "worker", senderName: "Lộc",
+      text: "Shop giao hoa nhanh (20c)", quotedMsgId: "recalled-photo", quoteOwnerId: "worker",
+      sentAt: "2026-11-02T06:00:00.000Z" };
+    expect(buildOrchidStemReport([orphan]).entries).toEqual([]);
+  });
   it("reads completed daily self reports without taking tomorrow's plan", () => {
     const at = "2026-10-29T13:00:00.000Z";
     expect(parseOrchidWorkPlanCount("báo cáo cv\ntổng cắm 124c\nKh 30/10 cắm đơn", at))

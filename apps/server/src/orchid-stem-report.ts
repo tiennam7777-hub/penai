@@ -220,6 +220,11 @@ export function buildOrchidStemReport(messages: OrchidStemMessage[]) {
         continue; // Count this quote only through its original photo.
       }
     }
+    if (!photo && (message.quotedMsgId || message.quotedCliMsgId) && !message.originalPhotoDay) {
+      // The quoted photo may have been recalled. Never turn its orphaned
+      // caption into a new report on the quote's later day.
+      continue;
+    }
     if (message.inRange === false) continue;
     // An unnumbered photo is not a report or a customer-name hint. It becomes
     // one report only when a later quote identifies that photo and gives a count.
