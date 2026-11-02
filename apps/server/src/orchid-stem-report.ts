@@ -200,7 +200,7 @@ export function buildOrchidStemReport(messages: OrchidStemMessage[]) {
   const photos = new Map(messages.filter(m => m.contentType === "photo").map(m => [m.msgId, m]));
   const photosByCliId = new Map(messages.filter(m => m.contentType === "photo" && m.cliMsgId)
     .map(m => [`${m.senderId}:${m.cliMsgId}`, m]));
-  const photoQuotes = new Map<string, Array<{ photo: OrchidStemMessage; quote: OrchidStemMessage; stems: number }>>();
+  const photoQuotes = new Map<string, Array<{ photo: OrchidStemMessage; quote: OrchidStemMessage; stems: number; customerName?: string }>>();
   for (const message of messages) {
     const photo = (message.quotedMsgId && message.quotedMsgId !== "0" ? photos.get(message.quotedMsgId) : undefined)
       ?? (message.quoteOwnerId && message.quotedCliMsgId
@@ -211,10 +211,11 @@ export function buildOrchidStemReport(messages: OrchidStemMessage[]) {
       const ownerMatchesPhoto = message.quoteOwnerId
         ? message.quoteOwnerId === photo.senderId
         : photo.senderId === message.senderId;
-      const stems = quotedPhotoQuantity(message.text, photo.senderName);
+      const namedQuote = parseOrchidStemText(message.text);
+      const stems = quotedPhotoQuantity(message.text, photo.senderName) ?? namedQuote?.stems;
       if (ownerMatchesPhoto && stems) {
         const candidates = photoQuotes.get(photo.msgId) ?? [];
-        candidates.push({ photo, quote: message, stems });
+        candidates.push({ photo, quote: message, stems, ...(namedQuote ? { customerName: namedQuote.customerName } : {}) });
         photoQuotes.set(photo.msgId, candidates);
         continue; // Count this quote only through its original photo.
       }
@@ -254,10 +255,11 @@ export function buildOrchidStemReport(messages: OrchidStemMessage[]) {
     const ordered = candidates.sort((a, b) => a.quote.sentAt.localeCompare(b.quote.sentAt) || a.quote.msgId.localeCompare(b.quote.msgId));
     const { quote, stems } = ordered.at(-1)!;
     const original = parseOrchidStemText(photo.text);
+    const customerName = original?.customerName ?? ordered.findLast(x => x.customerName)?.customerName;
     const countHistory = [...(original ? [{ msgId: photo.msgId, stems: original.stems, sentAt: photo.sentAt }] : []),
       ...ordered.map(x => ({ msgId: x.quote.msgId, stems: x.stems, sentAt: x.quote.sentAt }))];
     entries.push({ ...photo, senderName: senderLabel(photo.senderName), msgId: quote.msgId, text: quote.text,
-      customerName: original?.customerName ?? stemCustomerName(photo.text) ?? "Chưa ghi tên khách", stems, day: orchidStemDay(photo.sentAt),
+      customerName: customerName ?? stemCustomerName(photo.text) ?? "Chưa ghi tên khách", stems, day: orchidStemDay(photo.sentAt),
       quotedPhotoMsgId: photo.msgId, quoteSentAt: quote.sentAt, countHistory });
   }
   // A photo with a caption and its later correction represent one job.

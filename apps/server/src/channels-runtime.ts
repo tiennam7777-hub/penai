@@ -645,10 +645,15 @@ export function makeInboundHandler(
   const { db } = rt.db;
   const stemGroup = channel.config["orchid_stem_report_group"];
   if (channel.kind === "zalo_personal" && typeof stemGroup === "string" && /^group:\d+$/.test(stemGroup)) {
-    const month = orchidStemDay(new Date().toISOString()).slice(0, 7);
-    void refreshOrchidStemFile(db, systemContext(channel.workspaceId), channel.id,
-      stemGroup.slice(6), month, rt.config.dataDir)
-      .catch(error => logger.warn(`Không tạo file báo cáo cắm hoa: ${String(error)}`));
+    const currentMonth = orchidStemDay(new Date().toISOString()).slice(0, 7);
+    const [year, mon] = currentMonth.split("-").map(Number);
+    const previousMonth = new Date(Date.UTC(year!, mon! - 1, 0)).toISOString().slice(0, 7);
+    const months = [currentMonth, previousMonth];
+    for (const month of new Set(months)) {
+      void refreshOrchidStemFile(db, systemContext(channel.workspaceId), channel.id,
+        stemGroup.slice(6), month, rt.config.dataDir)
+        .catch(error => logger.warn(`Không tạo file báo cáo cắm hoa ${month}: ${String(error)}`));
+    }
   }
   if (channel.kind === "zalo_personal" &&
       ["cdf2a276-fa3d-4fe3-a46b-3ce1162a7678", "657116ed-7570-4f2e-8550-a3d323618724", "6bc2dc02-3d10-4737-931d-a37532bcabb2"].includes(channel.id)) {

@@ -21,6 +21,18 @@ describe("orchid stem report", () => {
     expect(buildOrchidStemReport([photo]).entries[0]?.stems).toBe(6);
     expect(buildOrchidStemReport([]).entries).toHaveLength(0);
   });
+  it("gets the customer name from a named quote when the original photo has no caption", () => {
+    const report = buildOrchidStemReport([
+      { msgId: "photo", senderId: "worker", senderName: "Lộc", text: "", contentType: "photo",
+        sentAt: "2026-11-01T09:00:00.000Z" },
+      { msgId: "named", senderId: "worker", senderName: "Lộc", text: "Shop giao hoa nhanh (20c)",
+        quotedMsgId: "photo", quoteOwnerId: "worker", sentAt: "2026-11-02T06:00:00.000Z" },
+      { msgId: "fix", senderId: "worker", senderName: "Lộc", text: "18c", quotedMsgId: "photo",
+        quoteOwnerId: "worker", sentAt: "2026-11-02T06:05:00.000Z" },
+    ]);
+    expect(report.entries).toMatchObject([{ customerName: "Shop giao hoa nhanh", stems: 18,
+      day: "2026-11-01", countHistory: [{ stems: 20 }, { stems: 18 }] }]);
+  });
   it("reads completed daily self reports without taking tomorrow's plan", () => {
     const at = "2026-10-29T13:00:00.000Z";
     expect(parseOrchidWorkPlanCount("báo cáo cv\ntổng cắm 124c\nKh 30/10 cắm đơn", at))
