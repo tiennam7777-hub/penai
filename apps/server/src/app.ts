@@ -73,6 +73,7 @@ import {
   saveMisaCredentials,
   listMisaInvoiceDrafts,
   listOrchidStemMessages,
+  listOrchidStemGroups,
   listOrchidWorkPlanMessages,
   getSavedMisaDraftSource,
 } from "@penai/db";
@@ -297,7 +298,7 @@ import {
 import { registerLibraryRoutes } from "./library.js";
 import { registerInboxRoutes } from "./inbox.js";
 import { buildXlsx, type XlsxCell } from "./xlsx.js";
-import { addOrchidWorkPlanCounts, buildOrchidStemReport, filterOrchidStemReport, orchidStemDateBounds, orchidStemWorkbook, refreshOrchidStemFile } from "./orchid-stem-report.js";
+import { addOrchidWorkPlanCounts, buildOrchidStemReport, combineOrchidStemReports, filterOrchidStemReport, orchidStemDateBounds, orchidStemWorkbook, refreshOrchidStemFile } from "./orchid-stem-report.js";
 import { isMcpPublicPath, registerMcpServerRoutes } from "./mcp-server.js";
 import { registerBrowserRoutes } from "./browser-runtime.js";
 
@@ -1249,7 +1250,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // ===== KiotViet Retail API: admin-only credentials and order draft status =====
   async function orchidStemReport(req: FastifyRequest, reply: FastifyReply) {
     if (!requireModeratorOrRole(req, reply, "ws_admin")) return null;
-    const query = req.query as { month?: string; from?: string; to?: string; sender?: string };
+    const query = req.query as { month?: string; from?: string; to?: string; sender?: string; group?: string };
     const month = String(query.month ?? "");
     const hasRange = query.from !== undefined || query.to !== undefined;
     let from: string;
@@ -1268,26 +1269,35 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (!bounds) { reply.code(400).send({ error: "Khoảng ngày không hợp lệ: Từ ngày phải trước hoặc bằng Đến ngày" }); return null; }
     const sender = String(query.sender ?? "").trim();
     if (sender.length > 100) { reply.code(400).send({ error: "Tên nhân viên quá dài" }); return null; }
+    const groupKey = String(query.group ?? "").trim();
+    if (groupKey && !["42", "188", "hanoi"].includes(groupKey)) {
+      reply.code(400).send({ error: "Nhóm báo cáo không hợp lệ" }); return null;
+    }
     const channels = await listChannels(db, req.authCtx);
     const channel = channels.find(c => c.kind === "zalo_personal" &&
       typeof (c.config as Record<string, unknown>)["orchid_stem_report_group"] === "string");
     if (!channel) { reply.code(404).send({ error: "Chưa cấu hình nhóm báo cáo cắm hoa" }); return null; }
-    const group = String((channel.config as Record<string, unknown>)["orchid_stem_report_group"]);
-    if (!/^group:\d+$/.test(group)) { reply.code(500).send({ error: "ID nhóm báo cáo không hợp lệ" }); return null; }
-    const [messages, plans] = await Promise.all([
-      listOrchidStemMessages(db, req.authCtx, channel.id, group.slice(6), bounds.start, bounds.end),
+    const groups = await listOrchidStemGroups(db, req.authCtx);
+    if (groupKey && !groups.some(g => g.key === groupKey)) {
+      reply.code(404).send({ error: "Chưa tìm thấy nhóm báo cáo này" }); return null;
+    }
+    const chosen = groupKey ? groups.filter(g => g.key === groupKey) : groups;
+    const [reports, plans] = await Promise.all([
+      Promise.all(chosen.map(async group => buildOrchidStemReport((await listOrchidStemMessages(
+        db, req.authCtx, group.channelId, group.threadId, bounds.start, bounds.end))
+        .map(m => ({ ...m, reportGroup: group.key }))))),
       listOrchidWorkPlanMessages(db, req.authCtx, channel.id, bounds.start,
         new Date(bounds.end.getTime() + 8 * 3600_000)),
     ]);
     if (from.slice(0, 7) === to.slice(0, 7)) {
-      await refreshOrchidStemFile(db, req.authCtx, channel.id, group.slice(6), from.slice(0, 7), deps.config.dataDir);
+      await refreshOrchidStemFile(db, req.authCtx, channel.id, "", from.slice(0, 7), deps.config.dataDir);
     }
-    const all = addOrchidWorkPlanCounts(buildOrchidStemReport(messages), plans, from, to);
+    const all = addOrchidWorkPlanCounts(combineOrchidStemReports(reports), groupKey ? [] : plans, from, to);
     const senders = [...new Set([...all.monthly.map(x => x.senderName), ...all.review.map(x => x.senderName)])]
       .sort((a, b) => a.localeCompare(b, "vi"));
     const filtered = filterOrchidStemReport(all, sender);
-    return { month: month || from.slice(0, 7), from, to, sender, senders,
-      channelName: channel.name, groupId: group.slice(6),
+    return { month: month || from.slice(0, 7), from, to, sender, senders, group: groupKey, groups,
+      channelName: channel.name,
       libraryPath: from.slice(0, 7) === to.slice(0, 7)
         ? `shared/bao-cao-cam-hoa/bao-cao-cam-hoa-${from.slice(0, 7)}.xlsx` : null,
       ...filtered };
@@ -1300,8 +1310,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.get("/v1/orchid-stem-report.xlsx", async (req, reply) => {
     const report = await orchidStemReport(req, reply);
     if (!report) return;
-    const buf = orchidStemWorkbook(report, { from: report.from, to: report.to, sender: report.sender });
-    const filename = `bao-cao-cam-hoa-${report.from}-${report.to}${report.sender ? "-nhan-vien" : ""}.xlsx`;
+    const buf = orchidStemWorkbook(report, { from: report.from, to: report.to, sender: report.sender, group: report.group });
+    const filename = `bao-cao-cam-hoa-${report.from}-${report.to}${report.group ? `-${report.group}` : ""}${report.sender ? "-nhan-vien" : ""}.xlsx`;
     return reply.header("cache-control", "no-store")
       .header("content-disposition", `attachment; filename="${filename}"`)
       .type("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet").send(buf);

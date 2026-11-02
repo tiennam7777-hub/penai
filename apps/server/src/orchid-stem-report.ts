@@ -1,5 +1,5 @@
 import type { OrchidStemMessage } from "@penai/db";
-import { listOrchidStemMessages, listOrchidWorkPlanMessages, type Db } from "@penai/db";
+import { listOrchidStemGroups, listOrchidStemMessages, listOrchidWorkPlanMessages, type Db } from "@penai/db";
 import type { WorkspaceContext } from "@penai/shared";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -15,6 +15,10 @@ export interface OrchidStemEntry extends OrchidStemMessage {
   quoteSentAt?: string;
   originalDayConfirmed?: boolean;
   countHistory?: Array<{ msgId: string; stems: number; sentAt: string }>;
+}
+
+export function isOrchidStemGroupName(name: string): boolean {
+  return ["Bao Cao Cam hoa 42 DBP", "Báo Cáo Cắm Hoa 188", "Báo Cáo Cắm Hoa Hà Nội"].includes(name);
 }
 
 function stemCustomerName(prefix: string): string | null {
@@ -282,6 +286,25 @@ export function buildOrchidStemReport(messages: OrchidStemMessage[]) {
   return { entries: uniqueEntries, review, daily: [...daily.values()], monthly: [...monthly.values()] };
 }
 
+export function combineOrchidStemReports(reports: Array<ReturnType<typeof buildOrchidStemReport>>) {
+  const entries = reports.flatMap(r => r.entries);
+  const review = reports.flatMap(r => r.review);
+  const daily = new Map<string, (typeof reports)[number]["daily"][number]>();
+  const monthly = new Map<string, (typeof reports)[number]["monthly"][number]>();
+  for (const report of reports) {
+    for (const row of report.daily) {
+      const key = `${row.day}:${row.senderId}`;
+      const prior = daily.get(key);
+      daily.set(key, prior ? { ...prior, stems: prior.stems + row.stems, jobs: prior.jobs + row.jobs } : { ...row });
+    }
+    for (const row of report.monthly) {
+      const prior = monthly.get(row.senderId);
+      monthly.set(row.senderId, prior ? { ...prior, stems: prior.stems + row.stems, jobs: prior.jobs + row.jobs } : { ...row });
+    }
+  }
+  return { entries, review, daily: [...daily.values()], monthly: [...monthly.values()] };
+}
+
 export function filterOrchidStemReport(report: ReturnType<typeof addOrchidWorkPlanCounts>, sender: string) {
   if (!sender) return report;
   return {
@@ -293,18 +316,18 @@ export function filterOrchidStemReport(report: ReturnType<typeof addOrchidWorkPl
 }
 
 export function orchidStemWorkbook(report: ReturnType<typeof addOrchidWorkPlanCounts>,
-  filter?: { from: string; to: string; sender: string }): Buffer {
+  filter?: { from: string; to: string; sender: string; group?: string }): Buffer {
   return buildXlsx([
     ...(filter ? [{ name: "Bộ lọc", widths: [24, 36], rows: [
       ["Điều kiện", "Giá trị"], ["Từ ngày", filter.from], ["Đến ngày", filter.to],
-      ["Nhân viên", filter.sender || "Tất cả"],
+      ["Nhân viên", filter.sender || "Tất cả"], ["Nhóm báo cáo", filter.group || "Tất cả"],
     ] }] : []),
-    { name: "Chi tiết", widths: [20, 12, 25, 24, 30, 12, 48, 22, 22, 20, 34, 70], rows: [
-      ["Ngày", "Giờ gửi ảnh/tin gốc", "Người gửi", "UID người gửi", "Tên khách", "Số cành tính", "Tin gốc", "Mã tin Zalo", "Mã ảnh trích dẫn", "Giờ báo lại", "Ghi chú ngày tính", "Lịch sử báo và sửa số cành"],
+    { name: "Chi tiết", widths: [20, 12, 25, 24, 30, 12, 48, 22, 22, 20, 34, 70, 25], rows: [
+      ["Ngày", "Giờ gửi ảnh/tin gốc", "Người gửi", "UID người gửi", "Tên khách", "Số cành tính", "Tin gốc", "Mã tin Zalo", "Mã ảnh trích dẫn", "Giờ báo lại", "Ghi chú ngày tính", "Lịch sử báo và sửa số cành", "Nhóm báo cáo"],
       ...report.entries.map(e => [e.day, e.originalDayConfirmed ? "" : orchidStemTime(e.sentAt),
         e.senderName, e.senderId, e.customerName, e.stems, e.text, e.msgId, e.quotedPhotoMsgId ?? "",
         e.quoteSentAt ? new Date(e.quoteSentAt) : "", e.originalDayConfirmed ? "Chủ shop xác nhận ngày ảnh gốc" : "",
-        (e.countHistory ?? []).map((h, i) => `${i + 1}. ${h.stems} cành · ${new Date(h.sentAt).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })} · tin ${h.msgId}`).join("; ")]),
+        (e.countHistory ?? []).map((h, i) => `${i + 1}. ${h.stems} cành · ${new Date(h.sentAt).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })} · tin ${h.msgId}`).join("; "), e.reportGroup ?? ""]),
     ] },
     { name: "Theo ngày", widths: [20, 25, 24, 16, 16, 16], rows: [
       ["Ngày", "Người gửi", "UID người gửi", "Số lượt", "Tổng cành tính", "NVBC"],
@@ -325,18 +348,20 @@ const refreshes = new Map<string, Promise<string>>();
 /** Persist the current month as a single Excel file in the visible shared library. */
 export function refreshOrchidStemFile(db: Db, ctx: WorkspaceContext, channelId: string,
   threadId: string, month: string, dataDir: string): Promise<string> {
-  const key = `${ctx.workspaceId}:${channelId}:${month}`;
+  const key = `${ctx.workspaceId}:${month}`;
   const prior = refreshes.get(key) ?? Promise.resolve("");
   const next = prior.catch(() => "").then(async () => {
     const [year, mon] = month.split("-").map(Number);
     if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(month)) throw new Error("Tháng không hợp lệ");
     const start = new Date(Date.UTC(year!, mon! - 1, 1) - 7 * 3600_000);
     const end = new Date(Date.UTC(year!, mon!, 1) - 7 * 3600_000);
-    const [messages, plans] = await Promise.all([
-      listOrchidStemMessages(db, ctx, channelId, threadId, start, end),
+    const groups = await listOrchidStemGroups(db, ctx);
+    const [reports, plans] = await Promise.all([
+      Promise.all(groups.map(async group => buildOrchidStemReport((await listOrchidStemMessages(
+        db, ctx, group.channelId, group.threadId, start, end)).map(m => ({ ...m, reportGroup: group.key }))))),
       listOrchidWorkPlanMessages(db, ctx, channelId, start, new Date(end.getTime() + 8 * 3600_000)),
     ]);
-    const report = addOrchidWorkPlanCounts(buildOrchidStemReport(messages), plans,
+    const report = addOrchidWorkPlanCounts(combineOrchidStemReports(reports), plans,
       `${month}-01`, new Date(Date.UTC(year!, mon!, 0)).toISOString().slice(0, 10));
     const dir = join(sharedDirFor(dataDir, ctx.workspaceId), "bao-cao-cam-hoa");
     await mkdir(dir, { recursive: true });

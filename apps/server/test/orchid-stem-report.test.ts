@@ -1,8 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { addOrchidWorkPlanCounts, buildOrchidStemReport, filterOrchidStemReport, orchidStemDateBounds, orchidStemRefreshMonths, orchidStemTime, parseOrchidStemText, parseOrchidWorkPlanCount } from "../src/orchid-stem-report.js";
+import { addOrchidWorkPlanCounts, buildOrchidStemReport, combineOrchidStemReports, filterOrchidStemReport, orchidStemDateBounds, orchidStemRefreshMonths, orchidStemTime, parseOrchidStemText, parseOrchidWorkPlanCount } from "../src/orchid-stem-report.js";
 import { INDEX_HTML } from "../src/ui.js";
 
 describe("orchid stem report", () => {
+  it("combines three groups without collapsing jobs by the same worker", () => {
+    const at = "2026-11-01T09:00:00.000Z";
+    const groups = ["42", "188", "hanoi"].map((reportGroup, i) => buildOrchidStemReport([
+      { msgId: `m${i}`, senderId: "worker", senderName: "Lộc", text: `Khách Hoa ${i + 3}c`,
+        sentAt: at, reportGroup },
+    ]));
+    const all = combineOrchidStemReports(groups);
+    expect(all.entries.map(e => e.reportGroup)).toEqual(["42", "188", "hanoi"]);
+    expect(all.daily).toMatchObject([{ stems: 12, jobs: 3 }]);
+    expect(all.monthly).toMatchObject([{ stems: 12, jobs: 3 }]);
+    expect(groups[1]!.monthly).toMatchObject([{ stems: 4, jobs: 1 }]);
+  });
+  it("offers group filtering in the report page", () => {
+    expect(INDEX_HTML).toContain('id="stemGroup"');
+    expect(INDEX_HTML).toContain('value="hanoi"');
+    expect(INDEX_HTML).toContain('q.set("group", group)');
+  });
   it("uses the newest surviving quote once, retains customer and correction history", () => {
     const photo = { msgId: "photo", senderId: "worker", senderName: "Lộc", text: "Chị Hà (6c)",
       contentType: "photo", sentAt: "2026-11-01T09:00:00.000Z" };

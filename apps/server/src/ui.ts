@@ -1000,20 +1000,23 @@ export const INDEX_HTML = `<!doctype html>
     var selectedFrom = params.get("from") || (monthValid ? month + "-01" : today.slice(0, 7) + "-01");
     var selectedTo = params.get("to") || monthEnd;
     var selectedSender = params.get("sender") || "";
+    var selectedGroup = params.get("group") || "";
     c.innerHTML = '<div class="stem-monthbar"><label>Tháng báo cáo<input id="stemMonth" type="month" value="' + esc(monthValid ? month : selectedFrom.slice(0, 7)) + '"></label>' +
       '<div class="row"><button id="stemMonthLoad">Xem báo cáo</button><button id="stemExport" class="ghost">Tải Excel</button></div></div>' +
       '<div class="stem-toolbar"><label>Từ ngày<input id="stemFrom" type="date" value="' + esc(selectedFrom) + '"></label>' +
       '<label>Đến ngày<input id="stemTo" type="date" value="' + esc(selectedTo) + '"></label>' +
       '<label>Nhân viên<select id="stemSender"><option value="">Tất cả nhân viên</option></select></label>' +
+      '<label>Nhóm báo cáo<select id="stemGroup"><option value="">Tất cả nhóm</option><option value="42">42 ĐBP</option><option value="188">188</option><option value="hanoi">Hà Nội</option></select></label>' +
       '<div class="row"><button id="stemLoad">Áp dụng lọc</button></div></div>' +
       '<p class="muted" style="margin:7px 0 0">File Excel dùng đúng khoảng ngày và nhân viên đang chọn.</p>' +
       '<div class="stem-guide"><strong>Cách ghi để được cộng vào báo cáo</strong><b>c = cành, v = vòi.</b> Ví dụ <b>C Chi (8c) Lộc</b> tính 8 cành cho C Chi; chữ sau ngoặc là ghi chú. Với chậu nhiều vòi, lấy số cành nhân số vòi: <b>Hà cii (3c 2v) = 6 cành</b>, <b>A trung. Cảnh 5 2v = 10 cành</b>. Cũng có thể gửi tên khách rồi số cành bằng tin tiếp theo trong 5 phút, cùng tài khoản. <b>Ảnh không ghi số cành không phải báo cáo cắm hoa.</b> Khi có tin trích dẫn đúng ảnh và nhắn <b>8c</b>, <b>8 cành</b> hoặc <b>@tên người gửi ảnh 8c</b>, ảnh được cộng một lần cho người gửi ảnh gốc, theo ngày gửi ảnh gốc. Ví dụ gửi ảnh ngày 10, đến ngày 15 mới trích dẫn báo <b>5 cành</b> thì cộng 5 cành vào <b>ngày 10</b>, không cộng ngày 15. Tin có nhiều số nhưng không rõ cành/vòi, giá hoặc phí ship sẽ nằm ở “Tin cần kiểm tra”.</div>' +
       '<div id="stemSummary" aria-live="polite">Đang tải...</div>' +
-      '<section class="stem-section"><h3>Theo người gửi</h3><p class="muted stem-section-note">Xếp theo tổng số cành trong khoảng ngày đã chọn. NVBC cộng báo cáo của nhân viên trong nhóm Kế Hoạch 5 phút Làm Việc trên toàn bộ khoảng ngày đã chọn, kể cả ngày chưa có tin cắm hoa được ghi nhận. Dấu — là chưa đối chiếu được đúng người gửi.</p><div id="stemMonthly"></div></section>' +
+      '<section class="stem-section"><h3>Theo người gửi</h3><p class="muted stem-section-note">Xếp theo tổng số cành trong khoảng ngày đã chọn. NVBC cộng báo cáo của nhân viên trong nhóm Kế Hoạch 5 phút Làm Việc khi xem tất cả nhóm; khi lọc một nhóm, NVBC để trống vì báo cáo công việc không chia theo nhóm. Dấu — là chưa có số đối chiếu.</p><div id="stemMonthly"></div></section>' +
       '<section class="stem-section"><h3>Theo ngày</h3><p class="muted stem-section-note">Mỗi ngày có tổng riêng; bấm vào ngày để xem từng người. Ngày có NVBC nhưng chưa có tin cắm hoa được ghi nhận sẽ hiện 0 ở Cành tính.</p><div id="stemDaily"></div></section>' +
       '<details class="stem-detail"><summary id="stemDetailTitle">Chi tiết từng tin</summary><label class="stem-detail-filter">Lọc theo người gửi<select id="stemDetailSender"><option value="">Tất cả người gửi</option></select></label><div id="stemDetail" class="stem-scroll"></div></details>' +
       '<details class="stem-detail" id="stemReviewSection"><summary id="stemReviewTitle">Tin cần kiểm tra</summary><p class="muted">Tin này chưa được cộng vào báo cáo. Đối chiếu trước khi chốt số liệu.</p><div id="stemReview" class="stem-scroll"></div></details>' +
-      '<p class="muted">Một lượt là một tin đủ tên khách và số cành (kể cả hai tin liền nhau), hoặc một ảnh được trích dẫn báo số cành và tính cho người gửi ảnh gốc. Tin Zalo trùng mã chỉ tính một lần. Dữ liệu từ nhóm Bao Cao Cam hoa 42 DBP.</p>';
+      '<p class="muted">Một lượt là một tin đủ tên khách và số cành (kể cả hai tin liền nhau), hoặc một ảnh được trích dẫn báo số cành và tính cho người gửi ảnh gốc. Tin Zalo trùng mã chỉ tính một lần. Dữ liệu từ ba nhóm 42 ĐBP, 188 và Hà Nội.</p>';
+    $("#stemGroup", c).value = selectedGroup;
     function number(n) { return Number(n || 0).toLocaleString("vi-VN"); }
     function dayLabel(day) {
       var parts = day.split("-");
@@ -1026,12 +1029,12 @@ export const INDEX_HTML = `<!doctype html>
       var detail = $("#stemDetail", c); detail.innerHTML = "";
       $("#stemDetailTitle", c).textContent = "Chi tiết từng tin (" + number(entries.length) + ")";
       if (!entries.length) { detail.innerHTML = '<p class="muted">Chưa có tin của người gửi này trong khoảng ngày đã chọn.</p>'; return; }
-      var et = table(["Ngày", "Giờ gửi", "Người gửi", "Khách", "Cành tính", "Tin gốc"], entries, function (x) {
+      var et = table(["Ngày", "Giờ gửi", "Nhóm", "Người gửi", "Khách", "Cành tính", "Tin gốc"], entries, function (x) {
         var sentTime = x.originalDayConfirmed ? "—" : new Date(x.sentAt).toLocaleTimeString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", hour12: false });
         var quoteTime = x.quoteSentAt ? new Date(x.quoteSentAt).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour12: false }) : "";
         var note = x.quotedPhotoMsgId ? 'Trích dẫn ảnh ' + esc(x.quotedPhotoMsgId) : x.originalDayConfirmed ? 'Ngày ảnh gốc do chủ shop xác nhận' : '';
         var history = (x.countHistory || []).map(function (h, i) { return (i + 1) + '. ' + number(h.stems) + ' cành · ' + new Date(h.sentAt).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) + ' · tin ' + h.msgId; }).join('; ');
-        var tr = el("tr"); tr.innerHTML = '<td>' + dayLabel(x.day) + '</td><td>' + esc(sentTime) + '</td><td>' + esc(x.senderName) + '</td><td>' + esc(x.customerName) + '</td><td class="stem-num">' + number(x.stems) + '</td><td>' + esc(x.text) + (note ? '<div class="muted">' + note + (quoteTime ? ' · Báo lại ' + esc(quoteTime) : '') + '</div>' : '') + (history ? '<div class="muted">Lịch sử: ' + esc(history) + '</div>' : '') + '</td>'; return tr;
+        var tr = el("tr"); tr.innerHTML = '<td>' + dayLabel(x.day) + '</td><td>' + esc(sentTime) + '</td><td>' + esc(x.reportGroup === 'hanoi' ? 'Hà Nội' : x.reportGroup === '42' ? '42 ĐBP' : x.reportGroup || '') + '</td><td>' + esc(x.senderName) + '</td><td>' + esc(x.customerName) + '</td><td class="stem-num">' + number(x.stems) + '</td><td>' + esc(x.text) + (note ? '<div class="muted">' + note + (quoteTime ? ' · Báo lại ' + esc(quoteTime) : '') + '</div>' : '') + (history ? '<div class="muted">Lịch sử: ' + esc(history) + '</div>' : '') + '</td>'; return tr;
       }); et.className = "stem-table"; detail.appendChild(et);
     }
     $("#stemDetailSender", c).onchange = renderDetail;
@@ -1049,6 +1052,8 @@ export const INDEX_HTML = `<!doctype html>
       var q = new URLSearchParams({ from: from, to: to });
       var sender = $("#stemSender", c).value;
       if (sender) q.set("sender", sender);
+      var group = $("#stemGroup", c).value;
+      if (group) q.set("group", group);
       return q.toString();
     }
     var loadId = 0;
@@ -1078,7 +1083,7 @@ export const INDEX_HTML = `<!doctype html>
         });
         var dayRows = Object.keys(days).sort().reverse().map(function (key) { return days[key]; });
         var box = $("#stemSummary", c);
-        box.innerHTML = '<p class="muted" style="margin:11px 0 0">Đang xem: ' + dayLabel(r.from) + ' – ' + dayLabel(r.to) + ' · ' + esc(r.sender || "Tất cả nhân viên") + '</p><div class="stem-summary">' +
+        box.innerHTML = '<p class="muted" style="margin:11px 0 0">Đang xem: ' + dayLabel(r.from) + ' – ' + dayLabel(r.to) + ' · ' + esc(r.sender || "Tất cả nhân viên") + ' · ' + esc(r.group === 'hanoi' ? 'Hà Nội' : r.group === '42' ? '42 ĐBP' : r.group || 'Tất cả nhóm') + '</p><div class="stem-summary">' +
           '<div class="stem-metric"><strong>' + number(total) + '</strong><span>Tổng cành</span></div>' +
           '<div class="stem-metric"><strong>' + number(r.entries.length) + '</strong><span>Lượt ghi nhận</span></div>' +
           '<div class="stem-metric"><strong>' + number(dayRows.length) + '</strong><span>Ngày có dữ liệu</span></div>' +

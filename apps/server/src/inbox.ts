@@ -94,7 +94,7 @@ import { expectsCurrentColorPhotos, latestDelegableStaffRow, promisedPotStemCoun
 import { readPhotoAcknowledgement } from "./photo-burst.js";
 import { inboxZaloQuote, type InboxZaloQuote } from "./inbox-quote.js";
 import { stemCountForPhoto } from "./orchid-photo-count.js";
-import { orchidStemRefreshMonths, refreshOrchidStemFile } from "./orchid-stem-report.js";
+import { isOrchidStemGroupName, orchidStemRefreshMonths, refreshOrchidStemFile } from "./orchid-stem-report.js";
 
 // ===== Cấu hình sống theo kênh =====
 
@@ -196,8 +196,8 @@ function inboxRuntime(channelId: string): PersonalChannel | null {
 async function refreshRecalledStemMessage(db: Db, ctx: WorkspaceContext, channelId: string,
   threadId: string, message: InboxMessageRow | null): Promise<void> {
   if (!message || !inboxDataDir) return;
-  const channel = await getChannelById(db, ctx, channelId);
-  if ((channel?.config as Record<string, unknown> | undefined)?.["orchid_stem_report_group"] !== `group:${threadId}`) return;
+  const thread = await getInboxThread(db, ctx, channelId, threadId);
+  if (!isOrchidStemGroupName(thread?.name ?? "")) return;
   const quote = message.meta?.quote as { msgId?: string; cliMsgId?: string } | undefined;
   const photoByMsg = quote?.msgId && quote.msgId !== "0"
     ? await getInboxMessageByMsgId(db, ctx, channelId, threadId, quote.msgId)

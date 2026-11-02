@@ -87,7 +87,7 @@ import {
   orchidDeliveryCorrection,
 } from "./orchid-order-dispatch.js";
 import { stemCountForPhoto } from "./orchid-photo-count.js";
-import { orchidStemDay, orchidStemRefreshMonths, refreshOrchidStemFile } from "./orchid-stem-report.js";
+import { isOrchidStemGroupName, orchidStemDay, orchidStemRefreshMonths, refreshOrchidStemFile } from "./orchid-stem-report.js";
 import { knownOrchidShippingHint, orchidShippingHintContext, completeOrchidShippingReply, orchidDeliveryPriorityContext } from "./orchid-shipping-reply.js";
 import { orchidCompanyPaymentContext } from "./orchid-payment-context.js";
 import { classifyOrchidFlowerComplaint, formatOrchidFlowerComplaintDispatch, orchidFlowerComplaintFingerprint } from "./orchid-flower-complaint.js";
@@ -849,8 +849,8 @@ export function makeInboundHandler(
   }
   return async (msg, hooks?: RunHooks): Promise<InboundResult> => {
     const ctx = systemContext(channel.workspaceId);
-    if (msg.channelKind === "zalo_personal" && msg.peerKind === "group" &&
-        channel.config["orchid_stem_report_group"] === msg.chatKey && /\d/.test(msg.text)) {
+    if (msg.channelKind === "zalo_personal" && msg.peerKind === "group" && /\d/.test(msg.text) &&
+        isOrchidStemGroupName((await getInboxThread(db, ctx, channel.id, msg.chatKey.slice(6)))?.name ?? "")) {
       const threadId = msg.chatKey.slice(6);
       const originalPhoto = msg.quoted?.kind === "photo"
         ? (msg.quoted.msgId !== "0"

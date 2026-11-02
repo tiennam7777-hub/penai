@@ -16,6 +16,26 @@ export interface OrchidStemMessage {
   quoteOwnerId?: string;
   originalPhotoDay?: string;
   inRange?: boolean;
+  reportGroup?: string;
+}
+
+export interface OrchidStemGroup { key: "42" | "188" | "hanoi"; name: string; channelId: string; threadId: string }
+
+/** One anchor view per report group; each report query deduplicates all Zalo views. */
+export async function listOrchidStemGroups(db: Db, ctx: WorkspaceContext): Promise<OrchidStemGroup[]> {
+  const result = await withWorkspace(db, ctx, tx => tx.execute(sql`
+    SELECT DISTINCT ON (t.name) t.name, t.channel_id, t.thread_id
+    FROM inbox_threads t JOIN channels c ON c.id = t.channel_id
+    WHERE t.workspace_id = ${ctx.workspaceId} AND t.kind = 'group'
+      AND c.kind = 'zalo_personal'
+      AND t.name IN ('Bao Cao Cam hoa 42 DBP', 'Báo Cáo Cắm Hoa 188', 'Báo Cáo Cắm Hoa Hà Nội')
+    ORDER BY t.name, CASE WHEN c.name = 'NV Bán Hàng Hot 1' THEN 0 ELSE 1 END, t.channel_id`));
+  const keys: Record<string, OrchidStemGroup["key"]> = {
+    "Bao Cao Cam hoa 42 DBP": "42", "Báo Cáo Cắm Hoa 188": "188", "Báo Cáo Cắm Hoa Hà Nội": "hanoi",
+  };
+  return result.rows.map(row => ({ key: keys[String(row.name)]!, name: String(row.name),
+    channelId: String(row.channel_id), threadId: String(row.thread_id) }))
+    .sort((a, b) => ["42", "188", "hanoi"].indexOf(a.key) - ["42", "188", "hanoi"].indexOf(b.key));
 }
 
 /** Prefer Hot 1's view, as the flower report also prefers its sender IDs. */
