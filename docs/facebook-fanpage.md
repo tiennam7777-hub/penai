@@ -4,21 +4,23 @@ PenAI dùng Messenger Platform API chính thức cho **Fanpage**. Mỗi Page là
 channel `facebook_page` riêng, có thể gắn cùng Agent kinh doanh. Tài khoản
 Facebook cá nhân không dùng được luồng này.
 
-## Hiện trạng hai Page (đối chiếu trong Meta ngày 01/11/2026)
+## Hiện trạng hai Page (đối chiếu ngày 02/11/2026)
 
 | Page | Page ID | Tên hiển thị trong Meta |
 | --- | --- | --- |
 | `lanhodiep.orchidsworld` | `620530068063788` | NPP Lan Hồ Điệp Đà Lạt Orchids World |
 | `lanhodiepdienbienphu` | `240316652835505` | NPP Lan Hồ Điệp Orchids World - CN Hòa Bình |
 
-Cả hai Page đã nằm trong Meta App **Chatbot IM1** (`1082111827116690`), hiện
-đang ở chế độ Development. App đã đăng ký `messages` cho cả hai Page và webhook
-đang trỏ tới `https://auto.imgroup.vn/webhook/chatbot-messenger-imgroup-v01`.
-`pages_messaging` và `pages_manage_metadata` xuất hiện trong danh sách quyền,
-nhưng cần kiểm tra cấp độ truy cập và App Review trước khi nhận khách thật.
-**Không thay callback hiện tại** khi chưa xác định dịch vụ `auto.imgroup.vn` đang
-xử lý gì và lịch chuyển kết nối. Một Meta App dùng một callback Page chung; nếu
-chuyển callback sang PenAI, webhook cũ sẽ ngừng nhận sự kiện từ App này.
+Cả hai Page đã nằm trong Meta App **Chatbot IM1** (`1082111827116690`). App
+vẫn ở chế độ Development. Callback hiện là
+`https://ai.phonglanvietnam.com/webhooks/facebook`; cả hai Page đăng ký
+`messages`, `messaging_postbacks` và `message_reads`. PenAI trên VPS đang chạy
+commit `9bc16bf7`, hai kênh Fanpage đã tạo và cả hai Page access token xác minh
+thành công bằng API. Các kênh được tạo với AI mặc định tắt. Chưa xác nhận một
+tin thử từ Meta đã vào Inbox hoặc nhân viên đã trả lời thành công từ Inbox.
+Trang xét duyệt Meta báo phiên đang dùng không phải quản trị viên ứng dụng, nên
+không thể yêu cầu App Review từ phiên này. Cần quản trị viên ứng dụng hoàn tất
+quyền `pages_messaging` và điều kiện chạy chính thức trước khi phục vụ khách thật.
 
 ## Chuẩn bị tại Meta
 
