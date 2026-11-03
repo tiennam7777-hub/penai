@@ -134,8 +134,9 @@ export function parseOrchidWorkPlanCount(text: string, sentAt: string): { day: s
   const lines = text.replace(/\r/g, "").split("\n");
   if (!/(?:bccv|báo cáo|bao cao|\b\d{1,2}\/\d{1,2}\b)/iu.test(lines.slice(0, 3).join(" "))) return null;
   const first = lines[0] + (/^\s*\d{1,2}\/\d{1,2}(?:\/20\d{2})?\s*$/u.test(lines[1] ?? "") ? ` ${lines[1]}` : "");
-  const dateMatch = /^\s*(?:(?:bccv|báo cáo(?:\s+cv)?|bao cao(?:\s+cv)?)\s*[:.\-]?\s*)?(\d{1,2})\/(\d{1,2})(?:\/(20\d{2}))?/iu.exec(first);
+  const dateMatch = /^\s*(?:(?:bccv|báo cáo(?:\s+cv)?|bao cao(?:\s+cv)?)\s*[:.\-]?\s*(?:ngày\s+)?)?(\d{1,2})\/(\d{1,2})(?:\/(20\d{2}))?/iu.exec(first);
   let day = orchidStemDay(sentAt);
+  const previousDay = new Date(Date.parse(`${day}T00:00:00Z`) - 86400_000).toISOString().slice(0, 10);
   if (dateMatch) {
     const year = Number(dateMatch[3] ?? day.slice(0, 4));
     const candidate = `${year}-${String(dateMatch[2]).padStart(2, "0")}-${String(dateMatch[1]).padStart(2, "0")}`;
@@ -148,6 +149,7 @@ export function parseOrchidWorkPlanCount(text: string, sentAt: string): { day: s
       if (!sameDayNumber || monthGap === 0 || monthGap > 1) day = candidate;
     }
   } else {
+    if (/\b(?:báo cáo|bao cao|bccv)\b.{0,20}\b(?:hôm qua|hom qua)\b|\b(?:hôm qua|hom qua)\b.{0,20}\b(?:báo cáo|bao cao|bccv)\b/iu.test(lines.slice(0, 3).join(" "))) day = previousDay;
     // Reports just after midnight often end with "Kh 19/10", meaning work on 18/10.
     const plan = /\bkh(?:nm|cv)?\s*(\d{1,2})\/(\d{1,2})(?:\/(20\d{2}))?/iu.exec(text);
     if (plan) {
@@ -397,7 +399,7 @@ export function refreshOrchidStemFile(db: Db, ctx: WorkspaceContext, channelId: 
     const [reports, plans] = await Promise.all([
       Promise.all(groups.map(async group => buildOrchidStemReport((await listOrchidStemMessages(
         db, ctx, group.channelId, group.threadId, start, end)).map(m => ({ ...m, reportGroup: group.key }))))),
-      listOrchidWorkPlanMessages(db, ctx, channelId, start, new Date(end.getTime() + 8 * 3600_000)),
+      listOrchidWorkPlanMessages(db, ctx, channelId, start, new Date(end.getTime() + 24 * 3600_000)),
     ]);
     const report = addOrchidWorkPlanCounts(combineOrchidStemReports(reports), plans,
       `${month}-01`, new Date(Date.UTC(year!, mon!, 0)).toISOString().slice(0, 10));

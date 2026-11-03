@@ -1287,7 +1287,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         db, req.authCtx, group.channelId, group.threadId, bounds.start, bounds.end))
         .map(m => ({ ...m, reportGroup: group.key }))))),
       listOrchidWorkPlanMessages(db, req.authCtx, channel.id, bounds.start,
-        new Date(bounds.end.getTime() + 8 * 3600_000)),
+        new Date(bounds.end.getTime() + 24 * 3600_000)),
     ]);
     if (from.slice(0, 7) === to.slice(0, 7)) {
       await refreshOrchidStemFile(db, req.authCtx, channel.id, "", from.slice(0, 7), deps.config.dataDir);

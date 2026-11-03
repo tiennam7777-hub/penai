@@ -82,6 +82,12 @@ describe("orchid stem report", () => {
       "2026-11-01T11:21:36.021Z")).toEqual({ day: "2026-11-01", stems: 66 });
     expect(parseOrchidWorkPlanCount("BCCV 2/10\ncắm 135 cây\nra 10 thùng hoa\nKHNM\ncắm đơn",
       "2026-11-02T11:38:04.271Z")).toEqual({ day: "2026-11-02", stems: 135 });
+    expect(parseOrchidWorkPlanCount("Bccv ngày 2/11\ncắm 18 cây", "2026-11-03T13:00:00.000Z"))
+      .toEqual({ day: "2026-11-02", stems: 18 });
+    expect(parseOrchidWorkPlanCount("Báo cáo hôm qua\ncắm 18 cây", "2026-11-03T13:00:00.000Z"))
+      .toEqual({ day: "2026-11-02", stems: 18 });
+    expect(parseOrchidWorkPlanCount("Bccv 3/11\ncắm 18 cây\nKH 4/11 cắm 30 cây", "2026-11-03T13:00:00.000Z"))
+      .toEqual({ day: "2026-11-03", stems: 18 });
   });
 
   it("matches NVBC by sender ID and original day, keeping missing reports blank", () => {
