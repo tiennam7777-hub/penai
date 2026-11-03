@@ -15,15 +15,33 @@ describe("orchid order dispatch", () => {
     expect(mayConfirmOrchidOrder("Chốt chậu này giao sáng mai nhé")).toBe(true);
     expect(mayConfirmOrchidOrder("Anh hỏi giá chậu 15 cành")).toBe(false);
   });
-  it("rejects inquiries and incomplete confirmations", () => {
+  it("accepts agreed orders with missing delivery details but rejects unknown products", () => {
     expect(parseConfirmedOrchidOrder('{"confirmed":false}')).toBeNull();
-    expect(parseConfirmedOrchidOrder('{"confirmed":true,"stems":15,"color":"vàng","delivery":""}')).toBeNull();
+    expect(parseConfirmedOrchidOrder('{"confirmed":true,"stems":15,"color":"vàng","delivery":""}')).toMatchObject({
+      stems: 15, color: "vàng", delivery: null, address: null,
+    });
     expect(parseConfirmedOrchidOrder('{"confirmed":true,"stems":0,"color":"vàng","delivery":"08:00 15/10/2026"}')).toBeNull();
     expect(parseConfirmedOrchidOrder("not-json")).toBeNull();
-    expect(parseConfirmedOrchidOrder('{"confirmed":true,"stems":5,"color":"vàng","delivery":null}')).toBeNull();
+    expect(parseConfirmedOrchidOrder('{"confirmed":true,"stems":5,"color":"vàng","delivery":null}')).not.toBeNull();
+    expect(parseConfirmedOrchidOrder('{"confirmed":true,"stems":5,"color":""}')).toBeNull();
     expect(parseConfirmedOrchidOrder('{"confirmed":true,"stems":5,"color":"vàng","delivery":null,"deliveryDeferred":true,"addressDeferred":true}')).toMatchObject({
       stems: 5, color: "vàng", delivery: null,
     });
+  });
+
+  it("passes a customer's quoted photo choice into order classification", async () => {
+    let prompt = "";
+    const provider = { chat: async (input: { messages: Array<{ content: string }> }) => {
+      prompt = input.messages[0]!.content;
+      return { stopReason: "end", toolCalls: [], content: JSON.stringify({ confirmed: true,
+        stems: 5, color: "mẫu ảnh khách chọn", delivery: null, address: null }) };
+    } } as unknown as Provider;
+    const messages = [{ id: "1", direction: "in", source: "zalo", senderName: "Khách", text: "lấy màu này nha a",
+      meta: { quote: { kind: "photo", msgId: "photo-1" } }, sentAt: "2026-11-02T04:50:38Z" }] as unknown as Parameters<typeof classifyConfirmedOrchidOrder>[2];
+    const order = await classifyConfirmedOrchidOrder(provider, "test", messages,
+      { text: "chốt đơn giúp e", senderName: "Khách" }, new Date("2026-11-02T04:52:34Z"));
+    expect(order).toMatchObject({ stems: 5, color: "mẫu ảnh khách chọn", delivery: null, address: null });
+    expect(prompt).toContain("khách trích dẫn ảnh mẫu");
   });
 
   it("forms one usable group message even when the agreed price is absent", () => {

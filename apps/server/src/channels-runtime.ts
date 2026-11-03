@@ -1527,6 +1527,10 @@ export function makeInboundHandler(
     const shippingContext = orchidShippingHintContext(shippingHint);
     let dispatchContext = "";
     let kiotContext = "";
+    if (agent.key === "nhan-vien-kinh-doanh-orchids-world" &&
+        /(?:lên|len|gửi|gui|có|co|xem).{0,30}(?:bill|phiếu đặt hàng)/i.test(msg.text)) {
+      kiotContext = "[HỆ THỐNG: Chưa có xác nhận tạo bill KiotViet từ lượt xử lý tin này. Chỉ nói đã lên bill khi hệ thống xác nhận tạo phiếu và có mã. Nếu chưa có xác nhận, nói rõ chưa xác minh được bill và cần nhân viên kiểm tra; không hứa gửi bill sau.]";
+    }
     let complaintReply: string | null = null;
     const orderGroupId = channel.config["orchid_order_dispatch_group"];
     if (agent.key === "nhan-vien-kinh-doanh-orchids-world" && channel.kind === "zalo_personal" &&
