@@ -990,24 +990,36 @@ export const INDEX_HTML = `<!doctype html>
   };
 
   PAGES["delivery-report"] = function () {
-    var m = page("Báo cáo Giao hàng", "Số đơn giao theo ngày và xếp hạng nhân viên trong tháng");
+    var m = page("Báo cáo Giao hàng", "Số đơn giao theo ngày và xếp hạng nhân viên trong khoảng đã chọn");
     var c = card(m); c.classList.add("stem-report");
     var params = new URLSearchParams(state.routeQuery || "");
     var month = params.get("month") || new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 7);
+    var monthEnd = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0)).toISOString().slice(0, 10);
+    var from = params.get("from") || month + "-01";
+    var to = params.get("to") || monthEnd;
     var sender = params.get("sender") || "";
     c.innerHTML = '<div class="stem-monthbar"><label>Tháng báo cáo<input id="deliveryMonth" type="month" value="' + esc(month) + '"></label>' +
+      '<label>Từ ngày<input id="deliveryFrom" type="date" value="' + esc(from) + '"></label>' +
+      '<label>Đến ngày<input id="deliveryTo" type="date" value="' + esc(to) + '"></label>' +
       '<label>Nhân viên<select id="deliverySender"><option value="">Tất cả nhân viên</option></select></label>' +
       '<button id="deliveryLoad">Xem báo cáo</button></div>' +
       '<p class="muted">Dữ liệu từ nhóm Kế Hoạch 5 phút Làm Việc. Mỗi nhân viên lấy báo cáo cuối cùng của từng ngày; tin kế hoạch ngày mai không tính. Xa và nặng là số đơn được ghi rõ, không tự suy từ địa chỉ hoặc loại chậu.</p>' +
       '<div id="deliverySummary" aria-live="polite">Đang tải...</div>' +
-      '<section class="stem-section"><h3>Xếp hạng trong tháng</h3><div id="deliveryRanking"></div></section>' +
+      '<section class="stem-section"><h3>Xếp hạng trong khoảng đã chọn</h3><div id="deliveryRanking"></div></section>' +
       '<section class="stem-section"><h3>Chi tiết theo ngày</h3><div id="deliveryDaily"></div></section>' +
       '<details class="stem-detail"><summary id="deliveryReviewTitle">Tin cần kiểm tra</summary><div id="deliveryReview" class="stem-scroll"></div></details>';
     function num(x) { return Number(x || 0).toLocaleString("vi-VN"); }
     function render() {
-      month = $("#deliveryMonth", c).value; sender = $("#deliverySender", c).value;
+      month = $("#deliveryMonth", c).value; from = $("#deliveryFrom", c).value;
+      to = $("#deliveryTo", c).value; sender = $("#deliverySender", c).value;
       if (!/^20\\d{2}-(0[1-9]|1[0-2])$/.test(month)) { toast("Chọn tháng hợp lệ", 1); return; }
-      var query = "month=" + encodeURIComponent(month) + (sender ? "&sender=" + encodeURIComponent(sender) : "");
+      if (!/^20\\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])$/.test(from) ||
+          !/^20\\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])$/.test(to) ||
+          from > to || from.slice(0, 7) !== month || to.slice(0, 7) !== month) {
+        toast("Chọn từ ngày đến ngày trong cùng tháng báo cáo", 1); return;
+      }
+      var query = "month=" + encodeURIComponent(month) + "&from=" + encodeURIComponent(from) +
+        "&to=" + encodeURIComponent(to) + (sender ? "&sender=" + encodeURIComponent(sender) : "");
       api("/v1/orchid-delivery-report?" + query).then(function (r) {
         history.replaceState(null, "", "#/delivery-report?" + query);
         var select = $("#deliverySender", c);
@@ -1023,7 +1035,15 @@ export const INDEX_HTML = `<!doctype html>
       }).catch(function (e) { $("#deliverySummary", c).textContent = e.message; });
     }
     $("#deliveryLoad", c).onclick = render;
-    $("#deliveryMonth", c).onchange = render;
+    $("#deliveryMonth", c).onchange = function () {
+      var selected = $("#deliveryMonth", c).value;
+      if (!/^20\\d{2}-(0[1-9]|1[0-2])$/.test(selected)) return;
+      $("#deliveryFrom", c).value = selected + "-01";
+      $("#deliveryTo", c).value = new Date(Date.UTC(Number(selected.slice(0, 4)), Number(selected.slice(5, 7)), 0)).toISOString().slice(0, 10);
+      render();
+    };
+    $("#deliveryFrom", c).onchange = render;
+    $("#deliveryTo", c).onchange = render;
     $("#deliverySender", c).onchange = render;
     render();
   };

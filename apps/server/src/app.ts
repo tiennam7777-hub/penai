@@ -1323,14 +1323,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   });
   app.get("/v1/orchid-delivery-report", async (req, reply) => {
     if (!requireModeratorOrRole(req, reply, "ws_admin")) return;
-    const query = req.query as { month?: string; sender?: string };
+    const query = req.query as { month?: string; from?: string; to?: string; sender?: string };
     const month = String(query.month ?? "");
     if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(month)) return reply.code(400).send({ error: "Tháng không hợp lệ" });
     const sender = String(query.sender ?? "").trim();
     if (sender.length > 100) return reply.code(400).send({ error: "Tên nhân viên quá dài" });
     const [year, mon] = month.split("-").map(Number);
-    const from = `${month}-01`, to = new Date(Date.UTC(year!, mon!, 0)).toISOString().slice(0, 10);
-    const bounds = orchidStemDateBounds(from, to)!;
+    const from = String(query.from ?? `${month}-01`);
+    const to = String(query.to ?? new Date(Date.UTC(year!, mon!, 0)).toISOString().slice(0, 10));
+    const bounds = orchidStemDateBounds(from, to);
+    if (!bounds || from.slice(0, 7) !== month || to.slice(0, 7) !== month) {
+      return reply.code(400).send({ error: "Chọn khoảng ngày hợp lệ trong tháng báo cáo" });
+    }
     const messages = await listOrchidDeliveryMessages(db, req.authCtx, bounds.start, new Date(bounds.end.getTime() + 24 * 3600_000));
     const report = buildDeliveryReport(messages, from, to);
     const senders = report.monthly.map(row => row.senderName).sort((a, b) => a.localeCompare(b, "vi"));
@@ -1340,7 +1344,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       report.review = report.review.filter(row => row.senderName === sender);
       report.totals = { orders: report.daily.reduce((n, x) => n + x.orders, 0), far: report.daily.reduce((n, x) => n + x.far, 0), heavy: report.daily.reduce((n, x) => n + x.heavy, 0) };
     }
-    return { month, sender, senders, ...report };
+    return { month, from, to, sender, senders, ...report };
   });
   app.get("/v1/orchid-stem-report.xlsx", async (req, reply) => {
     const report = await orchidStemReport(req, reply);
