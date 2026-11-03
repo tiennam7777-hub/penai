@@ -104,10 +104,10 @@ export async function listOrchidStemMessages(db: Db, ctx: WorkspaceContext, chan
       SELECT * FROM group_messages
       WHERE sent_at >= ${start.toISOString()} AND sent_at < ${end.toISOString()}
     ), photo_ids AS (
-      SELECT DISTINCT msg_id FROM dated WHERE content_type = 'photo'
+      SELECT DISTINCT msg_id FROM dated
     ), photo_cli_ids AS (
       SELECT DISTINCT meta->>'cliMsgId' AS cli_msg_id FROM dated
-      WHERE content_type = 'photo' AND NULLIF(meta->>'cliMsgId', '') IS NOT NULL
+      WHERE NULLIF(meta->>'cliMsgId', '') IS NOT NULL
     ), quote_targets AS (
       SELECT DISTINCT meta->'quote'->>'msgId' AS msg_id FROM dated
       WHERE NULLIF(NULLIF(meta->'quote'->>'msgId', '0'), '') IS NOT NULL
@@ -119,8 +119,8 @@ export async function listOrchidStemMessages(db: Db, ctx: WorkspaceContext, chan
       WHERE (m.sent_at >= ${start.toISOString()} AND m.sent_at < ${end.toISOString()})
          OR (m.meta->>'orchidStemOriginalDay' >= ${fromDay}
            AND m.meta->>'orchidStemOriginalDay' < ${toDay})
-         OR (m.content_type = 'photo' AND m.msg_id IN (SELECT msg_id FROM quote_targets))
-         OR (m.content_type = 'photo' AND m.meta->>'cliMsgId' IN (SELECT cli_msg_id FROM quote_cli_targets))
+         OR (m.msg_id IN (SELECT msg_id FROM quote_targets))
+         OR (m.meta->>'cliMsgId' IN (SELECT cli_msg_id FROM quote_cli_targets))
          OR (m.meta->'quote'->>'msgId' IN (SELECT msg_id FROM photo_ids))
          OR (m.meta->'quote'->>'cliMsgId' IN (SELECT cli_msg_id FROM photo_cli_ids))
     )

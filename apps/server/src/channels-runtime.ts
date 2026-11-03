@@ -852,7 +852,7 @@ export function makeInboundHandler(
     if (msg.channelKind === "zalo_personal" && msg.peerKind === "group" && /\d/.test(msg.text) &&
         isOrchidStemGroupName((await getInboxThread(db, ctx, channel.id, msg.chatKey.slice(6)))?.name ?? "")) {
       const threadId = msg.chatKey.slice(6);
-      const originalPhoto = msg.quoted?.kind === "photo"
+      const originalPhoto = msg.quoted
         ? (msg.quoted.msgId !== "0"
           ? await getInboxMessageByMsgId(db, ctx, channel.id, threadId, msg.quoted.msgId).catch(() => null)
           : null) ?? (msg.quoted.cliMsgId

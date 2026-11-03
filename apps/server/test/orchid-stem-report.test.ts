@@ -145,6 +145,27 @@ describe("orchid stem report", () => {
     expect(parseOrchidStemText("C Chi (8c) Lộc 2")).toBeNull();
     expect(parseOrchidStemText("C Chi 3c 2v + ship 50000")).toBeNull();
     expect(parseOrchidStemText("C Chi 150c 2v")).toBeNull();
+    expect(parseOrchidStemText("Thuý vân 3c lũa")).toEqual({ customerName: "Thuý vân", stems: 3 });
+  });
+
+  it("ignores group chatter and counts a two-pot quote as one 18-stem job on the photo day", () => {
+    const report = buildOrchidStemReport([
+      { msgId: "birthday", senderId: "hong", senderName: "Hong Long Le", text: "02/11 Sinh nhật của Hong Long Le", sentAt: "2026-11-02T00:01:03.000Z" },
+      { msgId: "chat", senderId: "shop", senderName: "Lan Hồ Điệp Orchids World", text: "Sơn bc cam 96 cây, ko có hình. Hình sau khi cắm xong gửi luôn vô group. Người chat trên máy tính chỉ việc chuyển tiếp qua khách hàng", sentAt: "2026-11-02T22:11:28.000Z" },
+      { msgId: "original", senderId: "hi", senderName: "Hi", text: "", contentType: "photo", cliMsgId: "photo-cli", sentAt: "2026-11-03T12:35:48.000Z" },
+      { msgId: "quote", senderId: "hi", senderName: "Hi", text: "2 chậu 18 c", quotedMsgId: "0", quotedCliMsgId: "photo-cli", quoteOwnerId: "hi", sentAt: "2026-11-03T16:16:57.000Z" },
+    ]);
+    expect(report.review).toHaveLength(0);
+    expect(report.entries).toMatchObject([{ msgId: "quote", stems: 18, quotedPhotoMsgId: "original", day: "2026-11-03" }]);
+  });
+
+  it("replaces a named text report when its sender quotes it with a corrected count", () => {
+    const report = buildOrchidStemReport([
+      { msgId: "first", cliMsgId: "text-cli", senderId: "hi", senderName: "Hi", text: "Thuý vân 3c lũa", sentAt: "2026-11-03T10:52:45.000Z" },
+      { msgId: "corrected", quotedMsgId: "0", quotedCliMsgId: "text-cli", quoteOwnerId: "hi", senderId: "hi", senderName: "Hi", text: "Thuý vân 4c lũa", sentAt: "2026-11-04T01:00:00.000Z" },
+    ]);
+    expect(report.entries).toMatchObject([{ msgId: "first", stems: 4, day: "2026-11-03" }]);
+    expect(report.monthly[0]).toMatchObject({ jobs: 1, stems: 4 });
   });
 
   it("sums by stable sender ID and local day while keeping ambiguous messages for review", () => {

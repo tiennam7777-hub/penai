@@ -40,7 +40,8 @@ export function parseOrchidStemText(text: string): { customerName: string; stems
   const annotated = /^(.+?\(\s*\d{1,3}\s*(?:c|f|cành|canh|cảnh|cây|cay|nhánh|nhanh)(?:\s+(?:[x×]\s*)?[1-9]\s*(?:v|vòi|voi))?\s*\))\s+([\p{L}]+(?:\s+[\p{L}]+){0,2})$/iu.exec(clean);
   const suffix = annotated?.[2] ?? "";
   if (suffix && /^(?:hủy|huỷ|đổi|sửa|xóa|xoá|hoàn|trả)(?:\s|$)/iu.test(suffix)) return null;
-  const counted = annotated ? annotated[1]! : clean;
+  // A material/style note after the count does not change the stem quantity.
+  const counted = annotated ? annotated[1]! : clean.replace(/\s+(?:lũa|lua)\s*$/iu, "");
   // "3c 2v" and "Cảnh 5 2v" mean 3×2 and 5×2 stems, respectively.
   const multi = /(?<!\d)(\d{1,3})\s*(?:c|f|cành|canh|cảnh|cây|cay)?(?:\s+|\s*[x×]\s*)([1-9])\s*(?:v|vòi|voi)\s*\)?$/iu.exec(counted);
   if (multi) {
@@ -72,6 +73,12 @@ function quantityOnly(text: string): number | null {
 
 function quotedPhotoQuantity(text: string, photoSenderName: string): number | null {
   const clean = text.replace(/\s+/g, " ").trim();
+  // "2 chậu 18 c" is 18 stems in two pots, not 2 × 18 stems.
+  const pots = /^\d{1,2}\s*chậu\s+(\d{1,3})\s*(?:c|cành|canh|cây|cay)\s*$/iu.exec(clean);
+  if (pots) {
+    const stems = Number(pots[1]);
+    return stems >= 1 && stems <= 200 ? stems : null;
+  }
   const names = new Set([photoSenderName, senderLabel(photoSenderName)]);
   for (const name of names) {
     const mention = `@${name}`;
@@ -100,7 +107,7 @@ export function orchidStemTime(iso: string): string {
 export function orchidStemRefreshMonths(quoteAt: string,
   originalPhoto?: { contentType: string; text: string; sentAt: string } | null): string[] {
   const months = new Set([orchidStemDay(quoteAt).slice(0, 7)]);
-  if (originalPhoto?.contentType === "photo") {
+  if (originalPhoto) {
     months.add(orchidStemDay(originalPhoto.sentAt).slice(0, 7));
   }
   return [...months];
@@ -211,8 +218,24 @@ export function buildOrchidStemReport(messages: OrchidStemMessage[]) {
   const photos = new Map(messages.filter(m => m.contentType === "photo").map(m => [m.msgId, m]));
   const photosByCliId = new Map(messages.filter(m => m.contentType === "photo" && m.cliMsgId)
     .map(m => [`${m.senderId}:${m.cliMsgId}`, m]));
+  const textById = new Map(messages.filter(m => m.contentType !== "photo").map(m => [m.msgId, m]));
+  const textByCliId = new Map(messages.filter(m => m.contentType !== "photo" && m.cliMsgId)
+    .map(m => [`${m.senderId}:${m.cliMsgId}`, m]));
+  const textCorrections = new Map<string, OrchidStemMessage[]>();
+  const correctionIds = new Set<string>();
+  for (const message of messages) {
+    const original = (message.quotedMsgId && message.quotedMsgId !== "0" ? textById.get(message.quotedMsgId) : undefined)
+      ?? (message.quoteOwnerId && message.quotedCliMsgId
+        ? textByCliId.get(`${message.quoteOwnerId}:${message.quotedCliMsgId}`) : undefined);
+    if (original && original.msgId !== message.msgId && original.senderId === message.senderId &&
+        parseOrchidStemText(original.text) && parseOrchidStemText(message.text)) {
+      textCorrections.set(original.msgId, [...(textCorrections.get(original.msgId) ?? []), message]);
+      correctionIds.add(message.msgId);
+    }
+  }
   const photoQuotes = new Map<string, Array<{ photo: OrchidStemMessage; quote: OrchidStemMessage; stems: number; customerName?: string }>>();
   for (const message of messages) {
+    if (correctionIds.has(message.msgId)) continue;
     const photo = (message.quotedMsgId && message.quotedMsgId !== "0" ? photos.get(message.quotedMsgId) : undefined)
       ?? (message.quoteOwnerId && message.quotedCliMsgId
         ? photosByCliId.get(`${message.quoteOwnerId}:${message.quotedCliMsgId}`) : undefined);
@@ -242,7 +265,8 @@ export function buildOrchidStemReport(messages: OrchidStemMessage[]) {
     if (message.contentType === "photo" && (!/\d/.test(message.text) || photoQuotes.has(message.msgId))) continue;
     const senderName = senderLabel(message.senderName);
     const source = { ...message, senderName };
-    let parsed = parseOrchidStemText(message.text);
+    const correction = textCorrections.get(message.msgId)?.sort((a, b) => a.sentAt.localeCompare(b.sentAt) || a.msgId.localeCompare(b.msgId)).at(-1);
+    let parsed = parseOrchidStemText(correction?.text ?? message.text);
     if (!parsed) {
       const stems = quantityOnly(message.text);
       const prior = latestCustomer.get(senderName);
@@ -256,7 +280,8 @@ export function buildOrchidStemReport(messages: OrchidStemMessage[]) {
       entries.push({ ...source, ...parsed, day: confirmedDay ?? orchidStemDay(message.sentAt),
         ...(confirmedDay ? { quoteSentAt: message.sentAt, originalDayConfirmed: true } : {}) });
     }
-    else if (/\d/.test(message.text)) review.push(source);
+    else if (/\d/.test(message.text) && message.text.length <= 100 &&
+      !/\b(?:sinh nhật|thông báo|bc cam|báo cáo|chuyển tiếp)\b/iu.test(message.text)) review.push(source);
     else {
       const name = message.text.replace(/\s+/g, " ").trim();
       if (name.length >= 2 && name.length <= 80 && /[\p{L}]/u.test(name) &&
