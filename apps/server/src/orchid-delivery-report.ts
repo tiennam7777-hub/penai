@@ -3,6 +3,16 @@ import { orchidStemDay, orchidStemDateBounds } from "./orchid-stem-report.js";
 
 export interface DeliveryRow { day: string; senderId: string; senderName: string; orders: number; far: number; heavy: number; msgId: string; text: string; sentAt: string }
 
+const KEN_VU_LABEL = "Ken-chery+ A Vũ hot Seven";
+function deliveryPerson(message: OrchidStemMessage): { key: string; name: string } {
+  const normalized = message.senderName.normalize("NFKD").replace(/\p{M}/gu, "")
+    .toLocaleLowerCase("vi").replace(/[^\p{L}\p{N}]+/gu, "");
+  if (normalized === "kenchery" || normalized === "avuhotseven") {
+    return { key: "ken-vu", name: KEN_VU_LABEL };
+  }
+  return { key: message.senderId, name: message.senderName };
+}
+
 /** Only completed deliveries in the work report; never count tomorrow's plan or order handling. */
 export function parseDeliveryReport(text: string, sentAt: string): { day: string; orders: number; far: number; heavy: number } | null {
   const sentDay = orchidStemDay(sentAt);
@@ -45,16 +55,19 @@ export function buildDeliveryReport(messages: OrchidStemMessage[], from: string,
   const review: OrchidStemMessage[] = [];
   for (const message of messages) {
     const parsed = parseDeliveryReport(message.text, message.sentAt);
+    const person = deliveryPerson(message);
     if (!parsed) {
       if (orchidStemDay(message.sentAt) >= from && orchidStemDay(message.sentAt) <= to &&
-          /(?<![\p{L}])(?:giao|ship|đi|di)(?![\p{L}]).{0,25}\d{1,3}\s*(?:đơn|don)/iu.test(message.text)) review.push(message);
+          /(?<![\p{L}])(?:giao|ship|đi|di)(?![\p{L}]).{0,25}\d{1,3}\s*(?:đơn|don)/iu.test(message.text)) {
+        review.push({ ...message, senderName: person.name });
+      }
       continue;
     }
     if (parsed.day < from || parsed.day > to) continue;
-    const key = `${parsed.day}:${message.senderId}`;
+    const key = `${parsed.day}:${person.key}`;
     const prior = latest.get(key);
-    if (!prior || message.sentAt > prior.sentAt) latest.set(key, { ...parsed, senderId: message.senderId,
-      senderName: message.senderName, msgId: message.msgId, text: message.text, sentAt: message.sentAt });
+    if (!prior || message.sentAt > prior.sentAt) latest.set(key, { ...parsed, senderId: person.key,
+      senderName: person.name, msgId: message.msgId, text: message.text, sentAt: message.sentAt });
   }
   const daily = [...latest.values()].sort((a, b) => b.day.localeCompare(a.day) || b.orders - a.orders);
   const byPerson = new Map<string, { senderId: string; senderName: string; orders: number; far: number; heavy: number; days: number }>();

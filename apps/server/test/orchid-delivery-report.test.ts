@@ -39,6 +39,17 @@ describe("orchid delivery report", () => {
     expect(report.monthly.map(x => [x.senderName, x.orders])).toEqual([["B", 9], ["A", 8]]);
     expect(report.totals.orders).toBe(17);
   });
+  it("merges Ken-chery and A Vũ Hot Seven into one employee without doubling a shared day", () => {
+    const messages = [
+      { msgId: "ken-29", senderId: "ken-id", senderName: "Ken_chery", text: "29/10 giao 16 đơn 5 xa 4 nặng", sentAt: "2026-10-29T12:00:00Z" },
+      { msgId: "vu-30", senderId: "vu-id", senderName: "A Vũ Hot Seven", text: "30/10 giao 12 đơn 3 xa 1 nặng", sentAt: "2026-10-30T12:00:00Z" },
+      { msgId: "ken-30", senderId: "ken-id", senderName: "Ken ̲chery", text: "30/10 giao 11 đơn", sentAt: "2026-10-30T11:00:00Z" },
+    ];
+    const report = buildDeliveryReport(messages, "2026-10-29", "2026-10-30");
+    expect(report.monthly).toMatchObject([{ senderName: "Ken-chery+ A Vũ hot Seven", orders: 28, far: 8, heavy: 5, days: 2 }]);
+    expect(report.daily).toHaveLength(2);
+    expect(report.daily[0]).toMatchObject({ day: "2026-10-30", orders: 12 });
+  });
   it("keeps the dashboard script valid and shows the delivery item after flower report", () => {
     const script = INDEX_HTML.match(/<script>([\s\S]*?)<\/script>/)?.[1];
     expect(script).toBeTruthy();
