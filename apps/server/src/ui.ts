@@ -404,6 +404,7 @@ export const INDEX_HTML = `<!doctype html>
     { id: "kiotviet", icon: "🧾", label: "KiotViet", admin: true },
     { id: "misa", icon: "📄", label: "MISA meInvoice", admin: true },
     { id: "stem-report", icon: "🌸", label: "Báo cáo cắm hoa" },
+    { id: "delivery-report", icon: "🚚", label: "Báo cáo Giao hàng" },
     { id: "channels", icon: "📡", label: "Channels" },
     { id: "cron", icon: "⏰", label: "Cron & lịch hẹn" },
     { id: "users", icon: "👤", label: "Người dùng", admin: true },
@@ -439,7 +440,7 @@ export const INDEX_HTML = `<!doctype html>
     }
     if (isModerator()) {
       nav.appendChild(el("div", { "class": "grp" }, "Công việc"));
-      ["chat", "channels", "library", "contacts", "stem-report"].concat((state.inboxChannels || []).length ? ["inbox"] : []).forEach(function (id) {
+      ["chat", "channels", "library", "contacts", "stem-report", "delivery-report"].concat((state.inboxChannels || []).length ? ["inbox"] : []).forEach(function (id) {
         var n = NAV.find(function (item) { return item.id === id; });
         nav.appendChild(el("a", { href: "#/" + id, "class": cur === id ? "active" : "" }, n.icon + " <span>" + (id === "channels" ? "Chờ duyệt" : n.label) + "</span>"));
       });
@@ -986,6 +987,45 @@ export const INDEX_HTML = `<!doctype html>
       });
     }
     load();
+  };
+
+  PAGES["delivery-report"] = function () {
+    var m = page("Báo cáo Giao hàng", "Số đơn giao theo ngày và xếp hạng nhân viên trong tháng");
+    var c = card(m); c.classList.add("stem-report");
+    var params = new URLSearchParams(state.routeQuery || "");
+    var month = params.get("month") || new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 7);
+    var sender = params.get("sender") || "";
+    c.innerHTML = '<div class="stem-monthbar"><label>Tháng báo cáo<input id="deliveryMonth" type="month" value="' + esc(month) + '"></label>' +
+      '<label>Nhân viên<select id="deliverySender"><option value="">Tất cả nhân viên</option></select></label>' +
+      '<button id="deliveryLoad">Xem báo cáo</button></div>' +
+      '<p class="muted">Dữ liệu từ nhóm Kế Hoạch 5 phút Làm Việc. Mỗi nhân viên lấy báo cáo cuối cùng của từng ngày; tin kế hoạch ngày mai không tính. Xa và nặng là số đơn được ghi rõ, không tự suy từ địa chỉ hoặc loại chậu.</p>' +
+      '<div id="deliverySummary" aria-live="polite">Đang tải...</div>' +
+      '<section class="stem-section"><h3>Xếp hạng trong tháng</h3><div id="deliveryRanking"></div></section>' +
+      '<section class="stem-section"><h3>Chi tiết theo ngày</h3><div id="deliveryDaily"></div></section>' +
+      '<details class="stem-detail"><summary id="deliveryReviewTitle">Tin cần kiểm tra</summary><div id="deliveryReview" class="stem-scroll"></div></details>';
+    function num(x) { return Number(x || 0).toLocaleString("vi-VN"); }
+    function render() {
+      month = $("#deliveryMonth", c).value; sender = $("#deliverySender", c).value;
+      if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(month)) { toast("Chọn tháng hợp lệ", 1); return; }
+      var query = "month=" + encodeURIComponent(month) + (sender ? "&sender=" + encodeURIComponent(sender) : "");
+      api("/v1/orchid-delivery-report?" + query).then(function (r) {
+        history.replaceState(null, "", "#/delivery-report?" + query);
+        var select = $("#deliverySender", c);
+        select.innerHTML = '<option value="">Tất cả nhân viên</option>' + (r.senders || []).map(function (x) { return '<option value="' + esc(x) + '">' + esc(x) + '</option>'; }).join("");
+        select.value = sender;
+        $("#deliverySummary", c).innerHTML = '<div class="stem-summary"><div><b>' + num(r.totals.orders) + '</b><span>Đơn giao</span></div><div><b>' + num(r.totals.far) + '</b><span>Đơn xa</span></div><div><b>' + num(r.totals.heavy) + '</b><span>Đơn nặng</span></div></div>';
+        $("#deliveryRanking", c).innerHTML = '<div class="stem-scroll"><table class="stem-table"><thead><tr><th>Hạng</th><th>Nhân viên</th><th>Ngày có báo cáo</th><th>Đơn giao</th><th>Xa</th><th>Nặng</th></tr></thead><tbody>' +
+          (r.monthly || []).map(function (x, i) { return '<tr><td>' + (i + 1) + '</td><td>' + esc(x.senderName) + '</td><td>' + num(x.days) + '</td><td>' + num(x.orders) + '</td><td>' + num(x.far) + '</td><td>' + num(x.heavy) + '</td></tr>'; }).join("") + '</tbody></table></div>';
+        $("#deliveryDaily", c).innerHTML = '<div class="stem-scroll"><table class="stem-table"><thead><tr><th>Ngày</th><th>Nhân viên</th><th>Đơn giao</th><th>Xa</th><th>Nặng</th><th>Báo cáo gốc</th></tr></thead><tbody>' +
+          (r.daily || []).map(function (x) { return '<tr><td>' + esc(x.day) + '</td><td>' + esc(x.senderName) + '</td><td>' + num(x.orders) + '</td><td>' + num(x.far) + '</td><td>' + num(x.heavy) + '</td><td><details><summary>Xem tin</summary><pre>' + esc(x.text) + '</pre></details></td></tr>'; }).join("") + '</tbody></table></div>';
+        $("#deliveryReviewTitle", c).textContent = 'Tin cần kiểm tra (' + (r.review || []).length + ')';
+        $("#deliveryReview", c).innerHTML = (r.review || []).map(function (x) { return '<p><b>' + esc(x.senderName) + '</b> · ' + esc(x.sentAt.slice(0, 10)) + '<br>' + esc(x.text) + '</p>'; }).join("");
+      }).catch(function (e) { $("#deliverySummary", c).textContent = e.message; });
+    }
+    $("#deliveryLoad", c).onclick = render;
+    $("#deliveryMonth", c).onchange = render;
+    $("#deliverySender", c).onchange = render;
+    render();
   };
 
   PAGES["stem-report"] = function () {
@@ -5398,7 +5438,7 @@ export const INDEX_HTML = `<!doctype html>
     var id = location.hash.replace("#/", "") || (isMember() || isModerator() ? "chat" : "overview");
     var qi = id.indexOf("?"); state.routeQuery = qi >= 0 ? id.slice(qi + 1) : ""; if (qi >= 0) id = id.slice(0, qi);
     if (isMember() && !(id === "inbox" && (state.inboxChannels || []).length)) id = "chat";
-    if (isModerator() && ["chat", "channels", "library", "contacts", "stem-report"].indexOf(id) < 0 && !(id === "inbox" && (state.inboxChannels || []).length)) id = "chat";
+    if (isModerator() && ["chat", "channels", "library", "contacts", "stem-report", "delivery-report"].indexOf(id) < 0 && !(id === "inbox" && (state.inboxChannels || []).length)) id = "chat";
     var n = null; for (var i = 0; i < NAV.length; i++) if (NAV[i].id === id) n = NAV[i];
     if (n && n.admin && !isAdmin()) id = "overview";
     var fn = PAGES[id] || PAGES.overview;
