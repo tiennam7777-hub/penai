@@ -14,12 +14,12 @@ export function parseDeliveryReport(text: string, sentAt: string): { day: string
   }
   const completed = text.split(/\b(?:KHNM|KHCV|KẾ HOẠCH|KE HOACH|kế hoạch mai)\b/iu)[0]!;
   const parts = completed.split(/[\n.;]|\.{2,}|-{2,}/u).map(x => x.trim()).filter(Boolean);
-  const shipping = parts.filter(x => /(?:giao|ship|đi|di)/iu.test(x) && /(?:đơn|don)/iu.test(x)
+  const shipping = parts.filter(x => /(?<![\p{L}])(?:giao|ship|đi|di)(?![\p{L}])/iu.test(x) && /(?:đơn|don)/iu.test(x)
     && !/(?:lên đơn|len don|chốt đơn|chot don|phân đơn|phan don|cắm|cam|xử lý|xu ly|đi sáng|di sang)/iu.test(x));
   if (!shipping.length) return null;
   const numbers: number[] = [];
   for (const part of shipping) {
-    const matches = [...part.matchAll(/(?:(?:giao|ship|đi|di)(?:\s+được|\s+dc)?\s*)(\d{1,3})\s*(?:đơn|don)|(\d{1,3})\s*(?:đơn|don)/giu)];
+    const matches = [...part.matchAll(/(?:(?<![\p{L}])(?:giao|ship|đi|di)(?![\p{L}])(?:\s+được|\s+dc)?\s*)(\d{1,3})\s*(?:đơn|don)|(\d{1,3})\s*(?:đơn|don)/giu)];
     for (const m of matches) numbers.push(Number(m[1] || m[2]));
   }
   // "8 đơn, hỗ trợ thêm 1 là 9" explicitly replaces the earlier subtotal.
@@ -47,7 +47,7 @@ export function buildDeliveryReport(messages: OrchidStemMessage[], from: string,
     const parsed = parseDeliveryReport(message.text, message.sentAt);
     if (!parsed) {
       if (orchidStemDay(message.sentAt) >= from && orchidStemDay(message.sentAt) <= to &&
-          /(?:giao|ship|đi|di).{0,25}\d{1,3}\s*(?:đơn|don)/iu.test(message.text)) review.push(message);
+          /(?<![\p{L}])(?:giao|ship|đi|di)(?![\p{L}]).{0,25}\d{1,3}\s*(?:đơn|don)/iu.test(message.text)) review.push(message);
       continue;
     }
     if (parsed.day < from || parsed.day > to) continue;

@@ -27,6 +27,7 @@ describe("orchid delivery report", () => {
   it("ignores sales, flower work, and tomorrow's plan", () => {
     expect(parseDeliveryReport("chat lên đơn 23 đơn; phân đơn cắm", at)).toBeNull();
     expect(parseDeliveryReport("Cắm 7 đơn; KHNM giao 5 đơn", at)).toBeNull();
+    expect(parseDeliveryReport("@Lan Hồ Điệp Điện Biên Phủ - N hôm qua 23 đơn, hôm nay 3 đơn", at)).toBeNull();
   });
   it("takes latest report once per employee and ranks by monthly deliveries", () => {
     const messages = [
