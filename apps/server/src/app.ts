@@ -1292,7 +1292,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (from.slice(0, 7) === to.slice(0, 7)) {
       await refreshOrchidStemFile(db, req.authCtx, channel.id, "", from.slice(0, 7), deps.config.dataDir);
     }
-    const all = addOrchidWorkPlanCounts(combineOrchidStemReports(reports), groupKey ? [] : plans, from, to);
+    const all = addOrchidWorkPlanCounts(combineOrchidStemReports(reports), plans, from, to);
     const groupTotals = chosen.map((group, index) => {
       const report = reports[index]!;
       const entries = sender ? report.entries.filter(e => e.senderName === sender) : report.entries;

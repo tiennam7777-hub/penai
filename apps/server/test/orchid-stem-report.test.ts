@@ -77,6 +77,8 @@ describe("orchid stem report", () => {
     expect(parseOrchidWorkPlanCount("Bccv 7/10: cắm 8 đơn 53 cây. Kh 8/10: lấy hoa",
       "2026-10-08T01:46:00.000Z")).toEqual({ day: "2026-10-07", stems: 53 });
     expect(parseOrchidWorkPlanCount("KH 30/10\nCắm 100 cây", at)).toBeNull();
+    expect(parseOrchidWorkPlanCount("1/11 Cắm 66 cây\nBốc xếp chậu về\n2/11 Cắm hoa nếu có đơn phát sinh",
+      "2026-11-01T11:21:36.021Z")).toEqual({ day: "2026-11-01", stems: 66 });
     expect(parseOrchidWorkPlanCount("BCCV 2/10\ncắm 135 cây\nra 10 thùng hoa\nKHNM\ncắm đơn",
       "2026-11-02T11:38:04.271Z")).toEqual({ day: "2026-11-02", stems: 135 });
   });
@@ -93,6 +95,18 @@ describe("orchid stem report", () => {
     ]);
     expect(Object.fromEntries(joined.daily.map(x => [x.senderId, x.nvbc]))).toEqual({ "uid-1": 124, "uid-2": null });
     expect(joined.monthly.map(x => x.nvbc)).toEqual([124, null]);
+  });
+
+  it("matches the Zalo sender ID from another Hot view of the same work report", () => {
+    const report = buildOrchidStemReport([
+      { msgId: "flower", senderId: "hot-6-id", senderName: "Nhân viên A", text: "Khách Hoa 5c", sentAt: "2026-11-03T03:00:00.000Z" },
+    ]);
+    const text = "Bccv 3/11 cắm 12 cây";
+    const joined = addOrchidWorkPlanCounts(report, [
+      { msgId: "same", senderId: "hot-1-id", senderName: "Nhân viên A", text, sentAt: "2026-11-03T12:00:00.000Z" },
+      { msgId: "same", senderId: "hot-6-id", senderName: "Nhân viên A", text, sentAt: "2026-11-03T12:00:00.000Z" },
+    ]);
+    expect(joined.daily[0]?.nvbc).toBe(12);
   });
 
   it("sums all reported days in the selected month, including days without flower log entries", () => {
