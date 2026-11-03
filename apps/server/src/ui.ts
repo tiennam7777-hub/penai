@@ -1006,7 +1006,7 @@ export const INDEX_HTML = `<!doctype html>
     function num(x) { return Number(x || 0).toLocaleString("vi-VN"); }
     function render() {
       month = $("#deliveryMonth", c).value; sender = $("#deliverySender", c).value;
-      if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(month)) { toast("Chọn tháng hợp lệ", 1); return; }
+      if (!/^20\\d{2}-(0[1-9]|1[0-2])$/.test(month)) { toast("Chọn tháng hợp lệ", 1); return; }
       var query = "month=" + encodeURIComponent(month) + (sender ? "&sender=" + encodeURIComponent(sender) : "");
       api("/v1/orchid-delivery-report?" + query).then(function (r) {
         history.replaceState(null, "", "#/delivery-report?" + query);

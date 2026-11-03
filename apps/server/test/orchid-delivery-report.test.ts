@@ -40,6 +40,7 @@ describe("orchid delivery report", () => {
     const script = INDEX_HTML.match(/<script>([\s\S]*?)<\/script>/)?.[1];
     expect(script).toBeTruthy();
     expect(() => new vm.Script(script!.replace(/%%[A-Z_]+%%/g, "null"))).not.toThrow();
+    expect(script).toContain('/^20\\d{2}-(0[1-9]|1[0-2])$/');
     expect(INDEX_HTML.indexOf('id: "delivery-report"')).toBeGreaterThan(INDEX_HTML.indexOf('id: "stem-report"'));
   });
 });
