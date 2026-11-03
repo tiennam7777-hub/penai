@@ -21,6 +21,8 @@ describe("orchid delivery report", () => {
       .toMatchObject({ orders: 16, far: 1, heavy: 5, day: "2026-11-01" });
     expect(parseDeliveryReport("3/11 giao 2đơn --- tăng ca", at))
       .toMatchObject({ orders: 2, far: 0, heavy: 0 });
+    expect(parseDeliveryReport("1/11 e đi tổng 16 đơn...1xa...5 năng...đi bên 42 6 đơn.. đi bên 188 10 đơn", at))
+      .toMatchObject({ orders: 16, far: 1, heavy: 5 });
   });
   it("ignores sales, flower work, and tomorrow's plan", () => {
     expect(parseDeliveryReport("chat lên đơn 23 đơn; phân đơn cắm", at)).toBeNull();

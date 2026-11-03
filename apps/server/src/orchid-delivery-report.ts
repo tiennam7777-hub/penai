@@ -24,7 +24,9 @@ export function parseDeliveryReport(text: string, sentAt: string): { day: string
   }
   // "8 đơn, hỗ trợ thêm 1 là 9" explicitly replaces the earlier subtotal.
   const corrected = /(?:là|la|tổng|tong)\s*(\d{1,3})\s*(?:đơn|don)?/iu.exec(completed);
-  const orders = corrected && /hỗ trợ|ho tro/iu.test(completed) ? Number(corrected[1]) : numbers.length === 1 ? numbers[0]! : 0;
+  const total = /(?:giao|ship|đi|di)\s*(?:được|dc)?\s*(?:tổng|tong)\s*(\d{1,3})\s*(?:đơn|don)/iu.exec(completed);
+  const orders = total ? Number(total[1]) : corrected && /hỗ trợ|ho tro/iu.test(completed)
+    ? Number(corrected[1]) : numbers.length === 1 ? numbers[0]! : 0;
   if (!orders || orders > 100) return null;
   const shippingStart = completed.indexOf(shipping[0]!);
   const scope = completed.slice(Math.max(0, shippingStart)).split(/(?:lấy|lay|tăng ca|tang ca|làm|lam|dọn dẹp|don dep|bọc|boc|xử lý|xu li|quét|quet|kế hoạch|ke hoach)/iu)[0]!;
@@ -33,7 +35,7 @@ export function parseDeliveryReport(text: string, sentAt: string): { day: string
       .map(m => Number(m[1] || m[2]));
     return found.length === 1 ? found[0]! : found.length === 0 ? 0 : -1;
   };
-  const far = metric("xa"), heavy = metric("nặng|nang");
+  const far = metric("xa"), heavy = metric("nặng|nang|năng");
   if (far < 0 || heavy < 0 || far > orders || heavy > orders) return null;
   return { day, orders, far, heavy };
 }
@@ -45,7 +47,7 @@ export function buildDeliveryReport(messages: OrchidStemMessage[], from: string,
     const parsed = parseDeliveryReport(message.text, message.sentAt);
     if (!parsed) {
       if (orchidStemDay(message.sentAt) >= from && orchidStemDay(message.sentAt) <= to &&
-          /(?:giao|ship|đi|di).{0,25}(?:đơn|don)/iu.test(message.text)) review.push(message);
+          /(?:giao|ship|đi|di).{0,25}\d{1,3}\s*(?:đơn|don)/iu.test(message.text)) review.push(message);
       continue;
     }
     if (parsed.day < from || parsed.day > to) continue;
