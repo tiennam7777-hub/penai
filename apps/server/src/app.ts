@@ -1296,8 +1296,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const groupTotals = chosen.map((group, index) => {
       const report = reports[index]!;
       const entries = sender ? report.entries.filter(e => e.senderName === sender) : report.entries;
+      const memberIds = new Set(entries.map(e => e.senderId));
+      const withPlans = addOrchidWorkPlanCounts(report, plans, from, to);
+      const nvbcValues = withPlans.monthly.filter(row => memberIds.has(row.senderId) && row.nvbc !== null)
+        .map(row => row.nvbc!);
       return { key: group.key, name: group.name, jobs: entries.length,
         stems: entries.reduce((sum, entry) => sum + entry.stems, 0),
+        nvbc: nvbcValues.length ? nvbcValues.reduce((sum, value) => sum + value, 0) : null,
         unnumberedPhotos: sender ? null : report.unnumberedPhotos };
     });
     const senders = [...new Set([...all.monthly.map(x => x.senderName), ...all.review.map(x => x.senderName)])]

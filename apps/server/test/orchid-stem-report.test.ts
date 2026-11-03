@@ -25,6 +25,7 @@ describe("orchid stem report", () => {
     expect(INDEX_HTML).toContain('id="stemGroup"');
     expect(INDEX_HTML).toContain('value="hanoi"');
     expect(INDEX_HTML).toContain('q.set("group", group)');
+    expect(INDEX_HTML).toContain('"Tổng NVBC"');
   });
   it("uses the newest surviving quote once, retains customer and correction history", () => {
     const photo = { msgId: "photo", senderId: "worker", senderName: "Lộc", text: "Chị Hà (6c)",
