@@ -146,6 +146,14 @@ describe("orchid stem report", () => {
     expect(parseOrchidStemText("C Chi 3c 2v + ship 50000")).toBeNull();
     expect(parseOrchidStemText("C Chi 150c 2v")).toBeNull();
     expect(parseOrchidStemText("Thuý vân 3c lũa")).toEqual({ customerName: "Thuý vân", stems: 3 });
+    expect(parseOrchidStemText("kim oanh 9c cắm lũa")).toEqual({ customerName: "kim oanh", stems: 9 });
+  });
+
+  it("counts a named photo caption ending in cắm lũa once", () => {
+    const report = buildOrchidStemReport([{ msgId: "kim-oanh", senderId: "hanoi", senderName: "Lan Hồ Điệp Orchids World Hà Nội",
+      text: "kim oanh 9c cắm lũa", contentType: "photo", sentAt: "2026-11-03T10:54:21.000Z" }]);
+    expect(report.entries).toMatchObject([{ msgId: "kim-oanh", customerName: "kim oanh", stems: 9 }]);
+    expect(report.review).toHaveLength(0);
   });
 
   it("ignores group chatter and counts a two-pot quote as one 18-stem job on the photo day", () => {

@@ -41,7 +41,7 @@ export function parseOrchidStemText(text: string): { customerName: string; stems
   const suffix = annotated?.[2] ?? "";
   if (suffix && /^(?:hủy|huỷ|đổi|sửa|xóa|xoá|hoàn|trả)(?:\s|$)/iu.test(suffix)) return null;
   // A material/style note after the count does not change the stem quantity.
-  const counted = annotated ? annotated[1]! : clean.replace(/\s+(?:lũa|lua)\s*$/iu, "");
+  const counted = annotated ? annotated[1]! : clean.replace(/\s+(?:(?:cắm|cam)\s+)?(?:lũa|lua)\s*$/iu, "");
   // "3c 2v" and "Cảnh 5 2v" mean 3×2 and 5×2 stems, respectively.
   const multi = /(?<!\d)(\d{1,3})\s*(?:c|f|cành|canh|cảnh|cây|cay)?(?:\s+|\s*[x×]\s*)([1-9])\s*(?:v|vòi|voi)\s*\)?$/iu.exec(counted);
   if (multi) {
