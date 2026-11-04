@@ -53,6 +53,26 @@ describe("orchid delivery report", () => {
     expect(report.monthly.map(x => [x.senderName, x.orders])).toEqual([["B", 9], ["A", 8]]);
     expect(report.totals.orders).toBe(17);
   });
+  it("adds a separate supplement to the same day without adding a report day or repeating a message", () => {
+    const messages = [
+      { msgId: "base", senderId: "sang", senderName: "Sangnguyen", text: "Bccv..a di dc 24 đơn.. năng..2 xa", sentAt: "2026-10-20T15:55:42.384Z" },
+      { msgId: "extra", senderId: "sang", senderName: "Sangnguyen", text: "Bo sung..8 nang.", sentAt: "2026-10-20T15:56:02.380Z" },
+    ];
+    const report = buildDeliveryReport([messages[1]!, messages[0]!, messages[1]!], "2026-10-20", "2026-10-20");
+    expect(report.monthly).toMatchObject([{ days: 1, orders: 24, far: 2, heavy: 8 }]);
+    expect(report.daily).toMatchObject([{ day: "2026-10-20", orders: 24, far: 2, heavy: 8 }]);
+    expect(report.review).toHaveLength(0);
+  });
+  it("adds only explicit delivery metrics and sends orphan supplements for review", () => {
+    const messages = [
+      { msgId: "base", senderId: "a", senderName: "A", text: "giao 5 đơn", sentAt: "2026-10-07T12:00:00Z" },
+      { msgId: "extra", senderId: "a", senderName: "A", text: "bổ sung giao 1 đơn", sentAt: "2026-10-07T16:24:37Z" },
+      { msgId: "orphan", senderId: "b", senderName: "B", text: "Bố sung..2 xa", sentAt: "2026-10-07T16:25:00Z" },
+    ];
+    const report = buildDeliveryReport(messages, "2026-10-07", "2026-10-07");
+    expect(report.monthly).toMatchObject([{ senderName: "A", days: 1, orders: 6 }]);
+    expect(report.review.map(row => row.msgId)).toEqual(["orphan"]);
+  });
   it("merges Ken-chery and A Vũ Hot Seven into one employee without doubling a shared day", () => {
     const messages = [
       { msgId: "ken-29", senderId: "ken-id", senderName: "Ken_chery", text: "29/10 giao 16 đơn 5 xa 4 nặng", sentAt: "2026-10-29T12:00:00Z" },

@@ -3,6 +3,37 @@ import { orchidStemDay, orchidStemDateBounds } from "./orchid-stem-report.js";
 
 export interface DeliveryRow { day: string; senderId: string; senderName: string; orders: number; far: number; heavy: number; msgId: string; text: string; sentAt: string }
 
+function deliveryDay(text: string, sentAt: string): string {
+  const sentDay = orchidStemDay(sentAt);
+  const header = text.slice(0, 100).match(/(?:^|\b)(\d{1,2})\s*\/\s*(\d{1,2})(?:\s*\/\s*(20\d{2}))?/u);
+  if (header) {
+    const candidate = `${header[3] || sentDay.slice(0, 4)}-${header[2]!.padStart(2, "0")}-${header[1]!.padStart(2, "0")}`;
+    if (orchidStemDateBounds(candidate, candidate)) return candidate;
+  }
+  if (/\b(?:hôm qua|hom qua)\b/iu.test(text.slice(0, 100)) ||
+      new Date(Date.parse(sentAt) + 7 * 3600_000).getUTCHours() < 9) {
+    const previous = new Date(`${sentDay}T00:00:00.000Z`);
+    previous.setUTCDate(previous.getUTCDate() - 1);
+    return previous.toISOString().slice(0, 10);
+  }
+  return sentDay;
+}
+
+function parseDeliverySupplement(text: string, sentAt: string) {
+  const normalized = text.normalize("NFKD").replace(/\p{M}/gu, "").replace(/đ/giu, "d").toLowerCase();
+  if (!/^\s*bo\s+sung\b/u.test(normalized)) return null;
+  const value = (pattern: RegExp) => {
+    const matches = [...normalized.matchAll(pattern)].map(match => Number(match[1] || match[2]));
+    return matches.length === 1 ? matches[0]! : 0;
+  };
+  const far = value(/\b(\d{1,3})\s*(?:don\s*)?xa\b|\bxa\s*(\d{1,3})\b/gu);
+  const heavy = value(/\b(\d{1,3})\s*(?:don\s*)?nang\b|\bnang\s*(\d{1,3})\b/gu);
+  const orders = value(/\b(?:giao|ship|di)\s*(?:them\s*)?(\d{1,3})\s*don\b/gu) ||
+    (!far && !heavy ? value(/\b(\d{1,3})\s*don\b/gu) : 0);
+  if (!orders && !far && !heavy) return { day: deliveryDay(text, sentAt), orders: 0, far: 0, heavy: 0 };
+  return { day: deliveryDay(text, sentAt), orders, far, heavy };
+}
+
 const KEN_VU_LABEL = "Ken-chery+ A Vũ hot Seven";
 function deliveryPerson(message: OrchidStemMessage): { key: string; name: string } {
   const normalized = message.senderName.normalize("NFKD").replace(/\p{M}/gu, "")
@@ -15,18 +46,7 @@ function deliveryPerson(message: OrchidStemMessage): { key: string; name: string
 
 /** Only completed deliveries in the work report; never count tomorrow's plan or order handling. */
 export function parseDeliveryReport(text: string, sentAt: string): { day: string; orders: number; far: number; heavy: number } | null {
-  const sentDay = orchidStemDay(sentAt);
-  const header = text.slice(0, 100).match(/(?:^|\b)(\d{1,2})\s*\/\s*(\d{1,2})(?:\s*\/\s*(20\d{2}))?/u);
-  let day = sentDay;
-  if (header) {
-    const candidate = `${header[3] || sentDay.slice(0, 4)}-${header[2]!.padStart(2, "0")}-${header[1]!.padStart(2, "0")}`;
-    if (orchidStemDateBounds(candidate, candidate)) day = candidate;
-  } else if (/\b(?:hôm qua|hom qua)\b/iu.test(text.slice(0, 100)) ||
-      new Date(Date.parse(sentAt) + 7 * 3600_000).getUTCHours() < 9) {
-    const previous = new Date(`${sentDay}T00:00:00.000Z`);
-    previous.setUTCDate(previous.getUTCDate() - 1);
-    day = previous.toISOString().slice(0, 10);
-  }
+  const day = deliveryDay(text, sentAt);
   const completed = text.split(/\b(?:KHNM|KHCV|KẾ HOẠCH|KE HOACH|kế hoạch mai)\b/iu)[0]!;
   const parts = completed.replace(/\b((?:đi|di|giao|ship)\s*(?:được|dc)?)\s*\.{2,}\s*(?=\d{1,3}\s*(?:đơn|đon|don))/giu, "$1 ")
     .split(/[\n.;]|\.{2,}|-{2,}/u).map(x => x.trim()).filter(Boolean);
@@ -62,9 +82,26 @@ export function parseDeliveryReport(text: string, sentAt: string): { day: string
 export function buildDeliveryReport(messages: OrchidStemMessage[], from: string, to: string) {
   const latest = new Map<string, DeliveryRow>();
   const review: OrchidStemMessage[] = [];
-  for (const message of messages) {
-    const parsed = parseDeliveryReport(message.text, message.sentAt);
+  const seen = new Set<string>();
+  for (const message of [...messages].sort((a, b) => a.sentAt.localeCompare(b.sentAt) || a.msgId.localeCompare(b.msgId))) {
+    if (seen.has(message.msgId)) continue;
+    seen.add(message.msgId);
     const person = deliveryPerson(message);
+    const supplement = parseDeliverySupplement(message.text, message.sentAt);
+    if (supplement) {
+      if (supplement.day < from || supplement.day > to) continue;
+      const prior = latest.get(`${supplement.day}:${person.key}`);
+      if (!prior || (!supplement.orders && !supplement.far && !supplement.heavy) ||
+          prior.far + supplement.far > prior.orders + supplement.orders ||
+          prior.heavy + supplement.heavy > prior.orders + supplement.orders) {
+        review.push({ ...message, senderName: person.name });
+      } else {
+        prior.orders += supplement.orders; prior.far += supplement.far; prior.heavy += supplement.heavy;
+        prior.text += `\n[Bổ sung ${message.msgId}] ${message.text}`;
+      }
+      continue;
+    }
+    const parsed = parseDeliveryReport(message.text, message.sentAt);
     if (!parsed) {
       if (orchidStemDay(message.sentAt) >= from && orchidStemDay(message.sentAt) <= to &&
           /(?<![\p{L}])(?:giao|ship|đi|di)(?![\p{L}]).{0,25}\d{1,3}\s*(?:đơn|đon|don)/iu.test(message.text)) {
