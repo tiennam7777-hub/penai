@@ -21,7 +21,8 @@ export function parseDeliveryReport(text: string, sentAt: string): { day: string
   if (header) {
     const candidate = `${header[3] || sentDay.slice(0, 4)}-${header[2]!.padStart(2, "0")}-${header[1]!.padStart(2, "0")}`;
     if (orchidStemDateBounds(candidate, candidate)) day = candidate;
-  } else if (/\b(?:hôm qua|hom qua)\b/iu.test(text.slice(0, 100)) && sentDay.endsWith("-01")) {
+  } else if (/\b(?:hôm qua|hom qua)\b/iu.test(text.slice(0, 100)) ||
+      new Date(Date.parse(sentAt) + 7 * 3600_000).getUTCHours() < 9) {
     const previous = new Date(`${sentDay}T00:00:00.000Z`);
     previous.setUTCDate(previous.getUTCDate() - 1);
     day = previous.toISOString().slice(0, 10);

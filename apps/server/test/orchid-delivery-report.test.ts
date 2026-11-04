@@ -29,6 +29,14 @@ describe("orchid delivery report", () => {
       .toMatchObject({ day: "2026-10-21", orders: 14, far: 1, heavy: 2 });
     expect(parseDeliveryReport("BCCV hôm qua đi 9 đơn", "2026-11-01T02:00:00Z"))
       .toMatchObject({ day: "2026-10-31", orders: 9 });
+    expect(parseDeliveryReport("Bccv..a di dc 32 đơn..6nang..1xa", "2026-10-19T17:17:48.521Z"))
+      .toMatchObject({ day: "2026-10-19", orders: 32, far: 1, heavy: 6 });
+    expect(parseDeliveryReport("Bccv..a di dc 24 đơn..2 xa", "2026-10-20T15:55:42.384Z"))
+      .toMatchObject({ day: "2026-10-20", orders: 24, far: 2 });
+    expect(parseDeliveryReport("20/10 Bccv đi 7 đơn", "2026-10-19T17:17:48.521Z"))
+      .toMatchObject({ day: "2026-10-20", orders: 7 });
+    expect(parseDeliveryReport("Bccv đi 7 đơn", "2026-10-20T02:00:00Z"))
+      .toMatchObject({ day: "2026-10-20", orders: 7 });
   });
   it("ignores sales, flower work, and tomorrow's plan", () => {
     expect(parseDeliveryReport("chat lên đơn 23 đơn; phân đơn cắm", at)).toBeNull();

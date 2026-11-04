@@ -1003,7 +1003,7 @@ export const INDEX_HTML = `<!doctype html>
       '<label>Đến ngày<input id="deliveryTo" type="date" value="' + esc(to) + '"></label>' +
       '<label>Nhân viên<select id="deliverySender"><option value="">Tất cả nhân viên</option></select></label>' +
       '<button id="deliveryLoad">Xem báo cáo</button></div>' +
-      '<p class="muted">Dữ liệu từ nhóm Kế Hoạch 5 phút Làm Việc. Mỗi nhân viên lấy báo cáo cuối cùng của từng ngày; tin kế hoạch ngày mai không tính. Xa và nặng là số đơn được ghi rõ, không tự suy từ địa chỉ hoặc loại chậu.</p>' +
+      '<p class="muted">Dữ liệu từ nhóm Kế Hoạch 5 phút Làm Việc. Báo cáo không ghi ngày, gửi trước 09:00, tính cho ngày liền trước; ngày ghi rõ trong tin được ưu tiên. Mỗi nhân viên lấy báo cáo cuối cùng của từng ngày; tin kế hoạch ngày mai không tính. Xa và nặng là số đơn được ghi rõ, không tự suy từ địa chỉ hoặc loại chậu.</p>' +
       '<div id="deliverySummary" aria-live="polite">Đang tải...</div>' +
       '<section class="stem-section"><h3>Xếp hạng trong khoảng đã chọn</h3><div id="deliveryRanking"></div></section>' +
       '<section class="stem-section"><h3>Chi tiết theo ngày</h3><div id="deliveryDaily"></div></section>' +
