@@ -21,20 +21,28 @@ export function parseDeliveryReport(text: string, sentAt: string): { day: string
   if (header) {
     const candidate = `${header[3] || sentDay.slice(0, 4)}-${header[2]!.padStart(2, "0")}-${header[1]!.padStart(2, "0")}`;
     if (orchidStemDateBounds(candidate, candidate)) day = candidate;
+  } else if (/\b(?:hôm qua|hom qua)\b/iu.test(text.slice(0, 100)) && sentDay.endsWith("-01")) {
+    const previous = new Date(`${sentDay}T00:00:00.000Z`);
+    previous.setUTCDate(previous.getUTCDate() - 1);
+    day = previous.toISOString().slice(0, 10);
   }
   const completed = text.split(/\b(?:KHNM|KHCV|KẾ HOẠCH|KE HOACH|kế hoạch mai)\b/iu)[0]!;
-  const parts = completed.split(/[\n.;]|\.{2,}|-{2,}/u).map(x => x.trim()).filter(Boolean);
-  const shipping = parts.filter(x => /(?<![\p{L}])(?:giao|ship|đi|di)(?![\p{L}])/iu.test(x) && /(?:đơn|don)/iu.test(x)
+  const parts = completed.replace(/\b((?:đi|di|giao|ship)\s*(?:được|dc)?)\s*\.{2,}\s*(?=\d{1,3}\s*(?:đơn|đon|don))/giu, "$1 ")
+    .split(/[\n.;]|\.{2,}|-{2,}/u).map(x => x.trim()).filter(Boolean);
+  const shipping = parts.filter(x => /(?<![\p{L}])(?:giao|ship|đi|di)(?![\p{L}])/iu.test(x) && /(?:đơn|đon|don)/iu.test(x)
     && !/(?:lên đơn|len don|chốt đơn|chot don|phân đơn|phan don|cắm|cam|xử lý|xu ly|đi sáng|di sang)/iu.test(x));
   if (!shipping.length) return null;
   const numbers: number[] = [];
   for (const part of shipping) {
-    const matches = [...part.matchAll(/(?:(?<![\p{L}])(?:giao|ship|đi|di)(?![\p{L}])(?:\s+được|\s+dc)?\s*)(\d{1,3})\s*(?:đơn|don)|(\d{1,3})\s*(?:đơn|don)/giu)];
-    for (const m of matches) numbers.push(Number(m[1] || m[2]));
+    const matches = [...part.matchAll(/(?:(?<![\p{L}])(?:giao|ship|đi|di)(?![\p{L}])(?:\s+được|\s+dc)?[\s.]*)(\d{1,3})\s*(?:đơn|đon|don)|(\d{1,3})\s*(?:đơn|đon|don)/giu)];
+    for (const m of matches) {
+      if (/^\s*(?:xa|nặng|nang|năng)\b/iu.test(part.slice(m.index! + m[0].length))) continue;
+      numbers.push(Number(m[1] || m[2]));
+    }
   }
   // "8 đơn, hỗ trợ thêm 1 là 9" explicitly replaces the earlier subtotal.
   const corrected = /(?:là|la|tổng|tong)\s*(\d{1,3})\s*(?:đơn|don)?/iu.exec(completed);
-  const total = /(?:giao|ship|đi|di)\s*(?:được|dc)?\s*(?:tổng|tong)\s*(\d{1,3})\s*(?:đơn|don)/iu.exec(completed);
+  const total = /(?:giao|ship|đi|di)\s*(?:được|dc)?\s*(?:tổng|tong)\s*(\d{1,3})\s*(?:đơn|đon|don)/iu.exec(completed);
   const orders = total ? Number(total[1]) : corrected && /hỗ trợ|ho tro/iu.test(completed)
     ? Number(corrected[1]) : numbers.length === 1 ? numbers[0]! : 0;
   if (!orders || orders > 100) return null;
@@ -58,7 +66,7 @@ export function buildDeliveryReport(messages: OrchidStemMessage[], from: string,
     const person = deliveryPerson(message);
     if (!parsed) {
       if (orchidStemDay(message.sentAt) >= from && orchidStemDay(message.sentAt) <= to &&
-          /(?<![\p{L}])(?:giao|ship|đi|di)(?![\p{L}]).{0,25}\d{1,3}\s*(?:đơn|don)/iu.test(message.text)) {
+          /(?<![\p{L}])(?:giao|ship|đi|di)(?![\p{L}]).{0,25}\d{1,3}\s*(?:đơn|đon|don)/iu.test(message.text)) {
         review.push({ ...message, senderName: person.name });
       }
       continue;
