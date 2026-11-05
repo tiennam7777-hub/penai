@@ -405,6 +405,7 @@ export const INDEX_HTML = `<!doctype html>
     { id: "misa", icon: "📄", label: "MISA meInvoice", admin: true },
     { id: "stem-report", icon: "🌸", label: "Báo cáo cắm hoa" },
     { id: "delivery-report", icon: "🚚", label: "Báo cáo Giao hàng" },
+    { id: "attendance", icon: "🕘", label: "Chấm Công", admin: true },
     { id: "channels", icon: "📡", label: "Channels" },
     { id: "cron", icon: "⏰", label: "Cron & lịch hẹn" },
     { id: "users", icon: "👤", label: "Người dùng", admin: true },
@@ -986,6 +987,60 @@ export const INDEX_HTML = `<!doctype html>
         }));
       });
     }
+    load();
+  };
+
+  PAGES["attendance"] = function () {
+    var m = page("Chấm Công", "Bảng chấm công KiotViet theo từng chi nhánh; đối chiếu trước khi tính lương");
+    var c = card(m); c.classList.add("stem-report");
+    var params = new URLSearchParams(state.routeQuery || "");
+    var month = params.get("month") || "2026-10";
+    c.innerHTML = '<div class="stem-monthbar"><label>Tháng<input id="attendanceMonth" type="month" value="' + esc(month) + '"></label>' +
+      '<label>Chi nhánh<select id="attendanceBranch"><option value="">Cả ba chi nhánh</option><option value="42">42 Điện Biên Phủ</option><option value="188">188 Hòa Bình</option><option value="224">224 Kim Mã</option></select></label>' +
+      '<label>Tìm nhân viên<input id="attendanceSearch" type="search" placeholder="Tên hoặc mã nhân viên"></label>' +
+      '<button id="attendanceLoad">Xem bảng công</button></div>' +
+      '<p id="attendanceStatus" class="muted"></p><div id="attendanceFiles"></div><div id="attendanceTable"></div>';
+    var branches = [];
+    function show() {
+      var branch = $("#attendanceBranch", c).value;
+      var search = $("#attendanceSearch", c).value.trim().toLocaleLowerCase("vi-VN");
+      var selected = branches.filter(function (b) { return !branch || b.branchId === branch; });
+      $("#attendanceFiles", c).innerHTML = selected.map(function (b) {
+        return '<p><b>' + esc(b.branchName) + '</b> · ' + (b.rows || []).length + ' nhân viên trong bảng' +
+          ' · <a href="/v1/orchid-attendance/' + encodeURIComponent(b.branchId) + '.xlsx?month=' + encodeURIComponent(month) + '">Tải Excel gốc</a>' +
+          ' <span class="muted">(' + esc(b.importedAt.slice(0, 10)) + ')</span></p>';
+      }).join("");
+      var rows = [];
+      selected.forEach(function (b) { (b.rows || []).forEach(function (r) {
+        if (!search || (r.name + " " + r.code).toLocaleLowerCase("vi-VN").indexOf(search) >= 0) rows.push({ branch: b.branchName, row: r });
+      }); });
+      var fields = [["days", "Ngày công"], ["shifts", "Ca làm"], ["hours", "Giờ làm"], ["late", "Đi muộn"], ["early", "Về sớm"],
+        ["overtime", "Làm thêm"], ["paidLeave", "Nghỉ phép có lương"], ["unpaidLeave", "Nghỉ không lương"]];
+      $("#attendanceTable", c).innerHTML = '<div class="stem-scroll"><table class="stem-table"><thead><tr><th>Chi nhánh</th><th>Mã NV</th><th>Nhân viên</th>' +
+        fields.map(function (f) { return '<th>' + f[1] + '</th>'; }).join("") + '<th>Ghi chú</th></tr></thead><tbody>' +
+        rows.map(function (item) { var r = item.row, totals = r.totals || {};
+          return '<tr><td>' + esc(item.branch) + '</td><td>' + esc(r.code) + '</td><td>' + esc(r.name) + '</td>' +
+            fields.map(function (f) { var v = totals[f[0]]; return '<td>' + esc(v && v !== "-" ? v : "—") + '</td>'; }).join("") +
+            '<td>' + esc(r.archived ? "Đã xóa trên KiotViet; vẫn có công trong file" : r.shiftRows === 0 ? "Không có dòng ca trong Excel" : "") + '</td></tr>';
+        }).join("") + '</tbody></table></div>';
+    }
+    function load() {
+      month = $("#attendanceMonth", c).value;
+      if (!/^20\\d{2}-(0[1-9]|1[0-2])$/.test(month)) { toast("Tháng không hợp lệ", 1); return; }
+      $("#attendanceStatus", c).textContent = "Đang tải bảng công...";
+      api("/v1/orchid-attendance?month=" + encodeURIComponent(month)).then(function (result) {
+        history.replaceState(null, "", "#/attendance?month=" + encodeURIComponent(month));
+        branches = result.branches || [];
+        $("#attendanceStatus", c).textContent = branches.length
+          ? "Dữ liệu nhập từ Excel gốc KiotViet. " + (month === "2026-10" ? "Chi nhánh 224 hiển thị là Kim Mã trên KiotViet; cần đối chiếu với tên Khâm Thiên anh dùng. " : "") + "Dấu — là chưa có số liệu, không tự hiểu là 0."
+          : "Chưa nhập bảng chấm công tháng này.";
+        show();
+      }).catch(function (e) { $("#attendanceStatus", c).textContent = e.message; });
+    }
+    $("#attendanceLoad", c).onclick = load;
+    $("#attendanceMonth", c).onchange = load;
+    $("#attendanceBranch", c).onchange = show;
+    $("#attendanceSearch", c).oninput = show;
     load();
   };
 

@@ -75,6 +75,8 @@ import {
   listOrchidStemMessages,
   listOrchidStemGroups,
   listOrchidDeliveryMessages,
+  listOrchidAttendanceImports,
+  getOrchidAttendanceFile,
   listOrchidWorkPlanMessages,
   getSavedMisaDraftSource,
 } from "@penai/db";
@@ -1345,6 +1347,27 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       report.totals = { orders: report.daily.reduce((n, x) => n + x.orders, 0), far: report.daily.reduce((n, x) => n + x.far, 0), heavy: report.daily.reduce((n, x) => n + x.heavy, 0) };
     }
     return { month, from, to, sender, senders, ...report };
+  });
+  app.get("/v1/orchid-attendance", async (req, reply) => {
+    if (!requireRole(req, reply, "ws_admin")) return;
+    const month = String((req.query as { month?: string }).month ?? "");
+    if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(month)) return reply.code(400).send({ error: "Tháng không hợp lệ" });
+    return { month, branches: await listOrchidAttendanceImports(db, req.authCtx, month) };
+  });
+  app.get("/v1/orchid-attendance/:branchId.xlsx", async (req, reply) => {
+    if (!requireRole(req, reply, "ws_admin")) return;
+    const { branchId } = req.params as { branchId: string };
+    const month = String((req.query as { month?: string }).month ?? "");
+    if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(month) || !["42", "188", "224"].includes(branchId)) {
+      return reply.code(400).send({ error: "Tháng hoặc chi nhánh không hợp lệ" });
+    }
+    const source = await getOrchidAttendanceFile(db, req.authCtx, month, branchId);
+    if (!source) return reply.code(404).send({ error: "Chưa có file chấm công" });
+    return reply
+      .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+      .header("Content-Disposition", `attachment; filename="attendance-${month}-${branchId}.xlsx"`)
+      .header("Cache-Control", "private, no-store")
+      .send(source.bytes);
   });
   app.get("/v1/orchid-stem-report.xlsx", async (req, reply) => {
     const report = await orchidStemReport(req, reply);
