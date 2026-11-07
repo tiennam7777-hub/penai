@@ -27,12 +27,15 @@ it("archives only configured groups, downloads old photos, skips duplicates and 
   });
   const listener = new EventEmitter() as EventEmitter & { requestOldMessages: ReturnType<typeof vi.fn> };
   const pages = [[message("30", "123", true), message("20", "123", true), message("10", "999")], [message("5", "123")], []];
-  listener.requestOldMessages = vi.fn((type) => queueMicrotask(() => listener.emit("old_messages", pages.shift(), type)));
+  listener.requestOldMessages = vi.fn();
+  const sendWs = vi.fn(() => queueMicrotask(() => listener.emit("old_messages", pages.shift(), ThreadType.Group)));
+  Object.assign(listener, { sendWs });
   const api = { listener } as unknown as API;
   const internal = channel as unknown as { api: API; importGroupHistory(api: API): Promise<void> };
   internal.api = api;
   await internal.importGroupHistory(api);
-  expect(listener.requestOldMessages.mock.calls).toEqual([[ThreadType.Group, null], [ThreadType.Group, "10"], [ThreadType.Group, "5"]]);
+  expect(sendWs.mock.calls).toHaveLength(3);
+  expect(sendWs).toHaveBeenNthCalledWith(2, expect.objectContaining({ data: { first: false, lastId: "10", preIds: [] } }));
   expect(onHistory).toHaveBeenCalledTimes(2);
   expect(onHistory.mock.calls[0]![0][0]).toMatchObject({ threadId: "123", msgId: "30", media: { localPath: "/archive/old.jpg" } });
   expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -56,10 +59,12 @@ it("stops paging if Zalo repeats its cursor", async () => {
   const channel = new ZaloPersonalChannel({ id: "repeat", name: "repeat", token: "{}",
     config: { inbox_history_groups: ["123"] }, requirePairing: true, onInbound: vi.fn(), onHistory: vi.fn() });
   const listener = new EventEmitter() as EventEmitter & { requestOldMessages: ReturnType<typeof vi.fn> };
-  listener.requestOldMessages = vi.fn((type) => queueMicrotask(() => listener.emit("old_messages", [message("10", "999")], type)));
+  listener.requestOldMessages = vi.fn();
+  const sendWs = vi.fn(() => queueMicrotask(() => listener.emit("old_messages", [message("10", "999")], ThreadType.Group)));
+  Object.assign(listener, { sendWs });
   const api = { listener } as unknown as API;
   const internal = channel as unknown as { api: API; importGroupHistory(api: API): Promise<void> };
   internal.api = api;
   await internal.importGroupHistory(api);
-  expect(listener.requestOldMessages).toHaveBeenCalledTimes(2);
+  expect(sendWs).toHaveBeenCalledTimes(2);
 });

@@ -1212,7 +1212,10 @@ export class ZaloPersonalChannel implements Channel {
         };
         const timer = setTimeout(() => finish(undefined, new Error("Zalo không trả lịch sử nhóm trong 20 giây")), 20_000);
         api.listener.on("old_messages", receive);
-        try { api.listener.requestOldMessages(ThreadType.Group, cursor); }
+        try {
+          api.listener.sendWs({ version: 1, cmd: 511, subCmd: 1,
+            data: { first: cursor === null, lastId: cursor, preIds: [] } });
+        }
         catch (error) { finish(undefined, error instanceof Error ? error : new Error(String(error))); }
       });
       if (this.api !== api || !messages.length) break;
@@ -1229,7 +1232,7 @@ export class ZaloPersonalChannel implements Channel {
       }
       const next = messages.map((m) => String(m.data.msgId ?? "")).filter((id) => /^\d+$/.test(id))
         .sort((a, b) => BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0)[0];
-      logger.info(`zalo.history_page: channel ${this.id}, page ${page + 1}, received ${messages.length}, archived ${imported}`);
+      logger.info(`zalo.history_page: channel ${this.id}, page ${page + 1}, received ${messages.length}, archived ${imported}, oldest ${new Date(Number(messages[0]!.data.ts)).toISOString()}, groups ${[...new Set(messages.map((m) => m.threadId))].join(",")}`);
       if (!next || (cursor !== null && BigInt(next) >= BigInt(cursor))) break;
       cursor = next;
     }
