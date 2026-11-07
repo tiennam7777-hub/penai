@@ -67,7 +67,7 @@ export function parseOrchidQuality(text: string) {
       counts.unknown ? "Chưa rõ loại" : "", !customer ? "Chưa ghi khách" : ""].filter(Boolean).join("; ") };
 }
 
-export function buildOrchidQualityReport(messages: OrchidStemMessage[], from: string, to: string, search = "") {
+export function buildOrchidQualityReport(messages: OrchidStemMessage[], from: string, to: string, search = "", sender = "") {
   const unique = new Map<string, OrchidStemMessage>();
   for (const message of messages) unique.set(message.msgId, message);
   // Explicit quoted corrections replace their source, keeping its date and customer.
@@ -90,15 +90,22 @@ export function buildOrchidQualityReport(messages: OrchidStemMessage[], from: st
     return { ...m, ...parsed, day: orchidStemDay(m.sentAt), text: correction ? `${m.text}\n[Sửa] ${correction.text}` : m.text };
   }).filter(m => m.day >= from && m.day <= to);
   const q = qualitySearchText(search.trim());
-  const entries = rows.filter(r => !q || qualitySearchText([r.customerName, r.senderName, r.text, r.total,
-    r.potStems, r.bad, r.twoBranch, r.note].join(" ")).includes(q))
+  const senders = [...new Set(rows.map(r => r.senderName))].sort((a, b) => a.localeCompare(b, "vi"));
+  const entries = rows.filter(r => (!sender || r.senderName === sender) && (!q || qualitySearchText([r.customerName, r.senderName, r.text, r.total,
+    r.potStems, r.bad, r.twoBranch, r.note].join(" ")).includes(q)))
     .sort((a, b) => b.sentAt.localeCompare(a.sentAt) || b.msgId.localeCompare(a.msgId));
   const totals = { total: 0, bad: 0, twoBranch: 0, unknown: 0, reports: entries.length, review: 0 };
+  const people = new Map<string, { senderName: string; total: number; bad: number; twoBranch: number; unknown: number; reports: number; review: number }>();
   for (const r of entries) {
     totals.total += r.total ?? 0; totals.bad += r.bad; totals.twoBranch += r.twoBranch;
     totals.unknown += r.unknown; if (r.note) totals.review++;
+    const person = people.get(r.senderName) ?? { senderName: r.senderName, total: 0, bad: 0, twoBranch: 0, unknown: 0, reports: 0, review: 0 };
+    person.total += r.total ?? 0; person.bad += r.bad; person.twoBranch += r.twoBranch;
+    person.unknown += r.unknown; person.reports++; if (r.note) person.review++;
+    people.set(r.senderName, person);
   }
-  return { entries, totals, uncaptionedMedia: [...unique.values()].filter(m => m.inRange !== false &&
+  const monthly = [...people.values()].sort((a, b) => b.bad - a.bad || b.twoBranch - a.twoBranch || a.senderName.localeCompare(b.senderName, "vi"));
+  return { entries, totals, monthly, senders, sender, uncaptionedMedia: [...unique.values()].filter(m => m.inRange !== false &&
     !m.text.trim() && ["photo", "video"].includes(m.contentType ?? "")).length };
 }
 
@@ -106,6 +113,7 @@ export function orchidQualityWorkbook(report: ReturnType<typeof buildOrchidQuali
   return buildXlsx([
     { name: "Tổng hợp tháng", widths: [38, 65], rows: [["Chỉ tiêu", "Giá trị"], ["Tháng", month],
       ["Nhóm nguồn", "Di Hoa Xau - Nhet Cay 2 nhanh"], ["Tìm kiếm", search || "Tất cả"],
+      ["Nhân viên", report.sender || "Tất cả nhân viên"],
       ["Tổng cây/cành đã ghi số", report.totals.total], ["Hoa xấu", report.totals.bad],
       ["Cây 2 nhánh", report.totals.twoBranch], ["Chưa rõ loại", report.totals.unknown],
       ["Tin cần kiểm tra", report.totals.review], ["Ảnh/video không chú thích (không tự đếm)", report.uncaptionedMedia],
@@ -114,6 +122,10 @@ export function orchidQualityWorkbook(report: ReturnType<typeof buildOrchidQuali
       ["Ngày giờ", "Nhân viên", "Chậu / khách", "Số cành chậu", "Cây/cành đã dùng", "Hoa xấu", "Cây 2 nhánh", "Chưa rõ loại", "Cần kiểm tra", "Tin gốc", "Mã tin"],
       ...report.entries.map(r => [new Date(r.sentAt), r.senderName, r.customerName, r.potStems,
         r.total, r.bad, r.twoBranch, r.unknown, r.note, r.text, r.msgId]),
+    ] },
+    { name: "Theo nhân viên", widths: [30, 18, 18, 18, 18, 18, 24], rows: [
+      ["Nhân viên", "Hoa xấu", "Cây 2 nhánh", "Chưa rõ loại", "Tổng cây/cành", "Số tin", "Tin cần kiểm tra"],
+      ...report.monthly.map(r => [r.senderName, r.bad, r.twoBranch, r.unknown, r.total, r.reports, r.review]),
     ] },
   ]);
 }

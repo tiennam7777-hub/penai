@@ -1051,12 +1051,15 @@ export const INDEX_HTML = `<!doctype html>
     var params = new URLSearchParams(state.routeQuery || "");
     var month = params.get("month") || new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 7);
     c.innerHTML = '<div class="stem-monthbar"><label>Tháng báo cáo<input id="qualityMonth" type="month" value="' + esc(month) + '"></label>' +
+      '<label>Nhân viên<select id="qualitySender"><option value="">Tất cả nhân viên</option></select></label>' +
       '<label style="flex:1;min-width:220px">Tìm khách, chậu, số cành, nhân viên<input id="qualitySearch" placeholder="VD: Nhi, 35c, VSP, 2v" maxlength="200" value="' + esc(params.get("search") || "") + '"></label>' +
-      '<button id="qualityLoad">Xem báo cáo</button><button id="qualityExport" class="secondary">Tải Excel</button></div>' +
+      '<button id="qualityLoad">Lọc báo cáo</button><button id="qualityReset" class="secondary">Bỏ lọc</button><button id="qualityExport" class="secondary">Tải Excel</button></div>' +
       '<p class="stem-guide">Nguồn: nhóm Đi Hoa Xau - Nhet Cay 2 Nhanh. Cây 2 vòi / 2v được ghi ở cột Cây 2 nhánh. Số cành chậu khách được tách riêng với số cây đã dùng. Tin thiếu loại hoặc tên khách vẫn giữ để tra cứu; không tự đếm số cây từ ảnh.</p>' +
-      '<div id="qualitySummary" aria-live="polite">Đang tải...</div><div id="qualityRows" class="stem-scroll"></div><p id="qualitySource" class="muted"></p>';
+      '<div id="qualitySummary" aria-live="polite">Đang tải...</div><section class="stem-section"><h3>Tổng theo nhân viên</h3><p class="muted">Số lượng theo tháng và bộ lọc đang chọn. Chọn tên nhân viên để xem chi tiết bên dưới.</p><div id="qualityPeople" class="stem-scroll"></div></section><section class="stem-section"><h3>Chi tiết chậu / khách</h3><div id="qualityRows" class="stem-scroll"></div></section><p id="qualitySource" class="muted"></p>';
+    var selectedSender = params.get("sender") || "";
+    if (selectedSender) { var opt = document.createElement("option"); opt.value = selectedSender; opt.textContent = selectedSender; $("#qualitySender", c).appendChild(opt); $("#qualitySender", c).value = selectedSender; }
     var generation = 0, timer;
-    function query() { return "month=" + encodeURIComponent($("#qualityMonth", c).value) + "&search=" + encodeURIComponent($("#qualitySearch", c).value.trim()); }
+    function query() { return "month=" + encodeURIComponent($("#qualityMonth", c).value) + "&search=" + encodeURIComponent($("#qualitySearch", c).value.trim()) + "&sender=" + encodeURIComponent($("#qualitySender", c).value); }
     function num(n) { return n === null ? "—" : Number(n || 0).toLocaleString("vi-VN"); }
     function load() {
       var current = ++generation;
@@ -1065,10 +1068,17 @@ export const INDEX_HTML = `<!doctype html>
       return api("/v1/orchid-quality-report?" + q).then(function (r) {
         if (current !== generation) return;
         history.replaceState(null, "", "#/quality-report?" + q);
+        var select = $("#qualitySender", c);
+        select.innerHTML = '<option value="">Tất cả nhân viên</option>' + (r.senders || []).map(function (name) { return '<option value="' + esc(name) + '">' + esc(name) + '</option>'; }).join("");
+        if (r.sender && (r.senders || []).indexOf(r.sender) < 0) { var missing = document.createElement("option"); missing.value = r.sender; missing.textContent = r.sender + " (không có tin tháng này)"; select.appendChild(missing); }
+        select.value = r.sender || "";
         var t = r.totals;
         $("#qualitySummary", c).innerHTML = '<div class="stem-summary">' + [[t.total, "Tổng cây/cành đã ghi số"], [t.bad, "Hoa xấu"], [t.twoBranch, "Cây 2 nhánh"], [t.unknown, "Chưa rõ loại"]].map(function (x) {
           return '<div class="stem-metric"><strong>' + num(x[0]) + '</strong><span>' + x[1] + '</span></div>';
         }).join("") + '</div><p>' + num(t.reports) + ' tin · ' + num(t.review) + ' tin cần kiểm tra thông tin</p>';
+        $("#qualityPeople", c).innerHTML = '<table class="stem-table" style="table-layout:auto"><thead><tr><th>Nhân viên</th><th>Hoa xấu</th><th>Cây 2 nhánh</th><th>Chưa rõ loại</th><th>Tổng cây/cành</th><th>Số tin</th><th>Cần kiểm tra</th></tr></thead><tbody>' +
+          (r.monthly || []).map(function (x) { return '<tr><td><button class="secondary" data-quality-sender="' + esc(x.senderName) + '">' + esc(x.senderName) + '</button></td><td><b>' + num(x.bad) + '</b></td><td>' + num(x.twoBranch) + '</td><td>' + num(x.unknown) + '</td><td>' + num(x.total) + '</td><td>' + num(x.reports) + '</td><td>' + num(x.review) + '</td></tr>'; }).join("") + ((r.monthly || []).length ? '' : '<tr><td colspan="7">Không có tin phù hợp.</td></tr>') + '</tbody></table>';
+        $("#qualityPeople", c).querySelectorAll("[data-quality-sender]").forEach(function (button) { button.onclick = function () { $("#qualitySender", c).value = button.getAttribute("data-quality-sender"); load(); }; });
         $("#qualityRows", c).innerHTML = '<table class="stem-table" style="min-width:1100px;table-layout:auto"><thead><tr><th>Ngày giờ</th><th>Nhân viên</th><th>Chậu / khách</th><th>Cành chậu</th><th>Cây/cành đã dùng</th><th>Hoa xấu</th><th>Cây 2 nhánh</th><th>Chưa rõ loại</th><th>Tin gốc / kiểm tra</th></tr></thead><tbody>' +
           (r.entries || []).map(function (x) {
             return '<tr><td style="white-space:nowrap">' + esc(new Date(x.sentAt).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })) + '</td><td>' + esc(x.senderName) + '</td><td>' + esc(x.customerName) + '</td><td>' + num(x.potStems) + '</td><td>' + num(x.total) + '</td><td>' + num(x.bad) + '</td><td>' + num(x.twoBranch) + '</td><td>' + num(x.unknown) + '</td><td><span style="white-space:pre-wrap">' + esc(x.text) + '</span>' + (x.note ? '<br><small style="color:var(--accent2)">' + esc(x.note) + '</small>' : '') + '<br><small class="muted">' + esc(x.msgId) + '</small></td></tr>';
@@ -1079,6 +1089,8 @@ export const INDEX_HTML = `<!doctype html>
     }
     $("#qualityLoad", c).onclick = load;
     $("#qualityMonth", c).onchange = load;
+    $("#qualitySender", c).onchange = load;
+    $("#qualityReset", c).onclick = function () { $("#qualitySender", c).value = ""; $("#qualitySearch", c).value = ""; load(); };
     $("#qualitySearch", c).oninput = function () { clearTimeout(timer); timer = setTimeout(load, 350); };
     $("#qualityExport", c).onclick = function () { window.location.href = "/v1/orchid-quality-report.xlsx?" + query(); };
     load();

@@ -5,6 +5,29 @@ const message = (text: string, msgId = "1", extra = {}) => ({ text, msgId, sende
   senderId: "person", sentAt: "2026-11-07T06:32:50.504Z", ...extra });
 
 describe("Đi hoa xấu - cây 2 nhánh", () => {
+  it("lọc chính xác nhân viên, giữ danh sách đầy đủ và cộng tổng theo người", () => {
+    const messages = [message("3 cây 2v, 2 cây xấu (chậu 35c c Nhi)"),
+      message("4 cây xấu (chậu 9c Kim Chi)", "2"),
+      message("2c 2v chậu 6c a Thông", "3", { senderName: "Trung Toàn" }),
+      message("1c", "4", { senderName: "Trung Toàn" })];
+    const all = buildOrchidQualityReport(messages, "2026-11-01", "2026-11-30");
+    expect(all.monthly).toEqual([
+      { senderName: "Văn Hoàng", total: 9, bad: 6, twoBranch: 3, unknown: 0, reports: 2, review: 0 },
+      { senderName: "Trung Toàn", total: 3, bad: 0, twoBranch: 2, unknown: 1, reports: 2, review: 1 },
+    ]);
+    const filtered = buildOrchidQualityReport(messages, "2026-11-01", "2026-11-30", "", "Văn Hoàng");
+    expect(filtered.senders).toHaveLength(2);
+    expect(filtered.entries).toHaveLength(2);
+    expect(filtered.totals).toMatchObject({ total: 9, bad: 6, twoBranch: 3 });
+    expect(filtered.monthly).toHaveLength(1);
+    const search = buildOrchidQualityReport(messages, "2026-11-01", "2026-11-30", "nhi", "Văn Hoàng");
+    expect(search.totals).toMatchObject({ total: 5, bad: 2, twoBranch: 3 });
+    expect(buildOrchidQualityReport(messages, "2026-11-01", "2026-11-30", "", "Không có").entries).toHaveLength(0);
+    const zip = new AdmZip(orchidQualityWorkbook(filtered, "2026-11"));
+    expect(zip.readAsText("xl/workbook.xml")).toContain("Theo nhân viên");
+    expect(zip.readAsText("xl/worksheets/sheet3.xml")).toContain("Văn Hoàng");
+    expect(zip.readAsText("xl/worksheets/sheet3.xml")).not.toContain("Trung Toàn");
+  });
   it.each([
     ["3 cây 2v, 2 cây xấu (chậu 35c c nhi)", 5, 2, 3, 0, 35],
     ["5c( 2c 2v , 3c het nu)", 5, 3, 2, 0, null],

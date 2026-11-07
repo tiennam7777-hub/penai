@@ -1327,10 +1327,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   });
   async function orchidQualityReport(req: FastifyRequest, reply: FastifyReply) {
     if (!requireModeratorOrRole(req, reply, "ws_admin")) return null;
-    const query = req.query as { month?: string; search?: string };
+    const query = req.query as { month?: string; search?: string; sender?: string };
     const month = String(query.month ?? "");
     const search = String(query.search ?? "").trim();
-    if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(month) || search.length > 200) {
+    const sender = String(query.sender ?? "").trim();
+    if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(month) || search.length > 200 || sender.length > 100) {
       reply.code(400).send({ error: "Tháng hoặc từ khóa không hợp lệ" }); return null;
     }
     const [year, mon] = month.split("-").map(Number);
@@ -1342,7 +1343,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const full = buildOrchidQualityReport(source.messages, from, to);
     await saveOrchidQualityWorkbook(deps.config.dataDir, req.authCtx.workspaceId, month, orchidQualityWorkbook(full, month));
     return { month, search, libraryPath: `shared/di-hoa-xau-cay-2-nhanh/di-hoa-xau-cay-2-nhanh-${month}.xlsx`,
-      ...(search ? buildOrchidQualityReport(source.messages, from, to, search) : full) };
+      ...(search || sender ? buildOrchidQualityReport(source.messages, from, to, search, sender) : full) };
   }
   app.get("/v1/orchid-quality-report", async (req, reply) => {
     return (await orchidQualityReport(req, reply)) ?? undefined;
@@ -1351,7 +1352,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const report = await orchidQualityReport(req, reply);
     if (!report) return;
     return reply.header("cache-control", "no-store")
-      .header("content-disposition", `attachment; filename="di-hoa-xau-cay-2-nhanh-${report.month}${report.search ? "-loc" : ""}.xlsx"`)
+      .header("content-disposition", `attachment; filename="di-hoa-xau-cay-2-nhanh-${report.month}${report.search || report.sender ? "-loc" : ""}.xlsx"`)
       .type("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
       .send(orchidQualityWorkbook(report, report.month, report.search));
   });

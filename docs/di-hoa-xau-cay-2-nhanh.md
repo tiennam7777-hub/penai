@@ -2,6 +2,8 @@
 
 Mở mục ngay dưới **Báo cáo cắm hoa**, chọn tháng, tìm không dấu theo khách, chậu, số cành, nhân viên hoặc nội dung gốc. Mọi nhân viên nằm trong một cột, không tách chi nhánh. **Tải Excel** xuất kết quả đang tìm; để trống ô tìm để tải cả tháng.
 
+Chọn **Nhân viên** rồi bấm **Lọc báo cáo** để xem tổng và từng chậu của người đó. Bảng **Tổng theo nhân viên** cộng hoa xấu, cây 2 nhánh, chưa rõ loại và tổng cây/cành của từng người theo tháng và từ khóa đang lọc. Bấm tên trong bảng để lọc nhanh; **Bỏ lọc** quay về mọi nhân viên và xóa từ khóa. Excel có thêm sheet **Theo nhân viên** và ghi rõ điều kiện lọc. Nhân viên được xác định theo người gửi báo cáo trong nhóm.
+
 Nguồn duy nhất là nhóm `Di Hoa Xau - Nhet Cay 2 nhanh`. Gộp các bản tin trùng mã giữa tài khoản Zalo, loại tin thu hồi. Ngày tính là ngày gửi theo giờ Việt Nam. Tin sửa có trích dẫn và ghi “sửa”, “đính chính”, “báo lại” thay số tin được trích dẫn, giữ ngày và khách của tin gốc.
 
 - `3 cây 2v, 2 cây xấu (chậu 35c c Nhi)` → dùng 5 cây: 3 cây 2 nhánh, 2 hoa xấu; chậu khách có 35 cành.
