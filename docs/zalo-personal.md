@@ -224,6 +224,8 @@ QR và thông tin đăng nhập Zalo không bao giờ được ghi log hay trả
 
 Cấu hình kênh (`channels.config`): `demo_threads`, `require_mention`, `agent_reply`, `inbox`, `inbox_pause_minutes`, `mcp_read_messages`, `auto_reaction`. Biến môi trường: `PENAI_PUBLIC_URL` (bắt buộc cho MCP — bản cài có sẵn), `PENAI_MCP_ALLOWED_ORIGINS` (thêm Origin được gọi `/mcp`).
 
+Lịch sử nhóm (mặc định không tải): đặt `inbox_history_groups` là mảng UID nhóm cần lưu lại. Sau mỗi lần khôi phục phiên và đồng bộ danh bạ, PenAI gọi `getGroupChatHistory` riêng từng nhóm, tối đa `inbox_history_count` tin gần nhất (mặc định 500, giới hạn 1–1000). Tin đã lưu được bỏ qua trước khi tải file. Tin cũ chỉ vào Inbox, không chạy Agent/lệnh, không tự thả cảm xúc, không tăng chưa đọc hoặc tạm dừng AI. Ảnh/file còn URL CDN hợp lệ được lưu vào kho Inbox; không bảo đảm lấy được tin trước khi tài khoản tham gia hoặc ảnh đã hết hạn. Nhật ký `zalo.history_group` ghi số tin Zalo trả về và cờ còn lịch sử (`more`).
+
 Những điểm dễ làm hỏng:
 
 - **Tin dội lại.** Tin do PenAI gửi (agent/web/MCP) quay lại qua listener với `isSelf`. Adapter nhớ `msgId` lúc gửi để bỏ qua bản dội lại; bản dội lại có thể tới **trước** khi lệnh gửi trả kết quả nên listener chờ 1,5 giây rồi kiểm tra lại. Bỏ bước chờ → tin bị lưu trùng thành "gửi từ điện thoại" và AI tự tạm dừng sau chính câu trả lời của mình.

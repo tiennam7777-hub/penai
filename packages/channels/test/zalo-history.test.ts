@@ -1,4 +1,3 @@
-import { EventEmitter } from "node:events";
 import { afterEach, expect, it, vi } from "vitest";
 import { ThreadType, type API, type Message } from "zca-js";
 import { ZaloPersonalChannel } from "../src/zalo-personal.js";
@@ -25,46 +24,39 @@ it("archives only configured groups, downloads old photos, skips duplicates and 
     onInbound, onMessageLog, onHistory, saveInboxFile,
     hasHistoryMessage: async (_thread, id) => id === "20",
   });
-  const listener = new EventEmitter() as EventEmitter & { requestOldMessages: ReturnType<typeof vi.fn> };
-  const pages = [[message("30", "123", true), message("20", "123", true), message("10", "999")], [message("5", "123")], []];
-  listener.requestOldMessages = vi.fn();
-  const sendWs = vi.fn(() => queueMicrotask(() => listener.emit("old_messages", pages.shift(), ThreadType.Group)));
-  Object.assign(listener, { sendWs });
-  const api = { listener } as unknown as API;
+  const getGroupChatHistory = vi.fn().mockResolvedValue({ more: 0,
+    groupMsgs: [message("30", "123", true), message("20", "123", true), message("10", "999"), message("5", "123")] });
+  const api = { getGroupChatHistory } as unknown as API;
   const internal = channel as unknown as { api: API; importGroupHistory(api: API): Promise<void> };
   internal.api = api;
   await internal.importGroupHistory(api);
-  expect(sendWs.mock.calls).toHaveLength(3);
-  expect(sendWs).toHaveBeenNthCalledWith(2, expect.objectContaining({ data: { first: false, lastId: "10", preIds: [] } }));
+  expect(getGroupChatHistory).toHaveBeenCalledExactlyOnceWith("123", 500);
   expect(onHistory).toHaveBeenCalledTimes(2);
-  expect(onHistory.mock.calls[0]![0][0]).toMatchObject({ threadId: "123", msgId: "30", media: { localPath: "/archive/old.jpg" } });
+  expect(onHistory.mock.calls[1]![0][0]).toMatchObject({ threadId: "123", msgId: "30", media: { localPath: "/archive/old.jpg" } });
   expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(onMessageLog).not.toHaveBeenCalled();
   expect(onInbound).not.toHaveBeenCalled();
-  expect(listener.listenerCount("old_messages")).toBe(0);
 });
 
 it("does not request history without an explicit group selection", async () => {
   const channel = new ZaloPersonalChannel({ id: "disabled", name: "disabled", token: "{}", config: {},
     requirePairing: true, onInbound: vi.fn(), onHistory: vi.fn() });
-  const listener = { requestOldMessages: vi.fn() };
-  const api = { listener } as unknown as API;
+  const getGroupChatHistory = vi.fn();
+  const api = { getGroupChatHistory } as unknown as API;
   const internal = channel as unknown as { api: API; importGroupHistory(api: API): Promise<void> };
   internal.api = api;
   await internal.importGroupHistory(api);
-  expect(listener.requestOldMessages).not.toHaveBeenCalled();
+  expect(getGroupChatHistory).not.toHaveBeenCalled();
 });
 
-it("stops paging if Zalo repeats its cursor", async () => {
+it("continues to the second group when the first history request fails", async () => {
   const channel = new ZaloPersonalChannel({ id: "repeat", name: "repeat", token: "{}",
-    config: { inbox_history_groups: ["123"] }, requirePairing: true, onInbound: vi.fn(), onHistory: vi.fn() });
-  const listener = new EventEmitter() as EventEmitter & { requestOldMessages: ReturnType<typeof vi.fn> };
-  listener.requestOldMessages = vi.fn();
-  const sendWs = vi.fn(() => queueMicrotask(() => listener.emit("old_messages", [message("10", "999")], ThreadType.Group)));
-  Object.assign(listener, { sendWs });
-  const api = { listener } as unknown as API;
+    config: { inbox_history_groups: ["123", "456"] }, requirePairing: true, onInbound: vi.fn(), onHistory: vi.fn() });
+  const getGroupChatHistory = vi.fn().mockRejectedValueOnce(new Error("Unavailable"))
+    .mockResolvedValueOnce({ groupMsgs: [], more: 0 });
+  const api = { getGroupChatHistory } as unknown as API;
   const internal = channel as unknown as { api: API; importGroupHistory(api: API): Promise<void> };
   internal.api = api;
   await internal.importGroupHistory(api);
-  expect(sendWs).toHaveBeenCalledTimes(2);
+  expect(getGroupChatHistory).toHaveBeenCalledTimes(2);
 });
