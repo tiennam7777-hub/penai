@@ -166,7 +166,9 @@ export interface ChannelDeps {
    * Kênh cá nhân có Inbox — tin CŨ nền tảng gửi về ngay sau khi liên kết thiết bị (WhatsApp).
    * Đã xếp theo thời gian tăng dần; server lưu tuần tự, không tăng "chưa đọc", không tạm dừng AI.
    */
-  onHistory?: (entries: ChannelMessageLog[]) => void;
+  onHistory?: (entries: ChannelMessageLog[]) => void | Promise<void>;
+  /** Skip already archived Zalo history before downloading its attachments again. */
+  hasHistoryMessage?: (threadId: string, msgId: string) => Promise<boolean>;
   /** Thư mục riêng của kênh để adapter giữ trạng thái phiên (WhatsApp: khóa thiết bị liên kết). */
   stateDir?: string;
   /** Lưu file nhận được vào thư mục Inbox của kênh → trả đường dẫn tuyệt đối (để Inbox hiển thị lại). */

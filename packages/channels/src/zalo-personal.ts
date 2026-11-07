@@ -1135,6 +1135,15 @@ export class ZaloPersonalChannel implements Channel {
   }
 
   private attachListener(api: API): void {
+    // Opt-in history archive. Wait for the encrypted socket handshake; never
+    // route old messages through handleMessage (commands, reactions or Agent).
+    let historyStarted = false;
+    api.listener.on("cipher_key", () => {
+      if (historyStarted || this.api !== api) return;
+      historyStarted = true;
+      void this.importGroupHistory(api).catch((error) =>
+        logger.warn(`zalo.history_fail: channel ${this.id}: ${errorMessage(error)}`));
+    });
     api.listener.on("message", (message) => {
       this.runner.run(() => this.handleMessage(message));
     });
@@ -1180,6 +1189,51 @@ export class ZaloPersonalChannel implements Channel {
     });
     api.listener.start({ retryOnClose: true });
     this.listening = true;
+  }
+
+  private async importGroupHistory(api: API): Promise<void> {
+    const configured = this.deps.config["inbox_history_groups"];
+    const groups = new Set(Array.isArray(configured)
+      ? configured.filter((id): id is string => typeof id === "string" && /^\d{1,30}$/.test(id)) : []);
+    if (!groups.size || !this.deps.onHistory) return;
+    const configuredPages = Number(this.deps.config["inbox_history_max_pages"] ?? 10);
+    const maxPages = Number.isInteger(configuredPages) ? Math.max(1, Math.min(100, configuredPages)) : 10;
+    let cursor: string | null = null;
+    let imported = 0;
+    for (let page = 0; page < maxPages && this.api === api; page++) {
+      const messages = await new Promise<Message[]>((resolve, reject) => {
+        const finish = (messages?: Message[], error?: Error) => {
+          clearTimeout(timer);
+          api.listener.off("old_messages", receive);
+          if (error) reject(error); else resolve(messages ?? []);
+        };
+        const receive = (messages: Message[], type: ThreadType) => {
+          if (type === ThreadType.Group) finish(messages);
+        };
+        const timer = setTimeout(() => finish(undefined, new Error("Zalo không trả lịch sử nhóm trong 20 giây")), 20_000);
+        api.listener.on("old_messages", receive);
+        try { api.listener.requestOldMessages(ThreadType.Group, cursor); }
+        catch (error) { finish(undefined, error instanceof Error ? error : new Error(String(error))); }
+      });
+      if (this.api !== api || !messages.length) break;
+      messages.sort((a, b) => Number(a.data.ts) - Number(b.data.ts));
+      for (const message of messages) {
+        if (this.api !== api) return;
+        const threadId = String(message.threadId), msgId = String(message.data.msgId ?? "");
+        if (!groups.has(threadId) || !msgId || isZaloCallSignal(message.data.content, String(message.data.msgType ?? ""))) continue;
+        if (await this.deps.hasHistoryMessage?.(threadId, msgId)) continue;
+        const senderId = String(message.data.uidFrom || threadId);
+        await this.logListenerMessage(message, "group", threadId, senderId,
+          message.data.dName || (message.isSelf ? (this.account?.name ?? senderId) : senderId), true);
+        imported++;
+      }
+      const next = messages.map((m) => String(m.data.msgId ?? "")).filter((id) => /^\d+$/.test(id))
+        .sort((a, b) => BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0)[0];
+      logger.info(`zalo.history_page: channel ${this.id}, page ${page + 1}, received ${messages.length}, archived ${imported}`);
+      if (!next || (cursor !== null && BigInt(next) >= BigInt(cursor))) break;
+      cursor = next;
+    }
+    logger.info(`zalo.history_done: channel ${this.id}, archived ${imported}`);
   }
 
   private stopListener(): void {
@@ -1415,10 +1469,11 @@ export class ZaloPersonalChannel implements Channel {
     threadId: string,
     senderId: string,
     senderName: string,
+    history = false,
   ): Promise<void> {
-    if (!this.deps.onMessageLog) return;
+    if (history ? !this.deps.onHistory : !this.deps.onMessageLog) return;
     const msgId = String(message.data.msgId ?? "");
-    if (message.isSelf && msgId) {
+    if (!history && message.isSelf && msgId) {
       if (!this.sentMsgIds.has(msgId)) await new Promise((r) => setTimeout(r, 1_500));
       if (this.sentMsgIds.has(msgId)) {
         this.sentMsgIds.delete(msgId);
@@ -1499,7 +1554,7 @@ export class ZaloPersonalChannel implements Channel {
       const quoteSource = this.quoteSourceOf(message);
       if (quoteSource) meta.zaloQuoteSource = quoteSource;
       const ts = Number(message.data.ts);
-      this.deps.onMessageLog({
+      const entry: ChannelMessageLog = {
         threadId,
         peerKind,
         msgId,
@@ -1516,7 +1571,9 @@ export class ZaloPersonalChannel implements Channel {
             : message.isSelf
               ? ""
               : senderName,
-      });
+      };
+      if (history) await this.deps.onHistory?.([entry]);
+      else this.deps.onMessageLog?.(entry);
     } catch (error) {
       logger.warn(`zalo.inbox_log_fail: ${errorMessage(error)}`);
     }

@@ -301,10 +301,11 @@ export function inboxHooks(
       },
     } : {}),
     // Tin cũ nền tảng gửi về sau khi liên kết: lưu tuần tự theo thời gian, không tính "chưa đọc"
-    onHistory: (entries: ChannelMessageLog[]) => {
+    hasHistoryMessage: async (threadId: string, msgId: string) =>
+      !inboxState.get(ch.id)?.enabled || !!await getInboxMessageByMsgId(db, ctx, ch.id, threadId, msgId),
+    onHistory: async (entries: ChannelMessageLog[]) => {
       const st = inboxState.get(ch.id);
       if (!st?.enabled) return;
-      void (async () => {
         let n = 0;
         for (const entry of entries) {
           const saved = await recordInboxMessage(db, ctx, ch.id, toInput(entry), { history: true }).catch(() => null);
@@ -312,7 +313,6 @@ export function inboxHooks(
         }
         logger.info(`inbox.history_import: kênh ${ch.id} lưu ${n}/${entries.length} tin cũ`);
         if (n) broadcast(ch.workspaceId, ch.id, "contacts", { channelId: ch.id, count: n });
-      })();
     },
     onMessageLog: (entry: ChannelMessageLog) => {
       // Contacts: MỌI người nhắn tới (tin riêng + người gửi trong nhóm) và cả NHÓM — ghi ngay,
