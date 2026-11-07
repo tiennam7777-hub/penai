@@ -403,6 +403,7 @@ export const INDEX_HTML = `<!doctype html>
     { id: "providers", icon: "🔌", label: "Providers" },
     { id: "kiotviet", icon: "🧾", label: "KiotViet", admin: true },
     { id: "misa", icon: "📄", label: "MISA meInvoice", admin: true },
+    { id: "dlog", icon: "📒", label: "DLOG" },
     { id: "stem-report", icon: "🌸", label: "Báo cáo cắm hoa" },
     { id: "quality-report", icon: "🌿", label: "Đi Hoa Xấu - Cây 2 nhánh" },
     { id: "delivery-report", icon: "🚚", label: "Báo cáo Giao hàng" },
@@ -442,9 +443,9 @@ export const INDEX_HTML = `<!doctype html>
     }
     if (isModerator()) {
       nav.appendChild(el("div", { "class": "grp" }, "Công việc"));
-      ["chat", "channels", "library", "contacts", "stem-report", "quality-report", "delivery-report"].concat((state.inboxChannels || []).length ? ["inbox"] : []).forEach(function (id) {
+      ["chat", "channels", "library", "contacts", "dlog", "stem-report", "quality-report", "delivery-report"].concat((state.inboxChannels || []).length ? ["inbox"] : []).forEach(function (id) {
         var n = NAV.find(function (item) { return item.id === id; });
-        nav.appendChild(el("a", { href: "#/" + id, "class": cur === id ? "active" : "" }, n.icon + " <span>" + (id === "channels" ? "Chờ duyệt" : n.label) + "</span>"));
+        nav.appendChild(el("a", { href: "#/" + id, "class": (cur === id || (id === "dlog" && cur.indexOf("dlog-") === 0)) ? "active" : "" }, n.icon + " <span>" + (id === "channels" ? "Chờ duyệt" : n.label) + "</span>"));
       });
       return;
     }
@@ -454,7 +455,7 @@ export const INDEX_HTML = `<!doctype html>
       if (n.admin && !isAdmin()) return;
       if (n.id === "inbox" && !(state.inboxChannels || []).length) return;
       if (pendingGrp) { nav.appendChild(el("div", { "class": "grp" }, pendingGrp)); pendingGrp = null; }
-      var a = el("a", { href: "#/" + n.id, "class": cur === n.id ? "active" : "" }, n.icon + " <span>" + n.label + "</span>");
+      var a = el("a", { href: "#/" + n.id, "class": (cur === n.id || (n.id === "dlog" && cur.indexOf("dlog-") === 0)) ? "active" : "" }, n.icon + " <span>" + n.label + "</span>");
       nav.appendChild(a);
     });
   }
@@ -589,6 +590,41 @@ export const INDEX_HTML = `<!doctype html>
 
   // ===== Pages =====
   var PAGES = {};
+
+  // ===== DLOG =====
+  function dlogTiles(parent, items) {
+    var grid = el("div", { style: "display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px" });
+    parent.appendChild(grid);
+    items.forEach(function (item) {
+      var tile = el("a", { href: "#/" + item.id, "class": "card", style: "display:block;color:inherit;text-decoration:none;margin:0;padding:24px" });
+      tile.appendChild(el("h3", null, esc(item.icon + " " + item.label)));
+      tile.appendChild(el("span", { "class": "muted" }, esc(item.description)));
+      grid.appendChild(tile);
+    });
+  }
+  PAGES.dlog = function () {
+    var m = page("DLOG", "Chọn nội dung cần xem");
+    dlogTiles(m, [
+      { id: "dlog-cancel", icon: "🌱", label: "Hủy cây hư", description: "Vũng Tàu và Đức Trọng" },
+      { id: "dlog-work", icon: "📋", label: "BC Công Việc", description: "Báo cáo công việc" }
+    ]);
+  };
+  PAGES["dlog-cancel"] = function () {
+    var m = page("Hủy cây hư", "Chọn khu vực");
+    m.appendChild(el("p", null, '<a href="#/dlog">← DLOG</a>'));
+    dlogTiles(m, [
+      { id: "dlog-cancel-vung-tau", icon: "🌱", label: "Vũng Tàu", description: "Hủy cây hư tại Vũng Tàu" },
+      { id: "dlog-cancel-duc-trong", icon: "🌱", label: "Đức Trọng", description: "Hủy cây hư tại Đức Trọng" }
+    ]);
+  };
+  function dlogEmpty(title, back, backLabel) {
+    var m = page(title);
+    m.appendChild(el("p", null, '<a href="#/' + back + '">← ' + esc(backLabel) + '</a>'));
+    card(m).appendChild(el("p", { "class": "muted" }, "Chưa kết nối nguồn báo cáo."));
+  }
+  PAGES["dlog-cancel-vung-tau"] = function () { dlogEmpty("Hủy cây hư · Vũng Tàu", "dlog-cancel", "Hủy cây hư"); };
+  PAGES["dlog-cancel-duc-trong"] = function () { dlogEmpty("Hủy cây hư · Đức Trọng", "dlog-cancel", "Hủy cây hư"); };
+  PAGES["dlog-work"] = function () { dlogEmpty("BC Công Việc", "dlog", "DLOG"); };
 
   PAGES.overview = function () {
     var m = page("Tổng quan", "Trạng thái hệ thống " + BRAND.name);
@@ -5565,7 +5601,7 @@ export const INDEX_HTML = `<!doctype html>
     var id = location.hash.replace("#/", "") || (isMember() || isModerator() ? "chat" : "overview");
     var qi = id.indexOf("?"); state.routeQuery = qi >= 0 ? id.slice(qi + 1) : ""; if (qi >= 0) id = id.slice(0, qi);
     if (isMember() && !(id === "inbox" && (state.inboxChannels || []).length)) id = "chat";
-    if (isModerator() && ["chat", "channels", "library", "contacts", "stem-report", "quality-report", "delivery-report"].indexOf(id) < 0 && !(id === "inbox" && (state.inboxChannels || []).length)) id = "chat";
+    if (isModerator() && ["chat", "channels", "library", "contacts", "dlog", "dlog-cancel", "dlog-cancel-vung-tau", "dlog-cancel-duc-trong", "dlog-work", "stem-report", "quality-report", "delivery-report"].indexOf(id) < 0 && !(id === "inbox" && (state.inboxChannels || []).length)) id = "chat";
     var n = null; for (var i = 0; i < NAV.length; i++) if (NAV[i].id === id) n = NAV[i];
     if (n && n.admin && !isAdmin()) id = "overview";
     var fn = PAGES[id] || PAGES.overview;
