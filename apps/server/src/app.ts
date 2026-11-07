@@ -75,6 +75,7 @@ import {
   listOrchidStemMessages,
   listOrchidStemGroups,
   listOrchidDeliveryMessages,
+  listOrchidQualityMessages,
   listOrchidAttendanceImports,
   getOrchidAttendanceFile,
   listOrchidWorkPlanMessages,
@@ -303,6 +304,7 @@ import { registerInboxRoutes } from "./inbox.js";
 import { buildXlsx, type XlsxCell } from "./xlsx.js";
 import { addOrchidWorkPlanCounts, buildOrchidStemReport, combineOrchidStemReports, filterOrchidStemReport, orchidStemDateBounds, orchidStemWorkbook, refreshOrchidStemFile } from "./orchid-stem-report.js";
 import { buildDeliveryReport } from "./orchid-delivery-report.js";
+import { buildOrchidQualityReport, orchidQualityWorkbook, saveOrchidQualityWorkbook } from "./orchid-quality-report.js";
 import { isMcpPublicPath, registerMcpServerRoutes } from "./mcp-server.js";
 import { registerBrowserRoutes } from "./browser-runtime.js";
 
@@ -1322,6 +1324,36 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.get("/v1/orchid-stem-report", async (req, reply) => {
     const report = await orchidStemReport(req, reply);
     if (report) return report;
+  });
+  async function orchidQualityReport(req: FastifyRequest, reply: FastifyReply) {
+    if (!requireModeratorOrRole(req, reply, "ws_admin")) return null;
+    const query = req.query as { month?: string; search?: string };
+    const month = String(query.month ?? "");
+    const search = String(query.search ?? "").trim();
+    if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(month) || search.length > 200) {
+      reply.code(400).send({ error: "Tháng hoặc từ khóa không hợp lệ" }); return null;
+    }
+    const [year, mon] = month.split("-").map(Number);
+    const from = month + "-01";
+    const to = new Date(Date.UTC(year!, mon!, 0)).toISOString().slice(0, 10);
+    const bounds = orchidStemDateBounds(from, to)!;
+    const source = await listOrchidQualityMessages(db, req.authCtx, bounds.start, bounds.end);
+    if (!source.found) { reply.code(404).send({ error: "Chưa tìm thấy nhóm Đi Hoa Xau - Nhet Cay 2 Nhanh" }); return null; }
+    const full = buildOrchidQualityReport(source.messages, from, to);
+    await saveOrchidQualityWorkbook(deps.config.dataDir, req.authCtx.workspaceId, month, orchidQualityWorkbook(full, month));
+    return { month, search, libraryPath: `shared/di-hoa-xau-cay-2-nhanh/di-hoa-xau-cay-2-nhanh-${month}.xlsx`,
+      ...(search ? buildOrchidQualityReport(source.messages, from, to, search) : full) };
+  }
+  app.get("/v1/orchid-quality-report", async (req, reply) => {
+    return (await orchidQualityReport(req, reply)) ?? undefined;
+  });
+  app.get("/v1/orchid-quality-report.xlsx", async (req, reply) => {
+    const report = await orchidQualityReport(req, reply);
+    if (!report) return;
+    return reply.header("cache-control", "no-store")
+      .header("content-disposition", `attachment; filename="di-hoa-xau-cay-2-nhanh-${report.month}${report.search ? "-loc" : ""}.xlsx"`)
+      .type("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+      .send(orchidQualityWorkbook(report, report.month, report.search));
   });
   app.get("/v1/orchid-delivery-report", async (req, reply) => {
     if (!requireModeratorOrRole(req, reply, "ws_admin")) return;

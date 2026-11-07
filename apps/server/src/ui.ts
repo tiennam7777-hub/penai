@@ -404,6 +404,7 @@ export const INDEX_HTML = `<!doctype html>
     { id: "kiotviet", icon: "🧾", label: "KiotViet", admin: true },
     { id: "misa", icon: "📄", label: "MISA meInvoice", admin: true },
     { id: "stem-report", icon: "🌸", label: "Báo cáo cắm hoa" },
+    { id: "quality-report", icon: "🌿", label: "Đi Hoa Xấu - Cây 2 nhánh" },
     { id: "delivery-report", icon: "🚚", label: "Báo cáo Giao hàng" },
     { id: "attendance", icon: "🕘", label: "Chấm Công", admin: true },
     { id: "channels", icon: "📡", label: "Channels" },
@@ -441,7 +442,7 @@ export const INDEX_HTML = `<!doctype html>
     }
     if (isModerator()) {
       nav.appendChild(el("div", { "class": "grp" }, "Công việc"));
-      ["chat", "channels", "library", "contacts", "stem-report", "delivery-report"].concat((state.inboxChannels || []).length ? ["inbox"] : []).forEach(function (id) {
+      ["chat", "channels", "library", "contacts", "stem-report", "quality-report", "delivery-report"].concat((state.inboxChannels || []).length ? ["inbox"] : []).forEach(function (id) {
         var n = NAV.find(function (item) { return item.id === id; });
         nav.appendChild(el("a", { href: "#/" + id, "class": cur === id ? "active" : "" }, n.icon + " <span>" + (id === "channels" ? "Chờ duyệt" : n.label) + "</span>"));
       });
@@ -1041,6 +1042,45 @@ export const INDEX_HTML = `<!doctype html>
     $("#attendanceMonth", c).onchange = load;
     $("#attendanceBranch", c).onchange = show;
     $("#attendanceSearch", c).oninput = show;
+    load();
+  };
+
+  PAGES["quality-report"] = function () {
+    var m = page("Đi Hoa Xấu - Cây 2 nhánh", "Báo cáo theo tháng · Gộp toàn bộ nhân viên, không chia chi nhánh");
+    var c = card(m); c.classList.add("stem-report");
+    var params = new URLSearchParams(state.routeQuery || "");
+    var month = params.get("month") || new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 7);
+    c.innerHTML = '<div class="stem-monthbar"><label>Tháng báo cáo<input id="qualityMonth" type="month" value="' + esc(month) + '"></label>' +
+      '<label style="flex:1;min-width:220px">Tìm khách, chậu, số cành, nhân viên<input id="qualitySearch" placeholder="VD: Nhi, 35c, VSP, 2v" maxlength="200" value="' + esc(params.get("search") || "") + '"></label>' +
+      '<button id="qualityLoad">Xem báo cáo</button><button id="qualityExport" class="secondary">Tải Excel</button></div>' +
+      '<p class="stem-guide">Nguồn: nhóm Đi Hoa Xau - Nhet Cay 2 Nhanh. Cây 2 vòi / 2v được ghi ở cột Cây 2 nhánh. Số cành chậu khách được tách riêng với số cây đã dùng. Tin thiếu loại hoặc tên khách vẫn giữ để tra cứu; không tự đếm số cây từ ảnh.</p>' +
+      '<div id="qualitySummary" aria-live="polite">Đang tải...</div><div id="qualityRows" class="stem-scroll"></div><p id="qualitySource" class="muted"></p>';
+    var generation = 0, timer;
+    function query() { return "month=" + encodeURIComponent($("#qualityMonth", c).value) + "&search=" + encodeURIComponent($("#qualitySearch", c).value.trim()); }
+    function num(n) { return n === null ? "—" : Number(n || 0).toLocaleString("vi-VN"); }
+    function load() {
+      var current = ++generation;
+      var q = query();
+      $("#qualityExport", c).disabled = true;
+      return api("/v1/orchid-quality-report?" + q).then(function (r) {
+        if (current !== generation) return;
+        history.replaceState(null, "", "#/quality-report?" + q);
+        var t = r.totals;
+        $("#qualitySummary", c).innerHTML = '<div class="stem-summary">' + [[t.total, "Tổng cây/cành đã ghi số"], [t.bad, "Hoa xấu"], [t.twoBranch, "Cây 2 nhánh"], [t.unknown, "Chưa rõ loại"]].map(function (x) {
+          return '<div class="stem-metric"><strong>' + num(x[0]) + '</strong><span>' + x[1] + '</span></div>';
+        }).join("") + '</div><p>' + num(t.reports) + ' tin · ' + num(t.review) + ' tin cần kiểm tra thông tin</p>';
+        $("#qualityRows", c).innerHTML = '<table class="stem-table" style="min-width:1100px;table-layout:auto"><thead><tr><th>Ngày giờ</th><th>Nhân viên</th><th>Chậu / khách</th><th>Cành chậu</th><th>Cây/cành đã dùng</th><th>Hoa xấu</th><th>Cây 2 nhánh</th><th>Chưa rõ loại</th><th>Tin gốc / kiểm tra</th></tr></thead><tbody>' +
+          (r.entries || []).map(function (x) {
+            return '<tr><td style="white-space:nowrap">' + esc(new Date(x.sentAt).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })) + '</td><td>' + esc(x.senderName) + '</td><td>' + esc(x.customerName) + '</td><td>' + num(x.potStems) + '</td><td>' + num(x.total) + '</td><td>' + num(x.bad) + '</td><td>' + num(x.twoBranch) + '</td><td>' + num(x.unknown) + '</td><td><span style="white-space:pre-wrap">' + esc(x.text) + '</span>' + (x.note ? '<br><small style="color:var(--accent2)">' + esc(x.note) + '</small>' : '') + '<br><small class="muted">' + esc(x.msgId) + '</small></td></tr>';
+          }).join("") + ((r.entries || []).length ? '' : '<tr><td colspan="9">Không có tin phù hợp trong tháng đã chọn.</td></tr>') + '</tbody></table>';
+        $("#qualitySource", c).textContent = 'File đầy đủ của tháng: ' + r.libraryPath + '. Tải Excel xuất đúng kết quả tìm kiếm hiện tại. Nhóm có ' + num(r.uncaptionedMedia) + ' ảnh/video không chú thích trong tháng (không tự cộng số cây từ ảnh).';
+        $("#qualityExport", c).disabled = false;
+      }).catch(function (e) { if (current === generation) $("#qualitySummary", c).textContent = e.message; });
+    }
+    $("#qualityLoad", c).onclick = load;
+    $("#qualityMonth", c).onchange = load;
+    $("#qualitySearch", c).oninput = function () { clearTimeout(timer); timer = setTimeout(load, 350); };
+    $("#qualityExport", c).onclick = function () { window.location.href = "/v1/orchid-quality-report.xlsx?" + query(); };
     load();
   };
 
@@ -5513,7 +5553,7 @@ export const INDEX_HTML = `<!doctype html>
     var id = location.hash.replace("#/", "") || (isMember() || isModerator() ? "chat" : "overview");
     var qi = id.indexOf("?"); state.routeQuery = qi >= 0 ? id.slice(qi + 1) : ""; if (qi >= 0) id = id.slice(0, qi);
     if (isMember() && !(id === "inbox" && (state.inboxChannels || []).length)) id = "chat";
-    if (isModerator() && ["chat", "channels", "library", "contacts", "stem-report", "delivery-report"].indexOf(id) < 0 && !(id === "inbox" && (state.inboxChannels || []).length)) id = "chat";
+    if (isModerator() && ["chat", "channels", "library", "contacts", "stem-report", "quality-report", "delivery-report"].indexOf(id) < 0 && !(id === "inbox" && (state.inboxChannels || []).length)) id = "chat";
     var n = null; for (var i = 0; i < NAV.length; i++) if (NAV[i].id === id) n = NAV[i];
     if (n && n.admin && !isAdmin()) id = "overview";
     var fn = PAGES[id] || PAGES.overview;
