@@ -11,6 +11,10 @@ describe("orchid stem report", () => {
       .toEqual({ day: "2026-10-11", stems: 121 });
   });
   it("reads two retrospective days from one message but excludes future plans", () => {
+    expect(parseOrchidWorkPlanCounts("Bccv\nCắm 223c\nKH 19/10\nxử lý đơn", "2026-10-18T17:49:00Z"))
+      .toEqual([{ day: "2026-10-18", stems: 223 }]);
+    expect(parseOrchidWorkPlanCounts("BCCV 19/10\ncắm 450 cây\nBCCV 20/10\ncắm 406 cây\nBCCV 21/10\ncắm 162 cây\nKHNM\ncắm đơn", "2026-10-21T11:44:00Z"))
+      .toEqual([{ day: "2026-10-19", stems: 450 }, { day: "2026-10-20", stems: 406 }, { day: "2026-10-21", stems: 162 }]);
     expect(parseOrchidWorkPlanCounts("báo cáo cv 14/10\ntổng cắm 43c\nKh 15/10\noff sáng\ntổng cắm 85c\nKh 16/10\nxử lý đơn cắm", "2026-10-15T23:34:00Z"))
       .toEqual([{ day: "2026-10-14", stems: 43 }, { day: "2026-10-15", stems: 85 }]);
     expect(parseOrchidWorkPlanCounts("BCCV 14/10\ncắm 43c\nKH 15/10\ncắm 85c nếu có đơn", "2026-10-16T00:00:00Z"))

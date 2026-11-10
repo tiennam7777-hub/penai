@@ -186,17 +186,23 @@ export function parseOrchidWorkPlanCount(text: string, sentAt: string): { day: s
 
 /** A delayed message may contain completed reports for several past days. */
 export function parseOrchidWorkPlanCounts(text: string, sentAt: string): Array<{ day: string; stems: number }> {
-  const first = parseOrchidWorkPlanCount(text, sentAt);
-  const result = first ? [first] : [];
   const headers = [...text.matchAll(/^\s*(?:[-•]\s*)?(?:kh\s*|(?:bccv|báo cáo(?:\s+cv)?)\s*)?(\d{1,2})\/(\d{1,2})(?:\/(20\d{2}))?[^\n]*/gimu)];
+  const boundary = headers.find(header => text.slice(0, header.index).trim());
+  // Retain the first KH date as context for after-midnight reports, while
+  // excluding counts under a subsequent BCCV header from the first report.
+  const firstEnd = boundary ? boundary.index! + (/bccv|báo cáo/iu.test(boundary[0]) ? 0 : boundary[0].length) : text.length;
+  const first = parseOrchidWorkPlanCount(text.slice(0, firstEnd), sentAt);
+  const result = first ? [first] : [];
   for (let i = 0; i < headers.length; i++) {
     const header = headers[i]!;
     // The first section was already read with its original date context.
-    if (!text.slice(0, header.index).trim() || !parseOrchidWorkPlanCount(text.slice(0, header.index), sentAt)) continue;
+    if (!text.slice(0, header.index).trim()) continue;
     const day = `${header[3] ?? orchidStemDay(sentAt).slice(0, 4)}-${header[2]!.padStart(2, "0")}-${header[1]!.padStart(2, "0")}`;
     const section = text.slice(header.index! + header[0].length, headers[i + 1]?.index ?? text.length);
     // Future/today KH sections and conditional plans must never become actuals.
-    if (day >= orchidStemDay(sentAt) || !orchidStemDateBounds(day, day) || /nếu|dự kiến|sẽ\s+cắm/iu.test(section)) continue;
+    const actualHeader = /bccv|báo cáo/iu.test(header[0]);
+    if (day > orchidStemDay(sentAt) || (day === orchidStemDay(sentAt) && !actualHeader) ||
+        !orchidStemDateBounds(day, day) || /nếu|dự kiến|sẽ\s+cắm/iu.test(section)) continue;
     if (/\bkh\b/iu.test(header[0]) && !/tổng\s+cắm\s*\d/iu.test(section)) continue;
     const parsed = parseOrchidWorkPlanCount(`BCCV ${header[1]}/${header[2]}/${header[3] ?? day.slice(0, 4)}\n${section}`, sentAt);
     if (parsed && !result.some(row => row.day === parsed.day)) result.push(parsed);
