@@ -95,12 +95,20 @@ function senderLabel(name: string): string {
   return name === "Lan Hồ Điệp Orchids World S" ? "Lan Hồ Điệp Orchids World VI" : name;
 }
 
+// Reuse the ICU formatters: constructing one per message blocks the server
+// and creates substantial native-memory pressure for monthly reports.
+const stemDayFormatter = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Ho_Chi_Minh", year: "numeric", month: "2-digit", day: "2-digit",
+});
+const stemTimeFormatter = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", hour12: false,
+});
 export function orchidStemDay(iso: string): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Ho_Chi_Minh", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
+  return stemDayFormatter.format(new Date(iso));
 }
 
 export function orchidStemTime(iso: string): string {
-  return new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(iso));
+  return stemTimeFormatter.format(new Date(iso));
 }
 
 /** A late quoted count must also refresh the saved file for the photo's month. */

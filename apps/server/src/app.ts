@@ -302,7 +302,7 @@ import {
 import { registerLibraryRoutes } from "./library.js";
 import { registerInboxRoutes } from "./inbox.js";
 import { buildXlsx, type XlsxCell } from "./xlsx.js";
-import { addOrchidWorkPlanCounts, buildOrchidStemReport, combineOrchidStemReports, filterOrchidStemReport, orchidStemDateBounds, orchidStemWorkbook, refreshOrchidStemFile } from "./orchid-stem-report.js";
+import { addOrchidWorkPlanCounts, buildOrchidStemReport, combineOrchidStemReports, filterOrchidStemReport, orchidStemDateBounds, orchidStemWorkbook } from "./orchid-stem-report.js";
 import { buildDeliveryReport } from "./orchid-delivery-report.js";
 import { buildOrchidQualityReport, orchidQualityWorkbook, saveOrchidQualityWorkbook } from "./orchid-quality-report.js";
 import { isMcpPublicPath, registerMcpServerRoutes } from "./mcp-server.js";
@@ -1295,9 +1295,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       listOrchidWorkPlanMessages(db, req.authCtx, channel.id, bounds.start,
         new Date(bounds.end.getTime() + 24 * 3600_000)),
     ]);
-    if (from.slice(0, 7) === to.slice(0, 7)) {
-      await refreshOrchidStemFile(db, req.authCtx, channel.id, "", from.slice(0, 7), deps.config.dataDir);
-    }
+    // Inbox ingestion/startup maintains the shared monthly workbook. A read or
+    // filter must not wait for another full-month rebuild of all three groups.
     const all = addOrchidWorkPlanCounts(combineOrchidStemReports(reports), plans, from, to);
     const groupTotals = chosen.map((group, index) => {
       const report = reports[index]!;
