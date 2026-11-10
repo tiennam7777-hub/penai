@@ -1,8 +1,55 @@
 import { describe, expect, it } from "vitest";
 import { addOrchidWorkPlanCounts, buildOrchidStemReport, combineOrchidStemReports, filterOrchidStemReport, orchidStemDateBounds, orchidStemRefreshMonths, orchidStemTime, parseOrchidStemText, parseOrchidWorkPlanCount } from "../src/orchid-stem-report.js";
 import { INDEX_HTML } from "../src/ui.js";
+import { parseOrchidWorkPlanCounts } from "../src/orchid-stem-report.js";
 
 describe("orchid stem report", () => {
+  it("reads misspelled actual counts and keeps evening work on its send day", () => {
+    expect(parseOrchidWorkPlanCount("Bccv 30/10\nCăm 99c\nKh 31/10", "2026-10-31T00:12:00Z"))
+      .toEqual({ day: "2026-10-30", stems: 99 });
+    expect(parseOrchidWorkPlanCount("báo cáo cv\ntổng cắm 121c\nKh 11/10\nxử lý đơn", "2026-10-11T14:52:00Z"))
+      .toEqual({ day: "2026-10-11", stems: 121 });
+  });
+  it("reads two retrospective days from one message but excludes future plans", () => {
+    expect(parseOrchidWorkPlanCounts("báo cáo cv 14/10\ntổng cắm 43c\nKh 15/10\noff sáng\ntổng cắm 85c\nKh 16/10\nxử lý đơn cắm", "2026-10-15T23:34:00Z"))
+      .toEqual([{ day: "2026-10-14", stems: 43 }, { day: "2026-10-15", stems: 85 }]);
+    expect(parseOrchidWorkPlanCounts("BCCV 14/10\ncắm 43c\nKH 15/10\ncắm 85c nếu có đơn", "2026-10-16T00:00:00Z"))
+      .toEqual([{ day: "2026-10-14", stems: 43 }]);
+    expect(parseOrchidWorkPlanCounts("BCCV 14/10\ncắm 43c\nKH 15/10\ncắm 85c", "2026-10-14T14:00:00Z"))
+      .toEqual([{ day: "2026-10-14", stems: 43 }]);
+  });
+  it("applies standalone supplements once to the sender's recent actual report", () => {
+    const report = buildOrchidStemReport([{ msgId: "flower", senderId: "hoang", senderName: "Hoàng", text: "Chị Lan 5c", sentAt: "2026-10-01T03:00:00Z" }]);
+    const message = (msgId: string, text: string, sentAt: string, senderId = "hoang") => ({ msgId, senderId, senderName: "Hoàng", text, sentAt });
+    const base = message("base", "Bccv\ntổng cắm 12₫(159 cây)\nKH 2/10", "2026-10-01T13:37:00Z");
+    const supplement = message("bs", "Bs thêm 2₫, 11 cây (tổng 170 cây)", "2026-10-01T13:54:00Z");
+    const extra = message("extra", "Bổ sung cắm 5 cây", "2026-10-01T14:00:00Z");
+    expect(addOrchidWorkPlanCounts(report, [extra, supplement, base, supplement, extra,
+      message("other", "Bs thêm 20 cây", "2026-10-01T14:01:00Z", "other"),
+      message("late", "Bs thêm 20 cây", "2026-10-03T14:01:00Z")]).monthly[0]?.nvbc).toBe(175);
+    expect(addOrchidWorkPlanCounts(report, [base, supplement]).monthly[0]?.nvbc).toBe(170);
+  });
+  it("exposes conflicting copied dates without inventing a replacement date", () => {
+    const report = buildOrchidStemReport([{ msgId: "flower", senderId: "toan", senderName: "Toàn", text: "Chị Lan 5c", sentAt: "2026-10-23T03:00:00Z" }]);
+    const joined = addOrchidWorkPlanCounts(report, [
+      { msgId: "earlier", senderId: "toan", senderName: "Toàn", text: "BCCV 23/10\ntổng cắm 164c", sentAt: "2026-10-23T13:28:00Z" },
+      { msgId: "later", senderId: "toan", senderName: "Toàn", text: "BCCV 23/10\ntổng cắm 101c", sentAt: "2026-10-25T00:01:00Z" },
+    ]);
+    expect(joined.nvbcReview).toMatchObject([{ day: "2026-10-23", previousStems: 164, stems: 101, previousMsgId: "earlier", msgId: "later" }]);
+    expect(joined.nvbcSources).toMatchObject([{ day: "2026-10-23", stems: 101, msgId: "later" }]);
+    expect(joined.daily).toHaveLength(1);
+  });
+  it("uses the owner's verified work date while preserving the original report text", () => {
+    const report = buildOrchidStemReport([{ msgId: "flower", senderId: "toan", senderName: "Toàn", text: "Chị Lan 5c", sentAt: "2026-10-23T03:00:00Z" }]);
+    const joined = addOrchidWorkPlanCounts(report, [
+      { msgId: "earlier", senderId: "toan", senderName: "Toàn", text: "BCCV 23/10\ntổng cắm 164c", sentAt: "2026-10-23T13:28:00Z" },
+      { msgId: "later", senderId: "toan", senderName: "Toàn", text: "BCCV 23/10\ntổng cắm 101c", sentAt: "2026-10-25T00:01:00Z", workReportDay: "2026-10-24" },
+    ], "2026-10-01", "2026-10-31");
+    expect(joined.monthly[0]?.nvbc).toBe(265);
+    expect(joined.daily.map(row => [row.day, row.nvbc])).toEqual([["2026-10-23", 164], ["2026-10-24", 101]]);
+    expect(joined.nvbcReview).toEqual([]);
+    expect(joined.nvbcSources[1]?.text).toContain("23/10");
+  });
   it("combines three groups without collapsing jobs by the same worker", () => {
     const at = "2026-11-01T09:00:00.000Z";
     const groups = ["42", "188", "hanoi"].map((reportGroup, i) => buildOrchidStemReport([

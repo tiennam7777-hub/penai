@@ -1217,6 +1217,7 @@ export const INDEX_HTML = `<!doctype html>
       '<section class="stem-section"><h3>Theo nhóm báo cáo</h3><p class="muted stem-section-note">Tổng NVBC lấy từ báo cáo 5 phút của những người có tin cắm hoa trong nhóm, theo khoảng ngày đã chọn. Một người xuất hiện ở nhiều nhóm có thể được tính trong từng nhóm; không cộng các tổng NVBC giữa các nhóm. Ảnh chưa gắn số cành chưa cộng vào tổng.</p><div id="stemGroups"></div></section>' +
       '<section class="stem-section"><h3>Theo người gửi</h3><p class="muted stem-section-note">Xếp theo tổng số cành trong khoảng ngày đã chọn. NVBC lấy từ báo cáo của cùng nhân viên trong nhóm Kế Hoạch 5 phút Làm Việc, kể cả khi lọc nhóm cắm hoa. NVBC là tổng công việc của nhân viên trong ngày, không tách theo nhóm cắm hoa; dùng để đối chiếu, không cộng vào Cành tính. Dấu — là chưa có số đối chiếu.</p><div id="stemMonthly"></div></section>' +
       '<section class="stem-section"><h3>Theo ngày</h3><p class="muted stem-section-note">Mỗi ngày có tổng riêng; bấm vào ngày để xem từng người. Ngày có NVBC nhưng chưa có tin cắm hoa được ghi nhận sẽ hiện 0 ở Cành tính.</p><div id="stemDaily"></div></section>' +
+      '<section class="stem-section"><h3>Nguồn báo cáo 5 phút (NVBC)</h3><p class="muted stem-section-note">Mỗi ngày lấy báo cáo còn hiệu lực và tin bổ sung của đúng nhân viên. Các tin ghi trùng ngày nhưng số khác nhau được đánh dấu để đối chiếu; NVBC tạm lấy báo cáo mới nhất.</p><div id="stemNvbcReview"></div><details><summary>Xem tin gốc đã tính NVBC</summary><div id="stemNvbcSources"></div></details></section>' +
       '<details class="stem-detail"><summary id="stemDetailTitle">Chi tiết từng tin</summary><label class="stem-detail-filter">Lọc theo người gửi<select id="stemDetailSender"><option value="">Tất cả người gửi</option></select></label><div id="stemDetail" class="stem-scroll"></div></details>' +
       '<details class="stem-detail" id="stemReviewSection"><summary id="stemReviewTitle">Tin cần kiểm tra</summary><p class="muted">Tin này chưa được cộng vào báo cáo. Đối chiếu trước khi chốt số liệu.</p><div id="stemReview" class="stem-scroll"></div></details>' +
       '<p class="muted">Một lượt là một tin đủ tên khách và số cành (kể cả hai tin liền nhau), hoặc một ảnh được trích dẫn báo số cành và tính cho người gửi ảnh gốc. Tin Zalo trùng mã chỉ tính một lần. Dữ liệu từ ba nhóm 42 ĐBP, 188 và Hà Nội.</p>';
@@ -1329,6 +1330,14 @@ export const INDEX_HTML = `<!doctype html>
           dt.querySelectorAll("th")[2].className = "stem-num";
           dt.querySelectorAll("th")[3].className = "stem-num";
           group.appendChild(dt); daily.appendChild(group);
+        });
+        var nvbcSources = $("#stemNvbcSources", c); nvbcSources.innerHTML = "";
+        nvbcSources.appendChild(table(["Ngày công việc", "Nhân viên", "NVBC", "Tin gốc", "Mã tin"], r.nvbcSources || [], function (x) {
+          var tr = el("tr"); tr.innerHTML = '<td>' + esc(x.day) + '</td><td>' + esc(x.senderName) + '</td><td>' + number(x.stems) + '</td><td style="white-space:pre-wrap">' + esc(x.text) + '</td><td>' + esc(x.msgId) + '</td>'; return tr;
+        }));
+        var nvbcReview = $("#stemNvbcReview", c); nvbcReview.innerHTML = "";
+        (r.nvbcReview || []).forEach(function (x) {
+          var p = el("p"); p.textContent = x.senderName + ' · ' + x.day + ': báo cáo trước ' + number(x.previousStems) + ' cây (tin ' + x.previousMsgId + '), báo cáo gửi muộn ' + number(x.stems) + ' cây (tin ' + x.msgId + '). Cần xác nhận có ghi nhầm ngày hay sửa số.'; nvbcReview.appendChild(p);
         });
         detailEntries = r.entries.slice().sort(function (a, b) { return b.sentAt.localeCompare(a.sentAt); });
         var detailSelect = $("#stemDetailSender", c), detailChosen = detailSelect.value;

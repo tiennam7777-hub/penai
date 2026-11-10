@@ -17,6 +17,8 @@ export interface OrchidStemMessage {
   originalPhotoDay?: string;
   inRange?: boolean;
   reportGroup?: string;
+  /** Work date explicitly verified by the report owner; original text stays intact. */
+  workReportDay?: string;
 }
 
 export interface OrchidStemGroup { key: "42" | "188" | "hanoi"; name: string; channelId: string; threadId: string }
@@ -73,20 +75,27 @@ export async function listOrchidWorkPlanMessages(db: Db, ctx: WorkspaceContext, 
       FROM inbox_threads t JOIN channels c ON c.id = t.channel_id
       WHERE t.workspace_id = ${ctx.workspaceId} AND t.kind = 'group'
         AND t.name = 'Kế Hoạch 5 phút Làm Việc' AND c.kind = 'zalo_personal'
+    ), recalled AS (
+      SELECT DISTINCT m.msg_id FROM inbox_messages m JOIN views v
+        ON v.channel_id = m.channel_id AND v.thread_id = m.thread_id
+      WHERE m.workspace_id = ${ctx.workspaceId} AND m.meta->>'removed' = 'recalled'
     )
     -- The same Zalo sender has a different sender_id in each Hot account's view.
     -- Keep one copy per view-specific sender ID so the flower report can match it.
-    SELECT DISTINCT ON (m.msg_id, m.sender_id) m.msg_id, m.sender_id, m.sender_name, m.text, m.sent_at
+    SELECT DISTINCT ON (m.msg_id, m.sender_id) m.msg_id, m.sender_id, m.sender_name, m.text, m.sent_at,
+      m.meta->>'orchid_work_report_day' AS work_report_day
     FROM inbox_messages m JOIN views v ON v.channel_id = m.channel_id AND v.thread_id = m.thread_id
     WHERE m.workspace_id = ${ctx.workspaceId} AND m.msg_id <> ''
       AND m.direction IN ('in', 'out') AND m.source IN ('zalo', 'app', 'web', 'mcp')
       AND COALESCE(m.meta->>'removed', '') = '' AND m.text <> ''
+      AND NOT EXISTS (SELECT 1 FROM recalled r WHERE r.msg_id = m.msg_id)
       AND m.sent_at >= ${start.toISOString()} AND m.sent_at < ${end.toISOString()}
     ORDER BY m.msg_id, m.sender_id, v.priority, m.id`));
   return result.rows.map(row => ({
     msgId: String(row.msg_id), senderId: String(row.sender_id),
     senderName: String(row.sender_name), text: String(row.text),
     sentAt: new Date(String(row.sent_at)).toISOString(),
+    workReportDay: row.work_report_day ? String(row.work_report_day) : undefined,
   }));
 }
 

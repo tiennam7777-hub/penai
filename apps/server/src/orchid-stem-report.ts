@@ -157,7 +157,9 @@ export function parseOrchidWorkPlanCount(text: string, sentAt: string): { day: s
       const planDay = `${year}-${String(plan[2]).padStart(2, "0")}-${String(plan[1]).padStart(2, "0")}`;
       if (orchidStemDateBounds(planDay, planDay)) {
         const prior = new Date(Date.parse(`${planDay}T00:00:00Z`) - 86400_000).toISOString().slice(0, 10);
-        if (day === planDay || day === prior) day = prior;
+        // An evening report with a copied KH date still describes today's work.
+        const hour = Number(orchidStemTime(sentAt).slice(0, 2));
+        if ((day === planDay && hour < 12) || day === prior) day = prior;
       }
     }
   }
@@ -168,7 +170,7 @@ export function parseOrchidWorkPlanCount(text: string, sentAt: string): { day: s
     if (/^\s*[-•]?\s*(?:kh(?:nm|cv)?(?=\b|\d)|kế hoạch|ke hoach)/iu.test(line)) break;
     completed.push(line);
   }
-  const work = completed.join("\n");
+  const work = completed.join("\n").replace(/\b(?:căm|cam)(?=\s*\d)/giu, "cắm");
   const counts: number[] = [];
   const patterns = [
     /(?:tổng\s*)?cắm\s*\d{1,3}\s*(?:đơn|đ|₫)\s*\(?\s*(\d{1,4})\s*(?:cây|cành|c\b)/giu,
@@ -182,16 +184,65 @@ export function parseOrchidWorkPlanCount(text: string, sentAt: string): { day: s
   return counts.length && new Set(counts).size === 1 ? { day, stems: counts[0]! } : null;
 }
 
+/** A delayed message may contain completed reports for several past days. */
+export function parseOrchidWorkPlanCounts(text: string, sentAt: string): Array<{ day: string; stems: number }> {
+  const first = parseOrchidWorkPlanCount(text, sentAt);
+  const result = first ? [first] : [];
+  const headers = [...text.matchAll(/^\s*(?:[-•]\s*)?(?:kh\s*|(?:bccv|báo cáo(?:\s+cv)?)\s*)?(\d{1,2})\/(\d{1,2})(?:\/(20\d{2}))?[^\n]*/gimu)];
+  for (let i = 0; i < headers.length; i++) {
+    const header = headers[i]!;
+    // The first section was already read with its original date context.
+    if (!text.slice(0, header.index).trim() || !parseOrchidWorkPlanCount(text.slice(0, header.index), sentAt)) continue;
+    const day = `${header[3] ?? orchidStemDay(sentAt).slice(0, 4)}-${header[2]!.padStart(2, "0")}-${header[1]!.padStart(2, "0")}`;
+    const section = text.slice(header.index! + header[0].length, headers[i + 1]?.index ?? text.length);
+    // Future/today KH sections and conditional plans must never become actuals.
+    if (day >= orchidStemDay(sentAt) || !orchidStemDateBounds(day, day) || /nếu|dự kiến|sẽ\s+cắm/iu.test(section)) continue;
+    if (/\bkh\b/iu.test(header[0]) && !/tổng\s+cắm\s*\d/iu.test(section)) continue;
+    const parsed = parseOrchidWorkPlanCount(`BCCV ${header[1]}/${header[2]}/${header[3] ?? day.slice(0, 4)}\n${section}`, sentAt);
+    if (parsed && !result.some(row => row.day === parsed.day)) result.push(parsed);
+  }
+  return result;
+}
+
 export function addOrchidWorkPlanCounts(report: ReturnType<typeof buildOrchidStemReport>,
   messages: OrchidStemMessage[], from?: string, to?: string) {
-  const byDaySender = new Map<string, { stems: number; sentAt: string }>();
-  for (const message of messages) {
-    const parsed = parseOrchidWorkPlanCount(message.text, message.sentAt);
-    if (!parsed || (from && parsed.day < from) || (to && parsed.day > to)) continue;
-    const key = `${parsed.day}:${message.senderId}`;
-    const prior = byDaySender.get(key);
-    // A later complete report is a correction; repeated copies do not add twice.
-    if (!prior || message.sentAt > prior.sentAt) byDaySender.set(key, { stems: parsed.stems, sentAt: message.sentAt });
+  const byDaySender = new Map<string, { stems: number; sentAt: string; message: OrchidStemMessage }>();
+  const nvbcReview: Array<OrchidStemMessage & { day: string; stems: number; previousStems: number; previousMsgId: string }> = [];
+  const lastReport = new Map<string, { day: string; sentAt: string }>();
+  const seen = new Set<string>();
+  for (const message of [...messages].sort((a, b) => Date.parse(a.sentAt) - Date.parse(b.sentAt))) {
+    const identity = `${message.senderId}:${message.msgId}`;
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    const parsedRows = parseOrchidWorkPlanCounts(message.text, message.sentAt);
+    if (parsedRows[0] && message.workReportDay && orchidStemDateBounds(message.workReportDay, message.workReportDay)) {
+      parsedRows[0].day = message.workReportDay;
+    }
+    const anchor = lastReport.get(message.senderId);
+    // A standalone supplement only modifies this sender's recent actual report.
+    if (!parsedRows.length && /^\s*(?:bs\b|bổ\s+(?:sung|xung))/iu.test(message.text) && anchor &&
+        Date.parse(message.sentAt) - Date.parse(anchor.sentAt) <= 24 * 3600_000) {
+      const total = /tổng\s*(?:cắm\s*)?(\d{1,4})\s*(?:cây|cành|c\b)/iu.exec(message.text);
+      const extra = /(?:thêm|cắm)\s*(?:\d+\s*(?:đơn|₫|đ)\s*[,:(]?\s*)?(\d{1,4})\s*(?:cây|cành|c\b)/iu.exec(message.text);
+      const prior = byDaySender.get(`${anchor.day}:${message.senderId}`);
+      const stems = total ? Number(total[1]) : extra && prior ? prior.stems + Number(extra[1]) : 0;
+      if (stems >= 1 && stems <= 1000) parsedRows.push({ day: anchor.day, stems });
+    }
+    for (const parsed of parsedRows) {
+      lastReport.set(message.senderId, { day: parsed.day, sentAt: message.sentAt });
+      if ((from && parsed.day < from) || (to && parsed.day > to)) continue;
+      const key = `${parsed.day}:${message.senderId}`;
+      const prior = byDaySender.get(key);
+      // A different report arriving over a day later with the same header may
+      // have a copied date. Preserve the existing latest-report rule, but make
+      // the collision visible instead of silently hiding the earlier report.
+      if (prior && prior.stems !== parsed.stems && Date.parse(message.sentAt) - Date.parse(prior.sentAt) > 24 * 3600_000) {
+        nvbcReview.push({ ...message, day: parsed.day, stems: parsed.stems,
+          previousStems: prior.stems, previousMsgId: prior.message.msgId });
+      }
+      // A later complete report is a correction; repeated copies do not add twice.
+      if (!prior || Date.parse(message.sentAt) > Date.parse(prior.sentAt)) byDaySender.set(key, { stems: parsed.stems, sentAt: message.sentAt, message });
+    }
   }
   const daily = report.daily.map(row => ({ ...row,
     nvbc: byDaySender.get(`${row.day}:${row.senderId}`)?.stems ?? null }));
@@ -210,7 +261,11 @@ export function addOrchidWorkPlanCounts(report: ReturnType<typeof buildOrchidSte
     return { ...row, nvbc: reported.length ? reported.reduce((sum, d) => sum + d.nvbc!, 0) : null,
       nvbcDays: reported.length, countedDays: days.length };
   });
-  return { ...report, daily: daily.sort((a, b) => a.day.localeCompare(b.day) || a.senderName.localeCompare(b.senderName, "vi")), monthly };
+  const included = new Set(report.monthly.map(row => row.senderId));
+  const nvbcSources = [...byDaySender].filter(([, value]) => included.has(value.message.senderId))
+    .map(([key, value]) => ({ ...value.message, day: key.slice(0, 10), stems: value.stems }));
+  return { ...report, daily: daily.sort((a, b) => a.day.localeCompare(b.day) || a.senderName.localeCompare(b.senderName, "vi")), monthly,
+    nvbcSources, nvbcReview: nvbcReview.filter(row => included.has(row.senderId)) };
 }
 
 export function buildOrchidStemReport(messages: OrchidStemMessage[]) {
@@ -352,6 +407,8 @@ export function filterOrchidStemReport(report: ReturnType<typeof addOrchidWorkPl
     review: report.review.filter(x => x.senderName === sender),
     daily: report.daily.filter(x => x.senderName === sender),
     monthly: report.monthly.filter(x => x.senderName === sender),
+    nvbcSources: report.nvbcSources.filter(x => x.senderName === sender),
+    nvbcReview: report.nvbcReview.filter(x => x.senderName === sender),
   };
 }
 
@@ -376,6 +433,14 @@ export function orchidStemWorkbook(report: ReturnType<typeof addOrchidWorkPlanCo
     { name: "Theo nhân viên", widths: [25, 24, 16, 16, 16, 20], rows: [
       ["Người gửi", "UID người gửi", "Số lượt", "Tổng cành tính", "NVBC", "Ngày có NVBC"],
       ...report.monthly.map(m => [m.senderName, m.senderId, m.jobs, m.stems, m.nvbc ?? "", m.nvbcDays]),
+    ] },
+    { name: "Nguồn NVBC", widths: [18, 25, 16, 60, 24], rows: [
+      ["Ngày công việc", "Người gửi", "NVBC", "Tin gốc đã tính", "Mã tin Zalo"],
+      ...report.nvbcSources.map(m => [m.day, m.senderName, m.stems, m.text, m.msgId]),
+    ] },
+    { name: "NVBC cần đối chiếu", widths: [18, 25, 16, 16, 24, 24, 60], rows: [
+      ["Ngày bị trùng", "Người gửi", "Báo cáo trước", "Báo cáo muộn", "Mã tin trước", "Mã tin muộn", "Nội dung tin muộn"],
+      ...report.nvbcReview.map(m => [m.day, m.senderName, m.previousStems, m.stems, m.previousMsgId, m.msgId, m.text]),
     ] },
     { name: "Cần kiểm tra", widths: [22, 25, 24, 50, 22], rows: [
       ["Thời điểm", "Người gửi", "UID người gửi", "Tin chưa cộng", "Mã tin Zalo"],
