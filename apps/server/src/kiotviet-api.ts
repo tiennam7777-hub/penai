@@ -80,6 +80,7 @@ export async function createKiotVietOrchidDraft(input: {
   customer: string;
   customerPhone?: string | null;
   channelName: string;
+  channelKind?: string;
   stems: number;
   color: string;
   pot: string;
@@ -122,7 +123,7 @@ export async function createKiotVietOrchidDraft(input: {
     ...(input.instructions ? [`Lưu ý: ${clean(input.instructions)}.`] : []),
     `Giá hoa: ${clean(input.price ?? "chưa chốt")}.`,
     ...(missing.length ? [`Cần bổ sung: ${missing.join(", ")}.`] : []),
-    `Khách chat: ${clean(input.customer)}; nguồn ${clean(input.channelName)} / Zalo.`,
+    `Khách chat: ${clean(input.customer)}; nguồn ${clean(input.channelName)} / ${input.channelKind === "facebook_page" ? "Messenger" : "Zalo"}.`,
   ].join(" ");
   const details = [{
     productId: Number(product.id), productCode: "SP00016",

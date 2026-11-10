@@ -35,6 +35,29 @@ describe("KiotViet credential verification", () => {
 });
 
 describe("KiotViet orchid order draft", () => {
+  it("creates a Messenger-sourced unpaid slip with the configured branch and an unconfirmed price", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ access_token: "test-token" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: {
+        id: 916, code: "SP00016", fullName: "LAN HỒ ĐIỆP (Cây)", isActive: true, allowsSale: true,
+      } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [{ id: 30509890, code: "KH011293", name: "Chưa tìm ra tên" }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 43, code: "DH-FANPAGE" }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await createKiotVietOrchidDraft({ ...input, branchId: 55291, customer: "Khách Fanpage",
+      channelName: "Fanpage Orchids World - Đà Lạt", channelKind: "facebook_page",
+      stems: 8, color: "mẫu ảnh khách chọn", pot: "chậu lan", price: null, delivery: null });
+    expect(result.code).toBe("DH-FANPAGE");
+    const body = JSON.parse(fetchMock.mock.calls.at(-1)![1].body);
+    expect(body.branchId).toBe(55291);
+    expect(body.description).toContain("Fanpage Orchids World - Đà Lạt / Messenger");
+    expect(body.description).not.toContain("/ Zalo");
+    expect(body.orderDetails[0]).toMatchObject({ quantity: 8, price: 0 });
+    expect(body.makeInvoice).toBe(false);
+    expect(body.totalPayment).toBe(0);
+  });
+
   it("resolves a cashier by exact login over the KiotViet API", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ access_token: "test-token" }) })

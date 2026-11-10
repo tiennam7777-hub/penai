@@ -89,6 +89,7 @@ import {
   formatOrchidOrderReview, orchidOrderReviewReply, orchidOrderReviewFingerprint,
 } from "./orchid-order-dispatch.js";
 import { loadOrchidOrderPhotos } from "./orchid-order-photos.js";
+import { isOrchidOrderSourceKind, orchidOrderNotificationChannel, orchidOrderSourceNotice } from "./orchid-order-routing.js";
 import { stemCountForPhoto } from "./orchid-photo-count.js";
 import { isOrchidStemGroupName, orchidStemDay, orchidStemRefreshMonths, refreshOrchidStemFile } from "./orchid-stem-report.js";
 import { refreshOrchidQualityFile } from "./orchid-quality-report.js";
@@ -1430,7 +1431,7 @@ export function makeInboundHandler(
     // Inbox giữ cả những tin nhân viên/khách trao đổi trước khi Agent được duyệt.
     // Session của Agent có thể chưa tồn tại lúc đó, nên nạp đúng thread trước khi trả lời.
     const handoffMessages = agent.key === "nhan-vien-kinh-doanh-orchids-world" &&
-      msg.channelKind === "zalo_personal"
+      isOrchidOrderSourceKind(msg.channelKind)
       ? await listInboxMessages(db, ctx, channel.id, msg.chatKey.slice(msg.chatKey.indexOf(":") + 1), { limit: 30 })
         .catch((error) => {
           logger.warn(`Không đọc được ngữ cảnh Inbox khi tiếp quản: ${String(error)}`);
@@ -1549,7 +1550,7 @@ export function makeInboundHandler(
     let complaintReply: string | null = null;
     let orderReviewReply: string | null = null;
     const orderGroupId = channel.config["orchid_order_dispatch_group"];
-    if (agent.key === "nhan-vien-kinh-doanh-orchids-world" && channel.kind === "zalo_personal" &&
+    if (agent.key === "nhan-vien-kinh-doanh-orchids-world" && isOrchidOrderSourceKind(channel.kind) &&
         msg.peerKind === "direct" && (mayConfirmOrchidOrder(msg.text) || mayCancelOrchidOrder(msg.text)) &&
         typeof orderGroupId === "string" && /^\d{1,30}$/.test(orderGroupId)) {
       const sourceThreadId = msg.chatKey.slice(msg.chatKey.indexOf(":") + 1);
@@ -1592,15 +1593,14 @@ export function makeInboundHandler(
             const fingerprint = orchidOrderReviewFingerprint(orderMessages, now);
             const claimId = await claimOrchidOrderDispatch(db, ctx, {
               channelId: channel.id, threadId: sourceThreadId, fingerprint, targetThreadId: orderGroupId,
-              message: formatOrchidOrderReview(decision.review, customer, orderMessages, msg.text),
+              message: orchidOrderSourceNotice(channel, sourceThreadId, formatOrchidOrderReview(decision.review, customer, orderMessages, msg.text)),
             });
             let notified = false;
             if (claimId) {
               try {
-                const runtime = channelHandlers.get(channel.id)?.channel;
-                if (!isPersonalChannel(runtime) || !runtime.isConnected()) throw new Error(`${channel.name} chưa kết nối Zalo`);
+                const runtime = orchidOrderNotificationChannel(channel, channelHandlers);
                 const ids = await runtime.sendManual({ threadId: orderGroupId, peerKind: "group", source: "agent",
-                  text: formatOrchidOrderReview(decision.review, customer, orderMessages, msg.text), threadName: "Phan Don Cam Hoa" });
+                  text: orchidOrderSourceNotice(channel, sourceThreadId, formatOrchidOrderReview(decision.review, customer, orderMessages, msg.text)), threadName: "Phan Don Cam Hoa" });
                 if (!ids[0]) throw new Error("Zalo không trả mã tin đã gửi");
                 await finishOrchidOrderDispatch(db, ctx, claimId, ids[0]);
                 notified = true;
@@ -1618,9 +1618,9 @@ export function makeInboundHandler(
         if (cancellation || order) {
           const thread = await getInboxThread(db, ctx, channel.id, sourceThreadId);
           const customer = thread?.contactAlias || thread?.profileName || thread?.name || msg.senderName || msg.senderId;
-          const dispatchText = cancellation
+          const dispatchText = orchidOrderSourceNotice(channel, sourceThreadId, cancellation
             ? formatOrchidOrderCancellation(cancellation, customer)
-            : formatOrchidOrderDispatch(order!, customer);
+            : formatOrchidOrderDispatch(order!, customer));
           const claimId = cancellation
             ? await claimOrchidOrderDispatch(db, ctx, {
               channelId: channel.id, threadId: sourceThreadId,
@@ -1632,9 +1632,8 @@ export function makeInboundHandler(
               targetThreadId: orderGroupId, message: dispatchText,
             });
           if (claimId) {
-            const runtime = channelHandlers.get(channel.id)?.channel;
             try {
-              if (!isPersonalChannel(runtime) || !runtime.isConnected()) throw new Error(`${channel.name} chưa kết nối Zalo`);
+              const runtime = orchidOrderNotificationChannel(channel, channelHandlers);
               const ids = await runtime.sendManual({
                 threadId: orderGroupId, peerKind: "group", text: dispatchText,
                 source: "agent", threadName: "Phan Don Cam Hoa",
@@ -1677,7 +1676,7 @@ export function makeInboundHandler(
                   clientSecret: decryptSecret(credentials.clientSecretEncrypted),
                   branchId: credentials.branchId,
                   ...(credentials.cashierUserId ? { cashierUserId: credentials.cashierUserId } : {}),
-                  customer, customerPhone: thread?.phone, channelName: channel.name,
+                  customer, customerPhone: thread?.phone, channelName: channel.name, channelKind: channel.kind,
                   stems: order.stems, color: order.color, pot: order.pot,
                   price: order.price, delivery: order.delivery,
                   address: order.address, recipientPhone: order.recipientPhone,
@@ -1709,15 +1708,15 @@ export function makeInboundHandler(
                 const billGroupId = channel.config["kiotviet_bill_group"];
                 if (saved && recordId && typeof billGroupId === "string" && /^\d{1,30}$/.test(billGroupId)) {
                   try {
-                    const runtime = channelHandlers.get(channel.id)?.channel;
-                    if (!isPersonalChannel(runtime) || !runtime.isConnected()) throw new Error(`${channel.name} chưa kết nối Zalo`);
+                    const runtime = orchidOrderNotificationChannel(channel, channelHandlers);
                     const slip = await readKiotVietOrderSlip({
                       retailer: credentials.retailer, clientId: common.clientId, clientSecret: common.clientSecret,
                       orderId: saved.orderId, code: saved.code,
                     });
                     const ids = await withKiotVietSlipImage({ ...slip, delivery: order.delivery },
                       { dataDir: rt.config.dataDir, workspaceId: ctx.workspaceId, channelId: channel.id }, (path) => runtime.sendManual({
-                      threadId: billGroupId, peerKind: "group", text: kiotVietBillNotice("create", saved.code, customer), filePaths: [path],
+                      threadId: billGroupId, peerKind: "group", text: orchidOrderSourceNotice(channel, sourceThreadId,
+                        kiotVietBillNotice("create", saved.code, customer)), filePaths: [path],
                       source: "agent", threadName: "Đã Lên Bill",
                     }));
                     if (!ids.length) throw new Error("Zalo không trả mã ảnh đã gửi");
