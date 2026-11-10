@@ -69,6 +69,9 @@ describe("orders selected by photo must not disappear", () => {
 
   it("continues to create a bill when the customer supplies the missing stems", async () => {
     expect(mayConfirmOrchidOrder("8 cành nha")).toBe(true);
+    expect(mayConfirmOrchidOrder("8")).toBe(true);
+    expect(mayConfirmOrchidOrder("8 nha")).toBe(true);
+    expect(mayConfirmOrchidOrder("vàng nha")).toBe(true);
     const result = await classifyOrchidOrderDecision(provider('{"confirmed":true,"stems":8,"color":"mẫu ảnh khách chọn"}'),
       "test", history, { text: "8 cành nha", senderName: "Quỳnh Như" }, now);
     expect(result.kind).toBe("ready");

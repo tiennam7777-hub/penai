@@ -22,6 +22,8 @@ export interface ConfirmedOrchidOrder {
 
 /** Lọc nhẹ trước khi gọi model; quyết định chốt cuối cùng vẫn dựa vào hội thoại. */
 export function mayConfirmOrchidOrder(text: string): boolean {
+  if (/^\s*\d{1,3}(?:\s*(?:ạ|a|nha|nhé|nhe))?[.!]?\s*$/i.test(text) ||
+      /^\s*(?:vàng|vang|trắng|trang|hồng|hong|tím|tim|xanh|cam|đỏ|do)(?:\s|$)/i.test(text)) return true;
   return /(?:^|\s)(?:ok|oke|okay|đồng ý|dong y|chốt|chot|lấy|lay|đặt|dat|xác nhận|xac nhan|được|duoc|ừ|uh|vâng|vang|dạ|da|giao|làm|lam)(?=\s|[.,!?]|$)|^\s*(?:\d+\s*(?:cành|canh|cây|cay)|(?:màu|mau|mẫu)\s+)/i.test(text.trim());
 }
 
