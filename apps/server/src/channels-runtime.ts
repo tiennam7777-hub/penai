@@ -85,7 +85,10 @@ import {
   formatOrchidOrderDispatch, mayCancelOrchidOrder, mayConfirmOrchidOrder,
   orchidCancellationFingerprint, orchidOrderSessionFingerprint, orchidOrderPayloadFingerprint,
   orchidDeliveryCorrection,
+  classifyOrchidOrderDecision, currentOrchidOrderMessages, explicitOrchidOrderCommitment,
+  formatOrchidOrderReview, orchidOrderReviewReply, orchidOrderReviewFingerprint,
 } from "./orchid-order-dispatch.js";
+import { loadOrchidOrderPhotos } from "./orchid-order-photos.js";
 import { stemCountForPhoto } from "./orchid-photo-count.js";
 import { isOrchidStemGroupName, orchidStemDay, orchidStemRefreshMonths, refreshOrchidStemFile } from "./orchid-stem-report.js";
 import { refreshOrchidQualityFile } from "./orchid-quality-report.js";
@@ -1544,6 +1547,7 @@ export function makeInboundHandler(
       kiotContext = "[HỆ THỐNG: Chưa có xác nhận tạo bill KiotViet từ lượt xử lý tin này. Chỉ nói đã lên bill khi hệ thống xác nhận tạo phiếu và có mã. Nếu chưa có xác nhận, nói rõ chưa xác minh được bill và cần nhân viên kiểm tra; không hứa gửi bill sau.]";
     }
     let complaintReply: string | null = null;
+    let orderReviewReply: string | null = null;
     const orderGroupId = channel.config["orchid_order_dispatch_group"];
     if (agent.key === "nhan-vien-kinh-doanh-orchids-world" && channel.kind === "zalo_personal" &&
         msg.peerKind === "direct" && (mayConfirmOrchidOrder(msg.text) || mayCancelOrchidOrder(msg.text)) &&
@@ -1557,8 +1561,60 @@ export function makeInboundHandler(
         const current = { text: msg.text, senderName: msg.senderName ?? msg.senderId };
         const now = msg.sentAt ?? new Date();
         const cancellation = await classifyOrchidOrderCancellation(limited, agent.model, handoffMessages, current, now);
-        const order = !cancellation && mayConfirmOrchidOrder(msg.text)
-          ? await classifyConfirmedOrchidOrder(limited, agent.model, handoffMessages, current, now) : null;
+        const orderHistory = !cancellation && mayConfirmOrchidOrder(msg.text)
+          ? await listInboxMessages(db, ctx, channel.id, sourceThreadId, { limit: 200 }) : [];
+        const orderMessages = currentOrchidOrderMessages(orderHistory, now);
+        const orderPhotos = await loadOrchidOrderPhotos(orderMessages, wsDirEarly);
+        // Inbox writes can lag the inbound handler. Include the current/quoted photo even before its DB row exists.
+        if (quotedPhotoDataUrl && !orderPhotos.some((photo) => photo.messageId === msg.quoted?.msgId)) {
+          orderPhotos.push({ messageId: msg.quoted!.msgId, sentAt: now.toISOString(),
+            dataUrl: quotedPhotoDataUrl, stems: quotedPhotoStemCount });
+        }
+        if (!orderPhotos.some((photo) => photo.messageId === msg.messageId)) {
+          photos.forEach((photo, index) => {
+            if (photo.dataUrl) orderPhotos.push({ messageId: msg.messageId ?? "ảnh mới nhất", sentAt: now.toISOString(),
+              dataUrl: photo.dataUrl, stems: inboundStemCounts[index] ?? null });
+          });
+        }
+        const decision = !cancellation && mayConfirmOrchidOrder(msg.text)
+          ? await classifyOrchidOrderDecision(limited, agent.model, orderMessages, current, now,
+            orderPhotos.slice(-3)) : { kind: "none" as const };
+        const order = decision.kind === "ready" ? decision.order : null;
+        if (decision.kind === "review") {
+          // Set this before any IO: a DB/send failure must never let the conversational AI promise fulfillment.
+          orderReviewReply = orchidOrderReviewReply(decision.review, false);
+          // Review has its own idempotency key: it must not suppress a later complete order report/bill.
+          const reset = [...orderHistory].reverse().find((m) => m.direction === "in" && /^\/new\s*$/i.test(m.text.trim()));
+          const since = reset ? new Date(reset.sentAt) : new Date(now.getTime() - 48 * 3600_000);
+          if (!await hasKiotVietOrderSince(db, ctx, channel.id, sourceThreadId, since)) {
+            const thread = await getInboxThread(db, ctx, channel.id, sourceThreadId);
+            const customer = thread?.contactAlias || thread?.profileName || thread?.name || msg.senderName || msg.senderId;
+            const fingerprint = orchidOrderReviewFingerprint(orderMessages, now);
+            const claimId = await claimOrchidOrderDispatch(db, ctx, {
+              channelId: channel.id, threadId: sourceThreadId, fingerprint, targetThreadId: orderGroupId,
+              message: formatOrchidOrderReview(decision.review, customer, orderMessages, msg.text),
+            });
+            let notified = false;
+            if (claimId) {
+              try {
+                const runtime = channelHandlers.get(channel.id)?.channel;
+                if (!isPersonalChannel(runtime) || !runtime.isConnected()) throw new Error(`${channel.name} chưa kết nối Zalo`);
+                const ids = await runtime.sendManual({ threadId: orderGroupId, peerKind: "group", source: "agent",
+                  text: formatOrchidOrderReview(decision.review, customer, orderMessages, msg.text), threadName: "Phan Don Cam Hoa" });
+                if (!ids[0]) throw new Error("Zalo không trả mã tin đã gửi");
+                await finishOrchidOrderDispatch(db, ctx, claimId, ids[0]);
+                notified = true;
+              } catch (error) {
+                await finishOrchidOrderDispatch(db, ctx, claimId, null, String(error)).catch(() => {});
+                logger.warn(`Không báo được đơn cần kiểm tra trên ${channel.name}: ${String(error)}`);
+              }
+            }
+            orderReviewReply = orchidOrderReviewReply(decision.review, notified);
+          } else {
+            orderReviewReply = "Đơn này đã có phiếu gần đây; em cần nhân viên kiểm tra phiếu hiện có trước khi xác nhận cắm/giao hoa ạ.";
+            kiotContext = "[HỆ THỐNG: Hội thoại đã có phiếu đặt hàng gần đây. Nhân viên cần kiểm tra phiếu hiện có; không tự tạo thêm hoặc hứa đã cắm/giao hoa.]";
+          }
+        }
         if (cancellation || order) {
           const thread = await getInboxThread(db, ctx, channel.id, sourceThreadId);
           const customer = thread?.contactAlias || thread?.profileName || thread?.name || msg.senderName || msg.senderId;
@@ -1681,6 +1737,10 @@ export function makeInboundHandler(
         }
       } catch (error) {
         logger.warn(`Không kiểm tra được thay đổi đơn trên ${channel.name}: ${String(error)}`);
+        if (!orderReviewReply && explicitOrchidOrderCommitment(msg.text,
+          currentOrchidOrderMessages(handoffMessages, msg.sentAt ?? new Date()))) {
+          orderReviewReply = "Em chưa xác nhận ghi nhận đơn thành công được. Anh/chị vui lòng liên hệ nhân viên qua 0938699916 để kiểm tra ngay trước khi cắm/giao hoa ạ.";
+        }
       }
     }
     if (!staffDelegation && agent.key === "nhan-vien-kinh-doanh-orchids-world" && channel.kind === "zalo_personal" &&
@@ -1728,6 +1788,7 @@ export function makeInboundHandler(
         logger.warn(`Không kiểm tra được phản ánh hoa trên ${channel.name}: ${String(error)}`);
       }
     }
+    if (orderReviewReply) return { kind: "reply", text: orderReviewReply };
     if (complaintReply) return { kind: "reply", text: complaintReply };
     const userMessageBase = handoffContext || dispatchContext || kiotContext || shippingContext || deliveryContext || paymentContext
       ? `${handoffContext}\n\n${dispatchContext ? `${dispatchContext}\n\n` : ""}${kiotContext ? `${kiotContext}\n\n` : ""}${deliveryContext ? `${deliveryContext}\n\n` : ""}${shippingContext ? `${shippingContext}\n\n` : ""}${paymentContext ? `${paymentContext}\n\n` : ""}[YÊU CẦU MỚI NHẤT CẦN TRẢ LỜI]\n${latestUserMessage}`
