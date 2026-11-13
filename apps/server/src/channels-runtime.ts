@@ -1589,18 +1589,19 @@ export function makeInboundHandler(
           const since = reset ? new Date(reset.sentAt) : new Date(now.getTime() - 48 * 3600_000);
           if (!await hasKiotVietOrderSince(db, ctx, channel.id, sourceThreadId, since)) {
             const thread = await getInboxThread(db, ctx, channel.id, sourceThreadId);
-            const customer = thread?.contactAlias || thread?.profileName || thread?.name || msg.senderName || msg.senderId;
+            const customer = thread?.contactAlias || thread?.profileName || thread?.name || msg.senderName || "";
+            const notice = formatOrchidOrderReview(decision.review, customer);
             const fingerprint = orchidOrderReviewFingerprint(orderMessages, now);
             const claimId = await claimOrchidOrderDispatch(db, ctx, {
               channelId: channel.id, threadId: sourceThreadId, fingerprint, targetThreadId: orderGroupId,
-              message: orchidOrderSourceNotice(channel, sourceThreadId, formatOrchidOrderReview(decision.review, customer, orderMessages, msg.text)),
+              message: notice,
             });
             let notified = false;
             if (claimId) {
               try {
                 const runtime = orchidOrderNotificationChannel(channel, channelHandlers);
                 const ids = await runtime.sendManual({ threadId: orderGroupId, peerKind: "group", source: "agent",
-                  text: orchidOrderSourceNotice(channel, sourceThreadId, formatOrchidOrderReview(decision.review, customer, orderMessages, msg.text)), threadName: "Phan Don Cam Hoa" });
+                  text: notice, threadName: "Phan Don Cam Hoa" });
                 if (!ids[0]) throw new Error("Zalo không trả mã tin đã gửi");
                 await finishOrchidOrderDispatch(db, ctx, claimId, ids[0]);
                 notified = true;

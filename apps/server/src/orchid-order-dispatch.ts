@@ -112,9 +112,7 @@ export interface OrchidOrderPhotoEvidence {
 }
 
 export interface OrchidOrderReview {
-  reason: string;
   missing: string[];
-  details: string;
 }
 
 export type OrchidOrderDecision = { kind: "ready"; order: ConfirmedOrchidOrder }
@@ -149,11 +147,7 @@ export function parseOrchidOrderDecision(raw: string | null): OrchidOrderDecisio
     if (!Number.isInteger(value.stems) || Number(value.stems) < 1 || Number(value.stems) > 200) missing.push("số cành");
     if (typeof value.color !== "string" || !value.color.trim()) missing.push("màu/mẫu hoa");
     if (!missing.length) missing.push("thời gian giao hợp lệ");
-    const labels = { pot: "Chậu", color: "Màu/mẫu", price: "Giá hoa", delivery: "Giờ giao",
-      address: "Địa chỉ", recipientPhone: "SĐT người nhận", cardText: "Bảng chữ" };
-    const details = Object.entries(labels)
-      .flatMap(([key, label]) => typeof value[key] === "string" && value[key] ? [`${label}: ${String(value[key]).slice(0, 500)}`] : []).join("; ");
-    return { kind: "review", review: { reason: "Khách đã đồng ý đặt nhưng chưa đủ dữ kiện lên bill", missing, details } };
+    return { kind: "review", review: { missing } };
   } catch { return { kind: "none" }; }
 }
 
@@ -169,26 +163,21 @@ export async function classifyOrchidOrderDecision(
   current: { text: string; senderName: string }, now: Date, evidence: OrchidOrderPhotoEvidence[] = [],
 ): Promise<OrchidOrderDecision> {
   let decision: OrchidOrderDecision = { kind: "none" };
-  let failed = false;
   try {
     decision = parseOrchidOrderDecision(await requestOrchidOrderClassification(provider, model, messages, current, now, "customer", evidence));
-  } catch { failed = true; }
+  } catch { /* Preserve explicit commitments when the provider is unavailable. */ }
   if (decision.kind !== "none" || !explicitOrchidOrderCommitment(current.text, messages)) return decision;
-  return { kind: "review", review: {
-    reason: failed ? "Bộ nhận diện đơn lỗi khi khách yêu cầu làm hoa" : "Khách yêu cầu làm hoa nhưng bộ nhận diện chưa xác minh được đơn",
-    missing: ["số cành và màu/mẫu hoa"], details: "Cần đối chiếu ảnh và hội thoại trước khi lên bill",
-  } };
+  return { kind: "review", review: { missing: ["số cành", "màu/mẫu hoa"] } };
 }
 
-export function formatOrchidOrderReview(review: OrchidOrderReview, customer: string, messages: InboxMessageRow[], currentText: string): string {
-  const clean = (s: string) => s.replace(/[\r\n]+/g, " ").trim();
+export function formatOrchidOrderReview(review: OrchidOrderReview, customer: string): string {
+  const name = customer.replace(/[\r\n]+/g, " ").trim()
+    .replace(/(?:[\s·|,-]+|^)(?:0|\+?84)[35789]\d{8}$/, "").trim();
   return [
-    `⚠️ ĐƠN CẦN KIỂM TRA — CHƯA LÊN BILL`, `Khách hàng: ${clean(customer)}`,
-    clean(review.reason), `Cần xác minh: ${review.missing.map(clean).join(", ")}.`, clean(review.details),
-    ...messages.slice(-8).map((m) => `${m.direction === "in" ? "Khách" : "Shop"}: ${clean(m.text).slice(0, 350) || (m.contentType === "photo" ? "[ảnh trong hội thoại]" : "[tin khác]")}`),
-    `Khách vừa nhắn: ${clean(currentText).slice(0, 500)}`,
-    "Nhờ nhân viên kiểm tra ngay, xác nhận mẫu/số cành và lên bill. Chưa xác nhận cắm/giao hoa.",
-  ].filter(Boolean).join("\n");
+    "⚠️ ĐƠN CẦN KIỂM TRA — CHƯA LÊN BILL",
+    `Khách hàng: ${name || "Chưa rõ tên"}`,
+    `Cần xác minh: ${review.missing.join(", ")}.`,
+  ].join("\n");
 }
 
 export function orchidOrderReviewReply(review: OrchidOrderReview, notified: boolean): string {

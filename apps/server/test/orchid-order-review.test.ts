@@ -31,10 +31,9 @@ describe("orders selected by photo must not disappear", () => {
     expect(result.kind).toBe("review");
     if (result.kind !== "review") throw new Error("Order dropped");
     expect(result.review.missing).toEqual(["số cành"]);
-    const notice = formatOrchidOrderReview(result.review, "Ms Quỳnh Như", history, "Dạ làm giúp em");
-    expect(notice).toContain("CHƯA LÊN BILL");
-    expect(notice).toContain("11:00 09/11/2026");
-    expect(notice).toContain("45-47 Nguyễn Văn Kỉnh");
+    expect(formatOrchidOrderReview(result.review, "Ms Quỳnh Như · 0900000000")).toBe(
+      "⚠️ ĐƠN CẦN KIỂM TRA — CHƯA LÊN BILL\nKhách hàng: Ms Quỳnh Như\nCần xác minh: số cành.",
+    );
     expect(orchidOrderReviewReply(result.review, true)).toContain("Đơn chưa lên bill");
     expect(orchidOrderReviewReply(result.review, false)).not.toContain("đã báo nhân viên");
   });
