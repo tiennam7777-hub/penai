@@ -4814,7 +4814,8 @@ export const INDEX_HTML = `<!doctype html>
     function revealQuotedMessage(x) {
       var node = Array.prototype.find.call($("#ibxMsgs").querySelectorAll(".ibx-msg[data-id]"), function (n) { return n.getAttribute("data-id") === String(x.id); });
       if (!node) return false;
-      node.scrollIntoView({ behavior: "smooth", block: "center" });
+      // Jump before lazy-loaded images can change the target's position during a smooth scroll.
+      node.scrollIntoView({ behavior: "instant", block: "center" });
       node.classList.add("ibx-quote-target");
       setTimeout(function () { node.classList.remove("ibx-quote-target"); }, 2400);
       return true;
@@ -5111,8 +5112,7 @@ export const INDEX_HTML = `<!doctype html>
       api("/v1/inbox/" + channelId + "/threads/" + encodeURIComponent(threadId) + "/messages/" + encodeURIComponent(messageId) + "/context").then(function (j) {
         if (S.ch !== channelId || !S.cur || S.cur.threadId !== threadId) return;
         S.msgs = j.messages || []; S.jumped = true; renderMsgs(false);
-        var target = Array.prototype.find.call($("#ibxMsgs").querySelectorAll(".ibx-msg"), function (n) { return n.getAttribute("data-id") === messageId; });
-        if (target) { target.classList.add("ibx-quote-target"); $("#ibxMsgs").scrollTop = target.offsetTop - $("#ibxMsgs").offsetTop - 100; }
+        revealQuotedMessage({ id: messageId });
         if (window.innerWidth <= 1100) { S.detailsOpen = false; renderDetails(); }
       }).catch(function (e) { toast(e.message, true); });
     }
