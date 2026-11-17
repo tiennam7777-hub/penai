@@ -4828,14 +4828,30 @@ export const INDEX_HTML = `<!doctype html>
       dlg.addEventListener("close", function () { dlg.remove(); });
       document.body.appendChild(dlg); dlg.showModal();
     }
+    function quotedPhotoCliId(ref) {
+      return ref.kind === "photo" && ref.cliMsgId && ref.cliMsgId !== "0" ? ref.cliMsgId : "";
+    }
+    function findLoadedQuotedMessage(ref) {
+      var messages = S.msgs || [];
+      var byMsgId = ref.msgId && ref.msgId !== "0" && messages.find(function (m) { return m.msgId === ref.msgId; });
+      var cliMsgId = quotedPhotoCliId(ref);
+      // Use the server lookup when a global ID exists but its message isn't loaded.
+      return byMsgId || ((!ref.msgId || ref.msgId === "0") && cliMsgId && messages.find(function (m) {
+        return m.contentType === "photo" && m.meta && m.meta.cliMsgId === cliMsgId;
+      }));
+    }
     function openQuotedMessage(ref) {
-      if (!ref || !ref.msgId || !S.cur) { toast("Tin trích dẫn này thiếu mã để tìm tin gốc", true); return; }
+      if (!S.cur) return;
       var channelId = S.ch, threadId = S.cur.threadId;
-      var cached = (S.msgs || []).find(function (m) { return m.msgId === ref.msgId; });
+      var cached = findLoadedQuotedMessage(ref);
       if (cached && revealQuotedMessage(cached)) return;
-      api("/v1/inbox/" + channelId + "/threads/" + encodeURIComponent(threadId) + "/messages/by-msg-id/" + encodeURIComponent(ref.msgId)).then(function (j) {
+      var cliMsgId = quotedPhotoCliId(ref);
+      var query = cliMsgId ? "?cliMsgId=" + encodeURIComponent(cliMsgId) : "";
+      api("/v1/inbox/" + channelId + "/threads/" + encodeURIComponent(threadId) + "/messages/by-msg-id/" + encodeURIComponent(ref.msgId || "0") + query).then(function (j) {
         if (!S.cur || S.ch !== channelId || S.cur.threadId !== threadId) return;
-        if (!revealQuotedMessage(j.message)) showQuotedMessage(j.message);
+        if (revealQuotedMessage(j.message)) return;
+        if (j.message.contentType === "photo") jumpToExploreMessage(j.message.id);
+        else showQuotedMessage(j.message);
       }).catch(function (e) { toast(e.message, true); });
     }
     function msgEl(x) {
@@ -4845,12 +4861,12 @@ export const INDEX_HTML = `<!doctype html>
       var ref = x.meta && x.meta.quote;
       var q = ref && ref.text ? '<span>↪ ' + esc(ref.text) + "</span>" : "";
       if (ref && ref.kind === "photo") {
-        var chosen = (S.msgs || []).find(function (m) { return m.msgId === ref.msgId && m.contentType === "photo"; });
-        var chosenMedia = chosen && chosen.media || {};
+        var chosen = findLoadedQuotedMessage(ref);
+        var chosenMedia = chosen && chosen.contentType === "photo" && chosen.media || {};
         var chosenSrc = chosenMedia.file ? "/v1/inbox/" + S.ch + "/file?p=" + encodeURIComponent(chosenMedia.file) : (chosenMedia.url || "");
         q = '↪ Ảnh được trích dẫn' + (chosenSrc ? '<br><img class="ibx-photo" src="' + esc(chosenSrc) + '" referrerpolicy="no-referrer" alt="Ảnh được trích dẫn" loading="lazy" style="max-width:90px;max-height:90px">' : '');
       }
-      if (q) q = ref.msgId ? '<button type="button" class="ibx-quote ibx-quote-jump" title="Đến tin nhắn được trích dẫn">' + q + '</button>' : '<div class="ibx-quote">' + q + '</div>';
+      if (q) q = (ref.msgId && ref.msgId !== "0") || quotedPhotoCliId(ref) ? '<button type="button" class="ibx-quote ibx-quote-jump" title="Đến tin nhắn được trích dẫn">' + q + '</button>' : '<div class="ibx-quote">' + q + '</div>';
       var d = el("div", { "class": "ibx-msg " + (out ? "out" : "in") + (x.removed ? " removed" : ""), "data-id": x.id });
       d.innerHTML = (who ? '<div class="ibx-who">' + esc(who) + "</div>" : "") + '<div class="ibx-bubble">' + q + msgBody(x) + "</div>" + rxHtml(x) + '<div class="ibx-time">' + esc(ibxTime(x.sentAt)) + "</div>" +
         (x.removed ? '<div class="ibx-msg-state">' + (x.removed === "recalled" ? "Đã thu hồi" : "Đã xóa ở tài khoản này") + "</div>" : "");

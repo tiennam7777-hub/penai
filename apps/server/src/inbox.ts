@@ -1235,9 +1235,12 @@ export function registerInboxRoutes(app: FastifyInstance, deps: { db: Db; dataDi
 
   app.get(`${base}/:channelId/threads/:threadId/messages/by-msg-id/:msgId`, async (req, reply) => {
     const { channelId, threadId, msgId } = req.params as { channelId: string; threadId: string; msgId: string };
+    const { cliMsgId } = req.query as { cliMsgId?: unknown };
     if (!(await guard(req, reply, channelId))) return;
     if (!msgId || msgId.length > 100) return reply.code(400).send({ error: "Mã tin nhắn không hợp lệ" });
-    const message = await getInboxMessageByMsgId(db, req.authCtx, channelId, threadId, msgId);
+    const byMsgId = msgId !== "0" ? await getInboxMessageByMsgId(db, req.authCtx, channelId, threadId, msgId) : null;
+    const message = byMsgId ?? (typeof cliMsgId === "string"
+      ? await getInboxMessageByCliMsgId(db, req.authCtx, channelId, threadId, cliMsgId) : null);
     if (!message) return reply.code(404).send({ error: "Tin được trích dẫn không có trong lịch sử Inbox của hội thoại này" });
     return { message: publicMessage(message, req.authCtx.workspaceId) };
   });
