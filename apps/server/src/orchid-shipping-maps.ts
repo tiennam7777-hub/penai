@@ -2,7 +2,7 @@ import { decryptSecret, type WorkspaceContext } from "@penai/shared";
 import { getOrchidShippingMaps, reserveOrchidShippingMapRequest, type Db } from "@penai/db";
 export const ORCHID_SHIPPING_ORIGIN = "42 Điện Biên Phủ, Phường Đa Kao, Quận 1, Thành phố Hồ Chí Minh";
 export type OrchidRoadRoute = { destination: string; distanceKm: number };
-const normalize = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").toLowerCase();
+const normalize = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[đĐ]/g, "d").toLowerCase();
 export async function vietmapOrchidRoadRoute(apiKey: string, destination: string, request: typeof fetch = fetch): Promise<OrchidRoadRoute> {
   if (destination.length < 5 || destination.length > 400 || /https?:\/\//i.test(destination)) throw new Error("Cần địa chỉ giao cụ thể hoặc tọa độ vị trí.");
   async function get(path: string, params: URLSearchParams): Promise<any> {
