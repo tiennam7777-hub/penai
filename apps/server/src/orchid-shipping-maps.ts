@@ -26,6 +26,16 @@ export async function vietmapOrchidRoadRoute(apiKey: string, destination: string
       // A road or nearby landmark is enough for a quote, even without the exact house.
       candidates = available;
     }
+    if (address !== ORCHID_SHIPPING_ORIGIN) {
+      const street = normalize(address).match(/\bduong\s+([^,;]+)/)?.[1]
+        ?.split(/\s+(?:do|nhe|nha|khu|quan|phuong|vinhomes?|tp|thanh pho)\b/)[0]?.trim();
+      if (street) {
+        const streetPattern = new RegExp(`\\bduong\\s+${street.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
+        const onStreet = candidates.filter((r: any) => streetPattern.test(normalize(`${r.name ?? ""} ${r.address ?? ""} ${r.display ?? ""}`)));
+        // Prefer landmarks on the requested road over the centre of a large residential area.
+        if (onStreet.length) candidates = onStreet;
+      }
+    }
     if (!candidates.length) throw new Error("Chưa tìm thấy khu vực giao để ước tính phí.");
     const points: [number, number][] = [];
     // Compare the leading search results: accept nearby buildings/points on the same road.

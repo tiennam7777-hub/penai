@@ -13,7 +13,7 @@ describe("VIETMAP road routes", () => {
  });
  it("accepts nearby buildings within 1 km for a street and residential area", async () => {
   const results = [[{ref_id:"a",name:"42 Điện Biên Phủ",address:"Phường Đa Kao, Quận 1"}],{lat:10.79,lng:106.70},
-   [{ref_id:"b",name:"Đường D1, Vinhomes Grand Park"},{ref_id:"c",name:"Tòa Daisy, Vinhomes Grand Park"}],
+   [{ref_id:"b",name:"Đường D1, Vinhomes Grand Park"},{ref_id:"c",name:"Tòa Daisy, Vinhomes Grand Park",address:"Đường D1"}],
    {lat:10.84,lng:106.83},{lat:10.845,lng:106.835},{code:"OK",paths:[{distance:24800}]}];
   const f=vi.fn(async () => new Response(JSON.stringify(results.shift()))) as unknown as typeof fetch;
   expect(await vietmapOrchidRoadRoute("secret","Đường D1, khu Vinhomes quận 9",f)).toMatchObject({distanceKm:24.8});
@@ -25,6 +25,15 @@ describe("VIETMAP road routes", () => {
    [{ref_id:"b",name:"Đường D1"},{ref_id:"c",name:"Đường D1"}],{lat:10.84,lng:106.83},{lat:10.76,lng:106.69}];
   const f=vi.fn(async () => new Response(JSON.stringify(results.shift()))) as unknown as typeof fetch;
   await expect(vietmapOrchidRoadRoute("secret","Đường D1, TP.HCM",f)).rejects.toThrow(/chỉ cần làm rõ tên khu hoặc quận/);
+ });
+ it("prefers D1 landmarks over the distant centre of the same large residential area", async () => {
+  const results = [[{ref_id:"a",name:"42 Điện Biên Phủ",address:"Phường Đa Kao, Quận 1"}],{lat:10.79,lng:106.70},
+   [{ref_id:"b",name:"Trạm sạc Vinhomes Grand Park",address:"Đường D1, Long Bình"},
+    {ref_id:"c",name:"Tủ pin Vinhomes Grand Park",address:"Đường D1, Long Bình"},
+    {ref_id:"d",name:"Vinhomes Grand Park",address:"Nguyễn Xiển, Long Thạnh Mỹ"}],
+   {lat:10.84678,lng:106.84155},{lat:10.84678,lng:106.84155},{code:"OK",paths:[{distance:25000}]}];
+  const f=vi.fn(async () => new Response(JSON.stringify(results.shift()))) as unknown as typeof fetch;
+  expect(await vietmapOrchidRoadRoute("secret","đường D1 đó, khu Vinhomes quận 9",f)).toMatchObject({distanceKm:25});
  });
  it("still requires the correct shop origin", async () => {
   const f=vi.fn(async () => new Response(JSON.stringify([{ref_id:"wrong",name:"42 Điện Biên Phủ",address:"Phường 15, Bình Thạnh"}]))) as unknown as typeof fetch;
