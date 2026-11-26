@@ -9,8 +9,8 @@ describe("Orchids World shipping", () => {
   it("does not expose a retail fee even in a direct tool call at exactly 10 km", async () => {
     const result = await orchidShippingTool.execute({ customerType: "retail", stemCount: 10, distanceKm: 10 }, {} as ToolContext);
     expect(result).toContain("chỉ xác nhận Dạ");
-    expect(result).not.toContain("Phí ship là");
-    expect(await orchidShippingTool.execute({ customerType: "wholesale", stemCount: 10, distanceKm: 10 }, {} as ToolContext)).toContain("Phí ship là 80.000đ");
+    expect(result).not.toContain("Phí ship khoảng");
+    expect(await orchidShippingTool.execute({ customerType: "wholesale", stemCount: 10, distanceKm: 10 }, {} as ToolContext)).toContain("Phí ship khoảng 80.000đ");
   });
   it("uses the current owning prompt's tariff, including a different wholesale surcharge", () => {
     const policy = orchidShippingPolicyFromPrompt("QUY TẮC PHÍ SHIP ORCHIDS WORLD (abc): Khách lẻ, chậu 3–15 cành tính 7.000đ/km; chậu 16–35 cành tính 7.000đ/km + 20.000đ. Khách sỉ: Chậu 1–15 cành tính 7.500đ/km. Chậu 16–35 cành tính 7.500đ/km + 40.000đ.");

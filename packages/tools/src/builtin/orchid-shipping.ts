@@ -5,7 +5,7 @@ const schema = z.object({
   customerType: z.enum(["retail", "wholesale"]).describe("Loại khách: retail = khách lẻ, wholesale = khách sỉ."),
   stemCount: z.number().int().min(1).describe("Số cành trong một chậu cần giao."),
   distanceKm: z.number().positive().max(500).optional().describe("Chỉ truyền nếu số km đường bộ đã được xác minh; nếu chưa biết, truyền destination để hệ thống tự tra bản đồ."),
-  destination: z.string().trim().min(5).max(400).optional().describe("Địa chỉ giao cụ thể khách đã cho. Truyền địa chỉ để tự tra số km đường bộ và tính ship; không tự đoán km."),
+  destination: z.string().trim().min(5).max(400).optional().describe("Đường/khu dân cư/địa danh và quận khách đã cho, không cần số nhà hay đúng tòa để ước tính phí. Chấp nhận sai số vị trí 500 m–1 km; tự tra tuyến đường bộ, không tự đoán km."),
 });
 
 export type OrchidShippingInput = z.infer<typeof schema>;
@@ -75,6 +75,6 @@ export const orchidShippingTool: ToolHandler<typeof schema> = {
     const quote = calculateOrchidShipping(args);
     if (quote.kind === "manual") return quote.reason;
     const money = (value: number) => new Intl.NumberFormat("vi-VN").format(value) + "đ";
-    return `Phí ship là ${money(quote.feeVnd)}. (${args.distanceKm} km; ${args.stemCount} cành; ${args.customerType === "retail" ? "khách lẻ" : "khách sỉ"}; ${quote.vehicle}${quote.free ? "; miễn phí theo bán kính" : ""}).`;
+    return `Phí ship khoảng ${money(quote.feeVnd)}. (${args.distanceKm} km; ${args.stemCount} cành; ${args.customerType === "retail" ? "khách lẻ" : "khách sỉ"}; ${quote.vehicle}${quote.free ? "; miễn phí theo bán kính" : ""}).`;
   },
 };

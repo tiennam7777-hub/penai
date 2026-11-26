@@ -1557,7 +1557,7 @@ export function makeInboundHandler(
         } catch {
           shippingFailureContext = shippingCustomerType === "retail"
             ? "[HỆ THỐNG: Chưa xác minh được đường bộ trên 10 km cho khách lẻ. Chỉ xác nhận Dạ khi nhận địa chỉ; không báo/nhắc phí, không nói miễn phí, không xin ghim vị trí chỉ để tính phí, không hẹn kiểm tra chính sách giao hàng. Chỉ hỏi thêm địa chỉ nếu thực sự cần để giao hoa.]"
-            : "[HỆ THỐNG: Chưa xác minh được tuyến đường bộ. Không bịa phí, không hứa kiểm tra rồi báo sau. Nếu địa chỉ thiếu/mơ hồ, hỏi đúng phần thiếu hoặc xin ghim vị trí; nếu đã đủ, nói cần nhân viên xác minh phí. Có thể dùng orchid_shipping_quote với địa chỉ đầy đủ đã làm rõ.]";
+            : "[HỆ THỐNG: Chưa tra được tuyến đường bộ. Thử orchid_shipping_quote bằng tên đường/khu dân cư và quận đã có; chấp nhận điểm gần đúng trong 500 m–1 km, không đòi số nhà/tòa/ghim vị trí chỉ để báo phí. Chỉ hỏi ngắn tên khu hoặc quận nếu có nhiều nơi cách xa nhau; nếu bản đồ thật sự lỗi thì cần nhân viên hỗ trợ, không bịa số tiền.]";
           logger.info("orchid.shipping_route_unavailable");
         }
       }

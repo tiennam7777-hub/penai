@@ -15,15 +15,33 @@ export async function vietmapOrchidRoadRoute(apiKey: string, destination: string
   }
   async function locate(address: string): Promise<[number,number]> {
     const result = await get("search/v4", new URLSearchParams({ text: address, display_type: "2" }));
-    if (!Array.isArray(result) || result.length === 0) throw new Error("Không tìm thấy địa chỉ chính xác; cần khách gửi đầy đủ số nhà hoặc ghim vị trí.");
+    if (!Array.isArray(result) || result.length === 0) throw new Error("Chưa tìm thấy khu vực giao; thử tên đường/khu dân cư và quận, không cần số nhà để ước tính phí.");
     const house = address.match(/^\s*(\d+[\w/-]*)\s+/)?.[1];
-    let candidates = result.filter((r: any) => typeof r.ref_id === "string" && (!house || new RegExp(`(^|\\D)${house.replace(/[^\d]/g, "")}(?!\\d)`).test(normalize(String(r.name ?? "") + " " + String(r.display ?? "")))));
-    if (address === ORCHID_SHIPPING_ORIGIN) candidates = candidates.filter((r: any) => /da kao/.test(normalize(String(r.address ?? ""))) && normalize(String(r.name ?? "")).trim() === "42 dien bien phu");
-    if (candidates.length !== 1) throw new Error(address === ORCHID_SHIPPING_ORIGIN ? `Địa chỉ cửa hàng có ${candidates.length} kết quả khớp.` : `Địa chỉ giao có ${candidates.length} kết quả khớp; cần khách xác nhận hoặc gửi ghim vị trí.`);
-    const place = await get("place/v4", new URLSearchParams({refid: candidates[0].ref_id}));
-    const lat = Number(place.lat), lng = Number(place.lng);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < 8 || lat > 24 || lng < 102 || lng > 110) throw new Error("Không xác định được tọa độ địa chỉ.");
-    return [lat,lng];
+    const available = result.filter((r: any) => typeof r.ref_id === "string");
+    let candidates = available.filter((r: any) => !house || new RegExp(`(^|\\D)${house.replace(/[^\d]/g, "")}(?!\\d)`).test(normalize(String(r.name ?? "") + " " + String(r.display ?? ""))));
+    if (address === ORCHID_SHIPPING_ORIGIN) {
+      candidates = candidates.filter((r: any) => /da kao/.test(normalize(String(r.address ?? ""))) && normalize(String(r.name ?? "")).trim() === "42 dien bien phu");
+      if (candidates.length !== 1) throw new Error(`Địa chỉ cửa hàng có ${candidates.length} kết quả khớp.`);
+    } else if (!candidates.length) {
+      // A road or nearby landmark is enough for a quote, even without the exact house.
+      candidates = available;
+    }
+    if (!candidates.length) throw new Error("Chưa tìm thấy khu vực giao để ước tính phí.");
+    const points: [number, number][] = [];
+    // Compare the leading search results: accept nearby buildings/points on the same road.
+    for (const candidate of candidates.slice(0, 3)) {
+      const place = await get("place/v4", new URLSearchParams({refid: candidate.ref_id}));
+      const lat = Number(place.lat), lng = Number(place.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < 8 || lat > 24 || lng < 102 || lng > 110) throw new Error("Không xác định được tọa độ khu vực.");
+      points.push([lat, lng]);
+    }
+    // This proximity check only disambiguates locations; billing still uses the road route below.
+    for (const a of points) for (const b of points) {
+      const north = (a[0] - b[0]) * 111_320;
+      const east = (a[1] - b[1]) * 111_320 * Math.cos((a[0] + b[0]) * Math.PI / 360);
+      if (Math.hypot(north, east) > 1_000) throw new Error("Có nhiều khu vực giao cách xa nhau; chỉ cần làm rõ tên khu hoặc quận, không cần số nhà/ghim vị trí để báo phí.");
+    }
+    return points[0]!;
   }
   const origin = await locate(ORCHID_SHIPPING_ORIGIN);
   const coord = destination.match(/^\s*(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)\s*$/);

@@ -30,9 +30,15 @@ export function knownRoute(text: string): { destination: string; distanceKm: num
   return null;
 }
 
+function isAreaAddress(text: string): boolean {
+  const n = normalize(text);
+  return /\b(?:duong|khu|vinhomes?|chung cu|toa nha)\b.{2,}/.test(n) &&
+    /\b(?:quan|phuong|vinhomes?|hcm|thu duc|grand park)\b/.test(n);
+}
+
 function isAddressText(text: string): boolean {
   const n = normalize(text);
-  return !!knownRoute(text) || /(?:dia\s*chi|\bgiao\b|\bden\b|\btoi\b|\btai\b)/.test(n) ||
+  return !!knownRoute(text) || isAreaAddress(text) || /(?:dia\s*chi|\bgiao\b|\bden\b|\btoi\b|\btai\b)/.test(n) ||
     /(?:\d+[\w/-]*\s+(?:duong\s+)?[a-z]+\s+[a-z]+.*(?:phuong|quan|binh thanh|thu duc|tp\b|hcm)|^\s*\d+[\w/-]*\s+(?!canh\b|cay\b|chau\b|trieu\b|tr\b|gio\b|ngay\b)[a-z]+\s+[a-z]+\s+[a-z]+)/.test(n);
 }
 
@@ -57,7 +63,7 @@ export function orchidShippingRequest(messages: InboxMessageRow[]): { destinatio
     const previous = recent.filter(m => m.direction === "in" && m.text !== delivery).map(m => m.text).reverse().find(isAddressText);
     if (previous) destination = previous;
   }
-  if (!knownRoute(destination) && !/^\s*\d+[\w/-]*\s+\S+\s+\S+/.test(destination) &&
+  if (!knownRoute(destination) && !isAreaAddress(destination) && !/^\s*\d+[\w/-]*\s+\S+\s+\S+/.test(destination) &&
       !/(?:bệnh viện|benh vien|tòa nhà|toa nha|trường|truong|chung cư|chung cu|khách sạn|khach san)/i.test(destination)) return null;
   if (recent.some(m => /(?:\b[2-9]\d*\s*chậu|\b[2-9]\d*\s*chau)/i.test(m.text))) return null;
   const stemsIn = (text: string) => {
@@ -98,7 +104,7 @@ export function knownOrchidShippingHint(
 export function orchidShippingHintContext(hint: ShippingHint | null): string {
   if (!hint) return "";
   if (!hint.reportFee) return `[QUY TẮC TRẢ LỜI PHÍ SHIP: Khách lẻ, điểm giao ${hint.destination}, đường bộ ${hint.distanceKm} km, không hơn 10 km. Chỉ xác nhận ngắn "Dạ" khi nhận địa chỉ. Không nhắc phí ship, không nói 0đ/miễn phí/free ship, không xin vị trí để tính phí, không hẹn kiểm tra chính sách/phí giao. Không cộng một khoản ship vào tổng báo khách. Nếu khách hỏi việc khác thì vẫn trả lời đúng việc đó.]`;
-  return `[DỮ KIỆN PHÍ SHIP ĐÃ TÍNH: Điểm giao ${hint.destination}, tuyến đường bộ ${hint.distanceKm} km từ 42 Điện Biên Phủ. Phí ship theo đúng loại khách và số cành hiện tại là ${hint.feeVnd.toLocaleString("vi-VN")}đ. Khi khách cung cấp địa chỉ hoặc khi báo giá chậu, BẮT BUỘC báo khoản này ngay trong cùng tin. Không nói kiểm tra/báo phí ship sau.]`;
+  return `[DỮ KIỆN PHÍ SHIP ĐÃ TÍNH: Khu vực giao ${hint.destination}, tuyến đường bộ khoảng ${hint.distanceKm.toFixed(1)} km từ 42 Điện Biên Phủ. Phí ship ước tính theo loại khách và số cành hiện tại khoảng ${hint.feeVnd.toLocaleString("vi-VN")}đ. Dùng số này báo ngắn, chấp nhận sai số vị trí 500 m–1 km. Không hỏi số nhà, tòa/block/cổng hay ghim vị trí chỉ để báo phí; không yêu cầu khách xác nhận đúng tòa nhà tìm được nếu đã đúng khu vực. Không hẹn kiểm tra/báo phí sau.]`;
 }
 
 /** Chốt an toàn nếu model bỏ qua khoản ship dù dữ kiện đã có. */
@@ -118,7 +124,7 @@ export function completeOrchidShippingReply(reply: string, hint: ShippingHint | 
   const fee = hint.feeVnd === 0 ? "miễn phí" : `${hint.feeVnd.toLocaleString("vi-VN")}đ`;
   const sentence = hint.feeVnd === 0
     ? `Giao đến ${hint.destination} miễn phí.`
-    : `Phí ship đến ${hint.destination} là ${fee}.`;
+    : `Phí ship đến ${hint.destination} khoảng ${fee}.`;
   const withoutDeferral = reply.split(/(?<=[.!?])\s+|\n/).filter(part =>
     !/(?:phí\s*(?:ship|giao)|tiền\s*ship|free\s*ship|giao.{0,40}miễn phí)/i.test(part)).join(" ").trim();
   return `${withoutDeferral} ${sentence}`.replace(/\s{2,}/g, " ").trim();

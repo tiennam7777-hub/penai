@@ -6,6 +6,13 @@ const inbound = (text: string) => ({ direction: "in", text }) as InboxMessageRow
 const outbound = (text: string) => ({ direction: "out", text }) as InboxMessageRow;
 
 describe("orchid quote with shipping", () => {
+  it("accepts a street and residential area without asking for a house or tower", () => {
+    const request = orchidShippingRequest([outbound("Chậu 7 cành giá 1.400.000đ."), inbound("đường D1 đó, khu Vinhome quận 9")]);
+    expect(request).toEqual({ destination: "đường D1 đó, khu Vinhome quận 9", stemCount: 7 });
+    const hint = makeOrchidShippingHint({ destination: request!.destination, stemCount: 7, distanceKm: 24.8, customerType: "retail" });
+    expect(orchidShippingHintContext(hint)).toContain("sai số vị trí 500 m–1 km");
+    expect(completeOrchidShippingReply("Dạ anh.", hint)).toContain("khoảng 180.000đ");
+  });
   it.each([3.2, 8, 9.99, 10])("suppresses retail delivery fees at %s km, including free-delivery wording", distanceKm => {
     const hint = makeOrchidShippingHint({ destination: "290 Nam Kỳ Khởi Nghĩa", distanceKm, stemCount: 10, customerType: "retail" });
     expect(hint?.reportFee).toBe(false);
@@ -59,7 +66,7 @@ describe("orchid quote with shipping", () => {
     expect(completeOrchidShippingReply(
       "Chậu trắng 10 cành giá 2.000.000đ, chưa gồm VAT 5% em nhé. Phí giao đến Bệnh viện Xuyên Á trên QL22 Anh kiểm tra lại rồi báo em.",
       hint,
-    )).toBe("Chậu trắng 10 cành giá 2.000.000đ, chưa gồm VAT 5% em nhé. Phí ship đến Bệnh viện Xuyên Á trên QL22 là 180.000đ.");
+    )).toBe("Chậu trắng 10 cành giá 2.000.000đ, chưa gồm VAT 5% em nhé. Phí ship đến Bệnh viện Xuyên Á trên QL22 khoảng 180.000đ.");
   });
 
   it("keeps unknown routes and existing shipping quotes untouched", () => {
@@ -68,7 +75,7 @@ describe("orchid quote with shipping", () => {
     expect(hint?.feeVnd).toBe(100_000);
     expect(completeOrchidShippingReply("Chậu 10 cành giá 2.000.000đ. Phí ship 100.000đ.", hint))
       .toBe("Chậu 10 cành giá 2.000.000đ. Phí ship 100.000đ.");
-    expect(completeOrchidShippingReply("Phí ship 80.000đ.", hint)).toBe("Phí ship đến HUTECH đối diện Coca-Cola là 100.000đ.");
+    expect(completeOrchidShippingReply("Phí ship 80.000đ.", hint)).toBe("Phí ship đến HUTECH đối diện Coca-Cola khoảng 100.000đ.");
   });
 
   it("drops the old hospital route when the customer gives a new delivery address", () => {
@@ -85,6 +92,6 @@ describe("orchid quote with shipping", () => {
     const hint = knownOrchidShippingHint(messages, "retail");
     expect(hint?.feeVnd).toBe(180_000);
     expect(completeOrchidShippingReply("Anh nhận địa chỉ rồi em nhé.", hint))
-      .toBe("Anh nhận địa chỉ rồi em nhé. Phí ship đến Bệnh viện Xuyên Á trên QL22 là 180.000đ.");
+      .toBe("Anh nhận địa chỉ rồi em nhé. Phí ship đến Bệnh viện Xuyên Á trên QL22 khoảng 180.000đ.");
   });
 });
