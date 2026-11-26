@@ -1378,19 +1378,19 @@ export const INDEX_HTML = `<!doctype html>
     var c = card(m);
     c.innerHTML = '<p><b>Điểm đi:</b> 42 Điện Biên Phủ, P. Tân Định, TP.HCM.</p>' +
       '<p id="shipStatus" class="muted">Đang kiểm tra kết nối bản đồ...</p>' +
-      '<label>Khóa Google Routes API</label><input id="shipKey" type="password" autocomplete="new-password" style="width:100%">' +
-      '<p class="muted">Dùng khóa chỉ cho Routes API, giới hạn IP máy chủ 160.30.160.155. Khóa được lưu mã hóa.</p>' +
+      '<label>Khóa VIETMAP Services API</label><input id="shipKey" type="password" autocomplete="new-password" style="width:100%">' +
+      '<p class="muted">Dùng khóa dịch vụ VIETMAP cho tìm địa chỉ và chỉ đường. Khóa được lưu mã hóa.</p>' +
       '<label>Tối đa lượt tra mỗi ngày, dùng chung ba kênh</label><input id="shipLimit" type="number" min="1" max="10000" value="200">' +
       '<p><button id="shipSave">Xác minh và lưu kết nối</button></p><div id="shipMsg" class="muted"></div>';
     function status() { api("/v1/orchid-shipping").then(function (j) {
-      $("#shipStatus", c).textContent = (j.configured ? "Đã kết nối bản đồ." : "Chưa kết nối bản đồ; cần hoàn tất Google Cloud và lưu khóa.") +
+      $("#shipStatus", c).textContent = (j.configured ? "Đã kết nối bản đồ." : "Chưa kết nối bản đồ; cần hoàn tất VIETMAP và lưu khóa.") +
         " Hôm nay đã tra " + j.usageCount + "/" + j.dailyLimit + " lượt.";
       $("#shipLimit", c).value = String(j.dailyLimit);
     }).catch(function (e) { $("#shipStatus", c).textContent = e.message; }); }
     status();
     $("#shipSave", c).onclick = function () {
       var key = $("#shipKey", c).value.trim(), limit = Number($("#shipLimit", c).value);
-      if (!key) { $("#shipMsg", c).textContent = "Cần nhập khóa Google Routes API."; return; }
+      if (!key) { $("#shipMsg", c).textContent = "Cần nhập khóa VIETMAP Services API."; return; }
       $("#shipSave", c).disabled = true;
       $("#shipMsg", c).textContent = "Đang xác minh tuyến đường từ cửa hàng...";
       api("/v1/orchid-shipping", { method: "PUT", body: { apiKey: key, dailyLimit: limit } }).then(function () {
