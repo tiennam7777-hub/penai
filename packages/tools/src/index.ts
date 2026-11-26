@@ -20,7 +20,8 @@ export {
 export { httpFetchTool } from "./builtin/http-fetch.js";
 export { execTool, commandHeads } from "./builtin/exec.js";
 export { webSearchTool } from "./builtin/web-search.js";
-export { orchidShippingTool, calculateOrchidShipping } from "./builtin/orchid-shipping.js";
+export { orchidShippingTool, calculateOrchidShipping, orchidShippingPolicyFromPrompt } from "./builtin/orchid-shipping.js";
+export type { OrchidShippingPolicy } from "./builtin/orchid-shipping.js";
 export { memoryAddTool, memorySearchTool, memoryGetTool } from "./builtin/memory.js";
 export { skillSearchTool, useSkillTool, publishSkillTool, updateSkillTool } from "./builtin/skills.js";
 export {

@@ -109,6 +109,7 @@ export interface AgentLoopDeps {
   };
   /** Múi giờ của doanh nghiệp — forward vào ToolContext (current_time, lịch hẹn). */
   timezone?: string;
+  orchidShippingQuote?: ToolContext["orchidShippingQuote"];
   /** Lịch hẹn agent tự đặt khi chat (tool cron_*) — chỉ có khi đang chat với người dùng. */
   cron?: ToolContext["cron"];
   /** Trình duyệt của lượt chạy (tool browser) — forward vào ToolContext. */
@@ -376,6 +377,7 @@ export async function* runAgent(
         ...(deps.skills ? { skills: deps.skills } : {}),
         ...(deps.landingPages ? { landingPages: deps.landingPages } : {}),
         ...(deps.timezone ? { timezone: deps.timezone } : {}),
+        ...(deps.orchidShippingQuote ? { orchidShippingQuote: deps.orchidShippingQuote } : {}),
         ...(deps.cron ? { cron: deps.cron } : {}),
         ...(deps.browser ? { browser: deps.browser } : {}),
         showImage: (dataUrl: string) => {

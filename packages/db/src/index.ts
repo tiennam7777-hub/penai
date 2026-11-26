@@ -32,3 +32,4 @@ export * from "./misa-repo.js";
 export * from "./misa-accounting-repo.js";
 export * from "./orchid-after-hours-repo.js";
 export * from "./orchid-quality-report-repo.js";
+export * from "./orchid-shipping-repo.js";

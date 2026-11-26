@@ -1,10 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { calculateOrchidShipping } from "../src/builtin/orchid-shipping.js";
+import { calculateOrchidShipping, orchidShippingPolicyFromPrompt, orchidShippingTool } from "../src/builtin/orchid-shipping.js";
+import type { ToolContext } from "../src/registry.js";
 
 const quote = (customerType: "retail" | "wholesale", stemCount: number, distanceKm: number) =>
   calculateOrchidShipping({ customerType, stemCount, distanceKm });
 
 describe("Orchids World shipping", () => {
+  it("uses the current owning prompt's tariff, including a different wholesale surcharge", () => {
+    const policy = orchidShippingPolicyFromPrompt("QUY TẮC PHÍ SHIP ORCHIDS WORLD (abc): Khách lẻ, chậu 3–15 cành tính 7.000đ/km; chậu 16–35 cành tính 7.000đ/km + 20.000đ. Khách sỉ: Chậu 1–15 cành tính 7.500đ/km. Chậu 16–35 cành tính 7.500đ/km + 40.000đ.");
+    expect(policy).toEqual({ retailPerKm: 7000, wholesalePerKm: 7500, wholesaleExtra: 40000 });
+    expect(calculateOrchidShipping({ customerType: "retail", stemCount: 5, distanceKm: 14 }, policy)).toMatchObject({ feeVnd: 90000 });
+    expect(calculateOrchidShipping({ customerType: "wholesale", stemCount: 16, distanceKm: 14 }, policy)).toMatchObject({ feeVnd: 145000 });
+  });
+  it("accepts an address without invented km and forwards to the credential-owning runtime", async () => {
+    const args = orchidShippingTool.schema.parse({ customerType: "retail", stemCount: 7, destination: "31 Đống Đa, Bình Thạnh" });
+    const result = await orchidShippingTool.execute(args, { orchidShippingQuote: async input => {
+      expect(input.distanceKm).toBeUndefined(); expect(input.destination).toContain("31 Đống Đa"); return "Phí ship 0đ";
+    } } as ToolContext);
+    expect(result).toBe("Phí ship 0đ");
+  });
   it("gives retail pots from 3 to 35 stems free delivery strictly below 8 km", () => {
     expect(quote("retail", 3, 7.9)).toMatchObject({ kind: "quote", feeVnd: 0 });
     expect(quote("retail", 16, 7.9)).toMatchObject({ kind: "quote", feeVnd: 0 });

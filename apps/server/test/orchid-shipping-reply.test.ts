@@ -1,10 +1,20 @@
 import { describe, expect, it } from "vitest";
 import type { InboxMessageRow } from "@penai/db";
-import { completeOrchidShippingReply, knownOrchidShippingHint, orchidShippingHintContext, orchidDeliveryPriorityContext } from "../src/orchid-shipping-reply.js";
+import { completeOrchidShippingReply, knownOrchidShippingHint, orchidShippingHintContext, orchidDeliveryPriorityContext, orchidShippingRequest } from "../src/orchid-shipping-reply.js";
 
 const inbound = (text: string) => ({ direction: "in", text }) as InboxMessageRow;
+const outbound = (text: string) => ({ direction: "out", text }) as InboxMessageRow;
 
 describe("orchid quote with shipping", () => {
+  it("recognizes the real bare address that previously caused a deferred quote", () => {
+    expect(orchidShippingRequest([outbound("Dạ chậu mẫu 7 cành giá 1.400.000đ chưa VAT ạ."),
+      inbound("31 đống đa p2 bình thạnh")])).toEqual({ destination: "31 đống đa p2 bình thạnh", stemCount: 7 });
+  });
+  it("does not reuse shipping data across reset or infer stems for multiple pots", () => {
+    expect(orchidShippingRequest([inbound("10 cành giao HUTECH đối diện Coca-Cola"), inbound("/new"), inbound("31 đống đa p2 bình thạnh")])).toBeNull();
+    expect(orchidShippingRequest([inbound("2 chậu 10 cành giao HUTECH đối diện Coca-Cola")])).toBeNull();
+    expect(orchidShippingRequest([inbound("7-10 cành giao HUTECH đối diện Coca-Cola")])).toBeNull();
+  });
   it("calculates the known QL22 route from messages after /new", () => {
     const messages = [
       inbound("Phí giao bệnh viện xuyên á quốc lộ 22 là bao nhiêu"),
@@ -27,6 +37,7 @@ describe("orchid quote with shipping", () => {
     expect(hint?.feeVnd).toBe(100_000);
     expect(completeOrchidShippingReply("Chậu 10 cành giá 2.000.000đ. Phí ship 100.000đ.", hint))
       .toBe("Chậu 10 cành giá 2.000.000đ. Phí ship 100.000đ.");
+    expect(completeOrchidShippingReply("Phí ship 80.000đ.", hint)).toBe("Phí ship đến HUTECH đối diện Coca-Cola là 100.000đ.");
   });
 
   it("drops the old hospital route when the customer gives a new delivery address", () => {
@@ -36,5 +47,13 @@ describe("orchid quote with shipping", () => {
     ];
     expect(knownOrchidShippingHint(messages, "retail")).toBeNull();
     expect(orchidDeliveryPriorityContext(messages)).toContain("1002 Kha Vạn Cân");
+  });
+
+  it("quotes a known route when the customer supplies the address without asking the price", () => {
+    const messages = [inbound("Chậu 10 cành"), inbound("Giao đến Bệnh viện Xuyên Á trên QL22 sáng mai")];
+    const hint = knownOrchidShippingHint(messages, "retail");
+    expect(hint?.feeVnd).toBe(180_000);
+    expect(completeOrchidShippingReply("Anh nhận địa chỉ rồi em nhé.", hint))
+      .toBe("Anh nhận địa chỉ rồi em nhé. Phí ship đến Bệnh viện Xuyên Á trên QL22 là 180.000đ.");
   });
 });

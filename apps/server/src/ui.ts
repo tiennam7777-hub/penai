@@ -403,6 +403,7 @@ export const INDEX_HTML = `<!doctype html>
     { id: "providers", icon: "🔌", label: "Providers" },
     { id: "kiotviet", icon: "🧾", label: "KiotViet", admin: true },
     { id: "misa", icon: "📄", label: "MISA meInvoice", admin: true },
+    { id: "shipping", icon: "🚚", label: "Phí giao hàng", admin: true },
     { id: "dlog", icon: "📒", label: "DLOG" },
     { id: "stem-report", icon: "🌸", label: "Báo cáo cắm hoa" },
     { id: "quality-report", icon: "🌿", label: "Đi Hoa Xấu - Cây 2 nhánh" },
@@ -1370,6 +1371,48 @@ export const INDEX_HTML = `<!doctype html>
       load().then(function (query) { if (query) window.location.href = "/v1/orchid-stem-report.xlsx?" + query; });
     };
     load();
+  };
+
+  PAGES.shipping = function () {
+    var m = page("Phí giao hàng", "Tính phí cho NV kinh doanh Hot 1, Hot 4 và Hot 6");
+    var c = card(m);
+    c.innerHTML = '<p><b>Điểm đi:</b> 42 Điện Biên Phủ, P. Tân Định, TP.HCM.</p>' +
+      '<p id="shipStatus" class="muted">Đang kiểm tra kết nối bản đồ...</p>' +
+      '<label>Khóa Google Routes API</label><input id="shipKey" type="password" autocomplete="new-password" style="width:100%">' +
+      '<p class="muted">Dùng khóa chỉ cho Routes API, giới hạn IP máy chủ 160.30.160.155. Khóa được lưu mã hóa.</p>' +
+      '<label>Tối đa lượt tra mỗi ngày, dùng chung ba kênh</label><input id="shipLimit" type="number" min="1" max="10000" value="200">' +
+      '<p><button id="shipSave">Xác minh và lưu kết nối</button></p><div id="shipMsg" class="muted"></div>';
+    function status() { api("/v1/orchid-shipping").then(function (j) {
+      $("#shipStatus", c).textContent = (j.configured ? "Đã kết nối bản đồ." : "Chưa kết nối bản đồ; cần hoàn tất Google Cloud và lưu khóa.") +
+        " Hôm nay đã tra " + j.usageCount + "/" + j.dailyLimit + " lượt.";
+      $("#shipLimit", c).value = String(j.dailyLimit);
+    }).catch(function (e) { $("#shipStatus", c).textContent = e.message; }); }
+    status();
+    $("#shipSave", c).onclick = function () {
+      var key = $("#shipKey", c).value.trim(), limit = Number($("#shipLimit", c).value);
+      if (!key) { $("#shipMsg", c).textContent = "Cần nhập khóa Google Routes API."; return; }
+      $("#shipSave", c).disabled = true;
+      $("#shipMsg", c).textContent = "Đang xác minh tuyến đường từ cửa hàng...";
+      api("/v1/orchid-shipping", { method: "PUT", body: { apiKey: key, dailyLimit: limit } }).then(function () {
+        $("#shipKey", c).value = ""; $("#shipMsg", c).textContent = "Đã xác minh và lưu mã hóa. NV kinh doanh ba kênh dùng chung kết nối này."; status();
+      }).catch(function (e) { $("#shipMsg", c).textContent = e.message; })
+        .finally(function () { $("#shipSave", c).disabled = false; });
+    };
+    var q = card(m);
+    q.innerHTML = '<h3>Kiểm tra phí giao</h3><label>Địa chỉ khách</label><input id="shipDestination" style="width:100%" placeholder="Số nhà, tên đường, phường, thành phố">' +
+      '<label>Số cành trong một chậu</label><input id="shipStems" type="number" min="1" max="500" value="5">' +
+      '<label>Loại khách</label><select id="shipCustomer"><option value="retail">Khách lẻ</option><option value="wholesale">Khách sỉ</option></select>' +
+      '<p><button id="shipQuote">Tra đường và tính phí</button></p><div id="shipResult"></div>';
+    $("#shipQuote", q).onclick = function () {
+      $("#shipQuote", q).disabled = true; $("#shipResult", q).textContent = "Đang tra tuyến đường bộ...";
+      api("/v1/orchid-shipping/quote", { method: "POST", body: { destination: $("#shipDestination", q).value.trim(),
+        stemCount: Number($("#shipStems", q).value), customerType: $("#shipCustomer", q).value } }).then(function (j) {
+          $("#shipResult", q).textContent = j.quote.kind === "manual" ? j.quote.reason :
+            j.route.distanceKm + " km đường bộ — " + (j.quote.feeVnd ? "Phí giao " + j.quote.feeVnd.toLocaleString("vi-VN") + "đ" : "Giao miễn phí") + ".";
+          status();
+        }).catch(function (e) { $("#shipResult", q).textContent = e.message; })
+        .finally(function () { $("#shipQuote", q).disabled = false; });
+    };
   };
 
   PAGES.kiotviet = function () {

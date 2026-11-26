@@ -140,6 +140,8 @@ export interface ToolContext {
   };
   /** Múi giờ của doanh nghiệp (IANA, vd "Asia/Ho_Chi_Minh") — tool hiển thị giờ dùng mặc định. */
   timezone?: string;
+  /** Runtime owns the encrypted map key and the current Agent tariff. */
+  orchidShippingQuote?: (input: { customerType: "retail" | "wholesale"; stemCount: number; distanceKm?: number; destination?: string }) => Promise<string>;
   /**
    * Lịch hẹn agent tự đặt khi chat (tool cron_*). Runtime kiểm tra lịch, giới hạn
    * và quyền; trả chuỗi kết quả, ném lỗi dễ hiểu khi không làm được.

@@ -79,6 +79,8 @@ import {
 } from "@penai/providers";
 import {
   createDefaultToolRegistry,
+  calculateOrchidShipping,
+  orchidShippingPolicyFromPrompt,
   buildCustomTool,
   ensureWorkDirs,
   parseSkillFrontmatter,
@@ -88,6 +90,8 @@ import { readFile, writeFile, readdir, stat } from "node:fs/promises";
 import type { McpAccess, McpManager } from "./mcp-manager.js";
 import { makeCronToolApi } from "./cron-tools.js";
 import { browserForRun } from "./browser-runtime.js";
+import { resolveOrchidRoadRoute } from "./orchid-shipping-maps.js";
+import { knownRoute, type ShippingHint } from "./orchid-shipping-reply.js";
 import { makeHookDispatcher } from "./hooks.js";
 import { agentLibraryDir, execSandboxFor } from "./library-paths.js";
 import { moveToTrash } from "./library-trash.js";
@@ -388,6 +392,8 @@ export async function buildLoopDeps(
     /** 0 = nguoi dung that (mac dinh), 1 = luu luong API. */
     gatePriority?: number;
     disabledTools?: string[];
+    onOrchidShippingQuote?: (hint: ShippingHint) => void;
+    orchidShippingCustomerType?: "retail" | "wholesale";
     /** Agent có dùng Workspace Semantic hay không (mặc định true). */
     workspaceMemoryEnabled?: boolean;
     /** Agent được ghi vào thư viện file của chính nó (mặc định chỉ đọc). */
@@ -764,6 +770,20 @@ return res.text || "(agent không trả về nội dung)";
     ...(publishFile ? { publishFile } : {}),
     ...(landingPages ? { landingPages } : {}),
     timezone: rt.config.timezone,
+    orchidShippingQuote: async (input) => {
+      input = { ...input, customerType: opts.orchidShippingCustomerType ?? input.customerType };
+      const shippingAgent = opts.agentId ? await getAgentById(db, ctx, opts.agentId) : null;
+      if (shippingAgent?.key !== "nhan-vien-kinh-doanh-orchids-world") throw new Error("Chỉ Agent kinh doanh Orchids World dùng kết nối bản đồ này.");
+      if (input.customerType === "retail" && input.stemCount < 3) return "Chậu lẻ 1–2 cành cần nhân viên xác nhận phí ship.";
+      const route = input.destination
+        ? knownRoute(input.destination) ?? await resolveOrchidRoadRoute(db, ctx, input.destination)
+        : { destination: "điểm giao đã xác minh", distanceKm: input.distanceKm };
+      const quote = calculateOrchidShipping({ ...input, distanceKm: route.distanceKm }, orchidShippingPolicyFromPrompt(shippingAgent.systemPrompt));
+      if (quote.kind === "manual") return quote.reason;
+      const hint = { destination: route.destination, distanceKm: route.distanceKm!, feeVnd: quote.feeVnd };
+      opts.onOrchidShippingQuote?.(hint);
+      return `Phí ship đến ${hint.destination}: ${hint.feeVnd.toLocaleString("vi-VN")}đ${quote.free ? " (miễn phí)" : ""}. Đường bộ ${hint.distanceKm} km từ 42 Điện Biên Phủ, ${input.stemCount} cành, ${input.customerType === "retail" ? "khách lẻ" : "khách sỉ"}. Báo khoản phí này ngay trong câu trả lời khách.`;
+    },
     ...(cron ? { cron } : {}),
     ...(browser ? { browser } : {}),
     mcpGuard,

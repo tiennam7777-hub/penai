@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 import { decryptSecret, encryptSecret, logger } from "@penai/shared";
-import { confineMediaPath } from "@penai/tools";
+import { confineMediaPath, calculateOrchidShipping, orchidShippingPolicyFromPrompt } from "@penai/tools";
 import {
   appendMessage,
   createSession,
@@ -93,7 +93,8 @@ import { isOrchidOrderSourceKind, orchidOrderNotificationChannel, orchidOrderSou
 import { stemCountForPhoto } from "./orchid-photo-count.js";
 import { isOrchidStemGroupName, orchidStemDay, orchidStemRefreshMonths, refreshOrchidStemFile } from "./orchid-stem-report.js";
 import { refreshOrchidQualityFile } from "./orchid-quality-report.js";
-import { knownOrchidShippingHint, orchidShippingHintContext, completeOrchidShippingReply, orchidDeliveryPriorityContext } from "./orchid-shipping-reply.js";
+import { knownOrchidShippingHint, orchidShippingHintContext, completeOrchidShippingReply, orchidDeliveryPriorityContext, orchidShippingRequest } from "./orchid-shipping-reply.js";
+import { resolveOrchidRoadRoute } from "./orchid-shipping-maps.js";
 import { orchidCompanyPaymentContext } from "./orchid-payment-context.js";
 import { classifyOrchidFlowerComplaint, formatOrchidFlowerComplaintDispatch, orchidFlowerComplaintFingerprint } from "./orchid-flower-complaint.js";
 import { createKiotVietOrchidDraft, readKiotVietOrderSlip } from "./kiotviet-api.js";
@@ -1338,6 +1339,8 @@ export function makeInboundHandler(
     const loopDeps = await buildLoopDeps(rt, ctx, agent.provider, {
       ...agentOpts(agent),
       autoApproveExec: false,
+      onOrchidShippingQuote: (hint) => { shippingHint = hint; },
+      orchidShippingCustomerType: personData?.tags.some(tag => /(?:khách\s*)?sỉ/i.test(tag.name)) ? "wholesale" : "retail",
       // Thư mục làm việc riêng theo người gửi trên kênh (không đọc file của nhau)
       userKey,
       ...(channelIdentity ? {
@@ -1534,13 +1537,31 @@ export function makeInboundHandler(
       : [];
     const paymentContext = agent.key === "nhan-vien-kinh-doanh-orchids-world" && msg.peerKind === "direct"
       ? orchidCompanyPaymentContext(handoffMessages) : "";
+    // Inbox logging is asynchronous: always include this inbound message in shipping extraction.
+    const shippingMessages = handoffMessages.some(m => msg.messageId && m.msgId === msg.messageId)
+      ? handoffMessages : [...handoffMessages, { direction: "in", text: msg.text } as (typeof handoffMessages)[number]];
     const deliveryContext = agent.key === "nhan-vien-kinh-doanh-orchids-world" && msg.peerKind === "direct"
-      ? orchidDeliveryPriorityContext(handoffMessages) : "";
-    const shippingHint = agent.key === "nhan-vien-kinh-doanh-orchids-world" && msg.peerKind === "direct"
-      ? knownOrchidShippingHint(handoffMessages,
-          personData?.tags.some((tag) => /(?:khách\s*)?sỉ/i.test(tag.name)) ? "wholesale" : "retail")
+      ? orchidDeliveryPriorityContext(shippingMessages) : "";
+    const shippingCustomerType = personData?.tags.some((tag) => /(?:khách\s*)?sỉ/i.test(tag.name)) ? "wholesale" : "retail";
+    const shippingPolicy = orchidShippingPolicyFromPrompt(agent.systemPrompt);
+    let shippingHint = agent.key === "nhan-vien-kinh-doanh-orchids-world" && msg.peerKind === "direct"
+      ? knownOrchidShippingHint(shippingMessages, shippingCustomerType, shippingPolicy)
       : null;
-    const shippingContext = orchidShippingHintContext(shippingHint);
+    let shippingFailureContext = "";
+    if (!shippingHint && agent.key === "nhan-vien-kinh-doanh-orchids-world" && msg.peerKind === "direct") {
+      const request = orchidShippingRequest(shippingMessages);
+      if (request && !(shippingCustomerType === "retail" && request.stemCount < 3)) {
+        try {
+          const route = await resolveOrchidRoadRoute(db, ctx, request.destination);
+          const quote = calculateOrchidShipping({ customerType: shippingCustomerType, stemCount: request.stemCount, distanceKm: route.distanceKm }, shippingPolicy);
+          if (quote.kind === "quote") shippingHint = { ...route, feeVnd: quote.feeVnd };
+        } catch {
+          shippingFailureContext = "[HỆ THỐNG: Chưa xác minh được tuyến đường bộ. Không bịa phí, không hứa kiểm tra rồi báo sau. Nếu địa chỉ thiếu/mơ hồ, hỏi đúng phần thiếu hoặc xin ghim vị trí; nếu đã đủ, nói cần nhân viên xác minh phí. Có thể dùng orchid_shipping_quote với địa chỉ đầy đủ đã làm rõ.]";
+          logger.info("orchid.shipping_route_unavailable");
+        }
+      }
+    }
+    const shippingContext = orchidShippingHintContext(shippingHint) || shippingFailureContext;
     let dispatchContext = "";
     let kiotContext = "";
     if (agent.key === "nhan-vien-kinh-doanh-orchids-world" &&
@@ -1788,7 +1809,7 @@ export function makeInboundHandler(
         logger.warn(`Không kiểm tra được phản ánh hoa trên ${channel.name}: ${String(error)}`);
       }
     }
-    if (orderReviewReply) return { kind: "reply", text: orderReviewReply };
+    if (orderReviewReply) return { kind: "reply", text: completeOrchidShippingReply(orderReviewReply, shippingHint) };
     if (complaintReply) return { kind: "reply", text: complaintReply };
     const userMessageBase = handoffContext || dispatchContext || kiotContext || shippingContext || deliveryContext || paymentContext
       ? `${handoffContext}\n\n${dispatchContext ? `${dispatchContext}\n\n` : ""}${kiotContext ? `${kiotContext}\n\n` : ""}${deliveryContext ? `${deliveryContext}\n\n` : ""}${shippingContext ? `${shippingContext}\n\n` : ""}${paymentContext ? `${paymentContext}\n\n` : ""}[YÊU CẦU MỚI NHẤT CẦN TRẢ LỜI]\n${latestUserMessage}`
@@ -1856,11 +1877,11 @@ export function makeInboundHandler(
             streamed += ev.text;
             sinceTool += ev.text;
             // Streaming có thể gửi chữ ra kênh trước khi kiểm tra được cả câu.
-            if (!protectPersonalAddress) hooks?.onTextDelta?.(ev.text);
+            if (!protectPersonalAddress && !shippingContext) hooks?.onTextDelta?.(ev.text);
           } else if (ev.type === "tool_call") {
             // câu dẫn trước tool ("Để em kiểm tra...") → bubble riêng
             const block = sinceTool.replace(MEDIA_MARKER_RE, "").trim();
-            if (block && hooks?.onBlockReply) {
+            if (block && hooks?.onBlockReply && !shippingContext) {
               if (roleMismatch(block)) {
                 logger.warn(`Chặn câu dẫn đảo vai xưng hô trên kênh ${channel.id}`);
               } else {

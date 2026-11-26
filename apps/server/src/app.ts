@@ -70,6 +70,8 @@ import {
   setKiotVietCashier,
   listKiotVietOrderDrafts,
   getMisaCredentials,
+  getOrchidShippingMaps,
+  saveOrchidShippingMaps,
   saveMisaCredentials,
   listMisaInvoiceDrafts,
   listOrchidStemMessages,
@@ -208,6 +210,8 @@ import { checkKiotVietOrchidProduct, findKiotVietUser, verifyKiotVietRetailConne
 import { assertMisaInvoiceUnpublished, inspectMisaInvoiceReadback,
   previewMisaUnpublishedInvoice, verifyMisaWebConnection } from "./misa-api.js";
 import { saveMisaPreviewImages } from "./misa-preview-image.js";
+import { ORCHID_SHIPPING_ORIGIN, googleOrchidRoadRoute, resolveOrchidRoadRoute } from "./orchid-shipping-maps.js";
+import { calculateOrchidShipping, orchidShippingPolicyFromPrompt } from "@penai/tools";
 import {
   isChannelKindSupported,
   supportedChannelKinds,
@@ -1409,6 +1413,39 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return reply.header("cache-control", "no-store")
       .header("content-disposition", `attachment; filename="${filename}"`)
       .type("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet").send(buf);
+  });
+
+  app.get("/v1/orchid-shipping", async (req, reply) => {
+    if (!requireRole(req, reply, "ws_admin")) return;
+    const row = await getOrchidShippingMaps(db, req.authCtx);
+    return { origin: ORCHID_SHIPPING_ORIGIN, configured: !!row,
+      dailyLimit: row?.dailyLimit ?? 200, usageCount: row?.usageCount ?? 0 };
+  });
+  app.put("/v1/orchid-shipping", async (req, reply) => {
+    if (!requireRole(req, reply, "ws_admin")) return;
+    const parsed = z.object({ apiKey: z.string().trim().min(20).max(200),
+      dailyLimit: z.number().int().min(1).max(10000).default(200) }).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "Cần khóa Google Routes API hợp lệ và giới hạn lượt tra mỗi ngày." });
+    try {
+      const route = await googleOrchidRoadRoute(parsed.data.apiKey, "115 Nguyễn Huệ, Phường Sài Gòn, Thành phố Hồ Chí Minh");
+      await saveOrchidShippingMaps(db, req.authCtx, encryptSecret(parsed.data.apiKey), parsed.data.dailyLimit);
+      return { configured: true, origin: ORCHID_SHIPPING_ORIGIN, verifiedRoute: route };
+    } catch (error) {
+      return reply.code(400).send({ error: error instanceof Error ? error.message : "Không xác minh được khóa bản đồ." });
+    }
+  });
+  app.post("/v1/orchid-shipping/quote", async (req, reply) => {
+    if (!requireRole(req, reply, "ws_admin")) return;
+    const parsed = z.object({ destination: z.string().trim().min(5).max(400), stemCount: z.number().int().min(1).max(500),
+      customerType: z.enum(["retail", "wholesale"]) }).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "Cần địa chỉ, số cành và loại khách." });
+    try {
+      const agent = await getAgentByKey(db, req.authCtx, "nhan-vien-kinh-doanh-orchids-world");
+      const route = await resolveOrchidRoadRoute(db, req.authCtx, parsed.data.destination);
+      return { origin: ORCHID_SHIPPING_ORIGIN, route, quote: calculateOrchidShipping({ ...parsed.data, distanceKm: route.distanceKm }, orchidShippingPolicyFromPrompt(agent?.systemPrompt ?? "")) };
+    } catch (error) {
+      return reply.code(400).send({ error: error instanceof Error ? error.message : "Chưa xác định được phí ship." });
+    }
   });
 
   app.get("/v1/kiotviet", async (req, reply) => {
