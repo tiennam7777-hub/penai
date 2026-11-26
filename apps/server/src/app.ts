@@ -1427,7 +1427,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       dailyLimit: z.number().int().min(1).max(10000).default(200) }).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: "Cần khóa Google Routes API hợp lệ và giới hạn lượt tra mỗi ngày." });
     try {
-      const route = await vietmapOrchidRoadRoute(parsed.data.apiKey, "115 Nguyễn Huệ, Phường Sài Gòn, Thành phố Hồ Chí Minh");
+      const route = await vietmapOrchidRoadRoute(parsed.data.apiKey, "10.775,106.702");
       await saveOrchidShippingMaps(db, req.authCtx, encryptSecret(parsed.data.apiKey), parsed.data.dailyLimit);
       return { configured: true, origin: ORCHID_SHIPPING_ORIGIN, verifiedRoute: route };
     } catch (error) {
