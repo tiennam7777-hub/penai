@@ -18,8 +18,8 @@ export async function vietmapOrchidRoadRoute(apiKey: string, destination: string
     if (!Array.isArray(result) || result.length === 0) throw new Error("Không tìm thấy địa chỉ chính xác; cần khách gửi đầy đủ số nhà hoặc ghim vị trí.");
     const house = address.match(/^\s*(\d+[\w/-]*)\s+/)?.[1];
     let candidates = result.filter((r: any) => typeof r.ref_id === "string" && (!house || new RegExp(`(^|\\D)${house.replace(/[^\d]/g, "")}(?!\\d)`).test(normalize(String(r.name ?? "") + " " + String(r.display ?? "")))));
-    if (address === ORCHID_SHIPPING_ORIGIN) candidates = candidates.filter((r: any) => /da kao/.test(normalize(String(r.address ?? ""))));
-    if (candidates.length !== 1) throw new Error("Địa chỉ chưa khớp duy nhất; cần khách xác nhận hoặc gửi ghim vị trí.");
+    if (address === ORCHID_SHIPPING_ORIGIN) candidates = candidates.filter((r: any) => /da kao/.test(normalize(String(r.address ?? ""))) && normalize(String(r.name ?? "")).trim() === "42 dien bien phu");
+    if (candidates.length !== 1) throw new Error(address === ORCHID_SHIPPING_ORIGIN ? `Địa chỉ cửa hàng có ${candidates.length} kết quả khớp.` : `Địa chỉ giao có ${candidates.length} kết quả khớp; cần khách xác nhận hoặc gửi ghim vị trí.`);
     const place = await get("place/v4", new URLSearchParams({refid: candidates[0].ref_id}));
     const lat = Number(place.lat), lng = Number(place.lng);
     if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < 8 || lat > 24 || lng < 102 || lng > 110) throw new Error("Không xác định được tọa độ địa chỉ.");
