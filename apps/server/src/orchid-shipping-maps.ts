@@ -17,7 +17,8 @@ export async function vietmapOrchidRoadRoute(apiKey: string, destination: string
     const result = await get("search/v4", new URLSearchParams({ text: address, display_type: "2" }));
     if (!Array.isArray(result) || result.length === 0) throw new Error("Không tìm thấy địa chỉ chính xác; cần khách gửi đầy đủ số nhà hoặc ghim vị trí.");
     const house = address.match(/^\s*(\d+[\w/-]*)\s+/)?.[1];
-    const candidates = result.filter((r: any) => typeof r.ref_id === "string" && (!house || new RegExp(`(^|\\D)${house.replace(/[^\d]/g, "")}(?!\\d)`).test(normalize(String(r.name ?? "") + " " + String(r.display ?? "")))));
+    let candidates = result.filter((r: any) => typeof r.ref_id === "string" && (!house || new RegExp(`(^|\\D)${house.replace(/[^\d]/g, "")}(?!\\d)`).test(normalize(String(r.name ?? "") + " " + String(r.display ?? "")))));
+    if (address === ORCHID_SHIPPING_ORIGIN) candidates = candidates.filter((r: any) => /da kao/.test(normalize(String(r.address ?? ""))));
     if (candidates.length !== 1) throw new Error("Địa chỉ chưa khớp duy nhất; cần khách xác nhận hoặc gửi ghim vị trí.");
     const place = await get("place/v4", new URLSearchParams({refid: candidates[0].ref_id}));
     const lat = Number(place.lat), lng = Number(place.lng);
