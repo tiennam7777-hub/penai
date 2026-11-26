@@ -79,7 +79,6 @@ import {
 } from "@penai/providers";
 import {
   createDefaultToolRegistry,
-  calculateOrchidShipping,
   orchidShippingPolicyFromPrompt,
   buildCustomTool,
   ensureWorkDirs,
@@ -91,7 +90,7 @@ import type { McpAccess, McpManager } from "./mcp-manager.js";
 import { makeCronToolApi } from "./cron-tools.js";
 import { browserForRun } from "./browser-runtime.js";
 import { resolveOrchidRoadRoute } from "./orchid-shipping-maps.js";
-import { knownRoute, type ShippingHint } from "./orchid-shipping-reply.js";
+import { knownRoute, makeOrchidShippingHint, orchidShippingHintContext, type ShippingHint } from "./orchid-shipping-reply.js";
 import { makeHookDispatcher } from "./hooks.js";
 import { agentLibraryDir, execSandboxFor } from "./library-paths.js";
 import { moveToTrash } from "./library-trash.js";
@@ -774,15 +773,13 @@ return res.text || "(agent không trả về nội dung)";
       input = { ...input, customerType: opts.orchidShippingCustomerType ?? input.customerType };
       const shippingAgent = opts.agentId ? await getAgentById(db, ctx, opts.agentId) : null;
       if (shippingAgent?.key !== "nhan-vien-kinh-doanh-orchids-world") throw new Error("Chỉ Agent kinh doanh Orchids World dùng kết nối bản đồ này.");
-      if (input.customerType === "retail" && input.stemCount < 3) return "Chậu lẻ 1–2 cành cần nhân viên xác nhận phí ship.";
       const route = input.destination
         ? knownRoute(input.destination) ?? await resolveOrchidRoadRoute(db, ctx, input.destination)
         : { destination: "điểm giao đã xác minh", distanceKm: input.distanceKm };
-      const quote = calculateOrchidShipping({ ...input, distanceKm: route.distanceKm }, orchidShippingPolicyFromPrompt(shippingAgent.systemPrompt));
-      if (quote.kind === "manual") return quote.reason;
-      const hint = { destination: route.destination, distanceKm: route.distanceKm!, feeVnd: quote.feeVnd };
+      const hint = makeOrchidShippingHint({ ...input, destination: route.destination, distanceKm: route.distanceKm! }, orchidShippingPolicyFromPrompt(shippingAgent.systemPrompt));
+      if (!hint) return "Chậu lẻ 1–2 cành trên 10 km cần nhân viên xác nhận phí ship.";
       opts.onOrchidShippingQuote?.(hint);
-      return `Phí ship đến ${hint.destination}: ${hint.feeVnd.toLocaleString("vi-VN")}đ${quote.free ? " (miễn phí)" : ""}. Đường bộ ${hint.distanceKm} km từ 42 Điện Biên Phủ, ${input.stemCount} cành, ${input.customerType === "retail" ? "khách lẻ" : "khách sỉ"}. Báo khoản phí này ngay trong câu trả lời khách.`;
+      return orchidShippingHintContext(hint);
     },
     ...(cron ? { cron } : {}),
     ...(browser ? { browser } : {}),

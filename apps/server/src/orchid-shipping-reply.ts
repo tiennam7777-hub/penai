@@ -1,7 +1,21 @@
 import type { InboxMessageRow } from "@penai/db";
 import { calculateOrchidShipping, type OrchidShippingPolicy } from "@penai/tools";
 
-export type ShippingHint = { destination: string; feeVnd: number; distanceKm: number };
+export type ShippingHint = { destination: string; feeVnd: number; distanceKm: number; reportFee: boolean };
+
+/** This controls what is said to the customer, without changing the internal tariff. */
+export function makeOrchidShippingHint(
+  input: { destination: string; distanceKm: number; stemCount: number; customerType: "retail" | "wholesale" },
+  policy?: OrchidShippingPolicy,
+): ShippingHint | null {
+  const { destination, distanceKm } = input;
+  if (input.customerType === "retail" && distanceKm <= 10) {
+    // Zero is a placeholder; this branch must never describe delivery as free.
+    return { destination, distanceKm, feeVnd: 0, reportFee: false };
+  }
+  const quote = calculateOrchidShipping(input, policy);
+  return quote.kind === "quote" ? { destination, distanceKm, feeVnd: quote.feeVnd, reportFee: true } : null;
+}
 const normalize = (text: string) => text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").toLowerCase();
 
 /** Chỉ dùng các tuyến đã được cửa hàng xác nhận; tên cơ sở khác phải đo lại. */
@@ -78,17 +92,25 @@ export function knownOrchidShippingHint(
   if (!input) return null;
   const route = knownRoute(input.destination);
   if (!route) return null;
-  const quote = calculateOrchidShipping({ customerType, stemCount: input.stemCount, distanceKm: route.distanceKm }, policy);
-  return quote.kind === "quote" ? { ...route, feeVnd: quote.feeVnd } : null;
+  return makeOrchidShippingHint({ ...route, customerType, stemCount: input.stemCount }, policy);
 }
 
 export function orchidShippingHintContext(hint: ShippingHint | null): string {
   if (!hint) return "";
+  if (!hint.reportFee) return `[QUY TẮC TRẢ LỜI PHÍ SHIP: Khách lẻ, điểm giao ${hint.destination}, đường bộ ${hint.distanceKm} km, không hơn 10 km. Chỉ xác nhận ngắn "Dạ" khi nhận địa chỉ. Không nhắc phí ship, không nói 0đ/miễn phí/free ship, không xin vị trí để tính phí, không hẹn kiểm tra chính sách/phí giao. Không cộng một khoản ship vào tổng báo khách. Nếu khách hỏi việc khác thì vẫn trả lời đúng việc đó.]`;
   return `[DỮ KIỆN PHÍ SHIP ĐÃ TÍNH: Điểm giao ${hint.destination}, tuyến đường bộ ${hint.distanceKm} km từ 42 Điện Biên Phủ. Phí ship theo đúng loại khách và số cành hiện tại là ${hint.feeVnd.toLocaleString("vi-VN")}đ. Khi khách cung cấp địa chỉ hoặc khi báo giá chậu, BẮT BUỘC báo khoản này ngay trong cùng tin. Không nói kiểm tra/báo phí ship sau.]`;
 }
 
 /** Chốt an toàn nếu model bỏ qua khoản ship dù dữ kiện đã có. */
-export function completeOrchidShippingReply(reply: string, hint: ShippingHint | null): string {
+export function completeOrchidShippingReply(reply: string, hint: ShippingHint | null, customerType?: "retail" | "wholesale"): string {
+  if (!reply.trim()) return reply;
+  if (hint?.reportFee === false || (!hint && customerType === "retail")) {
+    // Do not quote retail delivery until the road distance is verified as over 10 km.
+    const withoutShipping = reply.split(/(?<=[.!?])\s+|\n|[,;]\s*(?=(?:phí|tiền|cước|ship(?!per)|free|giao.{0,30}miễn phí))/i)
+      .filter(part => !/(?:ship(?!per)|(?:phí|tiền|cước)\s*(?:giao|vận chuyển)|(?:giao|vận chuyển).{0,40}(?:miễn phí|0\s*đ))/i.test(part))
+      .join(" ").trim();
+    return withoutShipping || "Dạ.";
+  }
   if (!hint) return reply;
   const existing = reply.match(/phí\s*(?:ship|giao)[^\d\n]*?(\d[\d.,]*)\s*(đ|k\b)/i);
   const existingFee = existing ? Number(existing[1]!.replace(/[.,]/g, "")) * (/k/i.test(existing[2]!) ? 1000 : 1) : null;

@@ -64,11 +64,14 @@ export function calculateOrchidShipping(input: OrchidShippingInput, policy = DEF
 
 export const orchidShippingTool: ToolHandler<typeof schema> = {
   name: "orchid_shipping_quote",
-  description: "Tra tuyến đường bộ và tính phí giao chậu lan Orchids World từ 42 Điện Biên Phủ. Nếu đã có địa chỉ, truyền destination để tự tra bản đồ, không cần biết trước km. Báo ngay phí cùng giá chậu khi có địa chỉ và số cành.",
+  description: "Tra tuyến đường bộ và tính phí giao chậu lan Orchids World từ 42 Điện Biên Phủ. Truyền destination để tự tra bản đồ. Chỉ báo phí với khách sỉ hoặc khách lẻ trên 10 km. Khách lẻ không hơn 10 km chỉ xác nhận Dạ, không nhắc phí hay miễn phí.",
   schema,
   async execute(args, ctx) {
     if (ctx.orchidShippingQuote) return ctx.orchidShippingQuote(args);
     if (args.destination) throw new Error("Ngữ cảnh này chưa kết nối bản đồ tính ship.");
+    if (args.customerType === "retail" && args.distanceKm !== undefined && args.distanceKm <= 10) {
+      return "Khách lẻ không hơn 10 km: chỉ xác nhận Dạ. Không báo phí ship, không nói miễn phí/0đ, không xin vị trí để tính phí.";
+    }
     const quote = calculateOrchidShipping(args);
     if (quote.kind === "manual") return quote.reason;
     const money = (value: number) => new Intl.NumberFormat("vi-VN").format(value) + "đ";

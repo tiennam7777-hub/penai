@@ -1,11 +1,42 @@
 import { describe, expect, it } from "vitest";
 import type { InboxMessageRow } from "@penai/db";
-import { completeOrchidShippingReply, knownOrchidShippingHint, orchidShippingHintContext, orchidDeliveryPriorityContext, orchidShippingRequest } from "../src/orchid-shipping-reply.js";
+import { completeOrchidShippingReply, knownOrchidShippingHint, makeOrchidShippingHint, orchidShippingHintContext, orchidDeliveryPriorityContext, orchidShippingRequest } from "../src/orchid-shipping-reply.js";
 
 const inbound = (text: string) => ({ direction: "in", text }) as InboxMessageRow;
 const outbound = (text: string) => ({ direction: "out", text }) as InboxMessageRow;
 
 describe("orchid quote with shipping", () => {
+  it.each([3.2, 8, 9.99, 10])("suppresses retail delivery fees at %s km, including free-delivery wording", distanceKm => {
+    const hint = makeOrchidShippingHint({ destination: "290 Nam Kỳ Khởi Nghĩa", distanceKm, stemCount: 10, customerType: "retail" });
+    expect(hint?.reportFee).toBe(false);
+    expect(orchidShippingHintContext(hint)).toContain('Chỉ xác nhận ngắn "Dạ"');
+    expect(completeOrchidShippingReply("Phí ship là 70.000đ.", hint)).toBe("Dạ.");
+    expect(completeOrchidShippingReply("Giao miễn phí chị nhé.", hint)).toBe("Dạ.");
+    expect(completeOrchidShippingReply("Chị gửi em ghim vị trí để tính phí giao nhé.", hint)).toBe("Dạ.");
+    expect(completeOrchidShippingReply("Chậu 10 cành giá 2.000.000đ, phí ship 70.000đ.", hint)).toBe("Chậu 10 cành giá 2.000.000đ");
+    expect(completeOrchidShippingReply("Dạ chị.", hint)).toBe("Dạ chị.");
+  });
+  it("reports fees strictly above 10 km and for wholesale customers at any distance", () => {
+    const retail = makeOrchidShippingHint({ destination: "Điểm xa", distanceKm: 10.001, stemCount: 10, customerType: "retail" });
+    const wholesale = makeOrchidShippingHint({ destination: "Điểm gần", distanceKm: 2, stemCount: 10, customerType: "wholesale" });
+    expect(retail?.reportFee).toBe(true);
+    expect(completeOrchidShippingReply("Dạ.", retail)).toContain("Phí ship");
+    expect(wholesale).toMatchObject({ reportFee: true, feeVnd: 20_000 });
+    expect(completeOrchidShippingReply("Dạ.", wholesale)).toContain("20.000đ");
+  });
+  it("does not ask retail customers for shipping fees without a verified route over 10 km", () => {
+    expect(completeOrchidShippingReply("Dạ chị. Em cần nhân viên xác minh phí giao.", null, "retail")).toBe("Dạ chị.");
+    expect(completeOrchidShippingReply("", null, "retail")).toBe("");
+    expect(completeOrchidShippingReply("Chậu giá 500.000đ.", null, "retail")).toBe("Chậu giá 500.000đ.");
+    expect(completeOrchidShippingReply("Dạ, shipper giao lúc 8h30.", null, "retail")).toBe("Dạ, shipper giao lúc 8h30.");
+    expect(completeOrchidShippingReply("Cần nhân viên xác minh phí giao.", null, "wholesale")).toBe("Cần nhân viên xác minh phí giao.");
+  });
+  it("suppresses retail shipping inside 10 km regardless of pot size", () => {
+    for (const stemCount of [1, 2, 36, 100]) {
+      expect(makeOrchidShippingHint({ destination: "Điểm gần", distanceKm: 10, stemCount, customerType: "retail" })?.reportFee).toBe(false);
+    }
+    expect(makeOrchidShippingHint({ destination: "Điểm xa", distanceKm: 11, stemCount: 2, customerType: "retail" })).toBeNull();
+  });
   it("recognizes the real bare address that previously caused a deferred quote", () => {
     expect(orchidShippingRequest([outbound("Dạ chậu mẫu 7 cành giá 1.400.000đ chưa VAT ạ."),
       inbound("31 đống đa p2 bình thạnh")])).toEqual({ destination: "31 đống đa p2 bình thạnh", stemCount: 7 });
@@ -23,7 +54,7 @@ describe("orchid quote with shipping", () => {
       inbound("10 cành"),
     ];
     const hint = knownOrchidShippingHint(messages, "retail");
-    expect(hint).toEqual({ destination: "Bệnh viện Xuyên Á trên QL22", distanceKm: 24.3, feeVnd: 180_000 });
+    expect(hint).toEqual({ destination: "Bệnh viện Xuyên Á trên QL22", distanceKm: 24.3, feeVnd: 180_000, reportFee: true });
     expect(orchidShippingHintContext(hint)).toContain("180.000đ");
     expect(completeOrchidShippingReply(
       "Chậu trắng 10 cành giá 2.000.000đ, chưa gồm VAT 5% em nhé. Phí giao đến Bệnh viện Xuyên Á trên QL22 Anh kiểm tra lại rồi báo em.",

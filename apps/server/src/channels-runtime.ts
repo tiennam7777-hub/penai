@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 import { decryptSecret, encryptSecret, logger } from "@penai/shared";
-import { confineMediaPath, calculateOrchidShipping, orchidShippingPolicyFromPrompt } from "@penai/tools";
+import { confineMediaPath, orchidShippingPolicyFromPrompt } from "@penai/tools";
 import {
   appendMessage,
   createSession,
@@ -93,7 +93,7 @@ import { isOrchidOrderSourceKind, orchidOrderNotificationChannel, orchidOrderSou
 import { stemCountForPhoto } from "./orchid-photo-count.js";
 import { isOrchidStemGroupName, orchidStemDay, orchidStemRefreshMonths, refreshOrchidStemFile } from "./orchid-stem-report.js";
 import { refreshOrchidQualityFile } from "./orchid-quality-report.js";
-import { knownOrchidShippingHint, orchidShippingHintContext, completeOrchidShippingReply, orchidDeliveryPriorityContext, orchidShippingRequest } from "./orchid-shipping-reply.js";
+import { knownOrchidShippingHint, makeOrchidShippingHint, orchidShippingHintContext, completeOrchidShippingReply, orchidDeliveryPriorityContext, orchidShippingRequest } from "./orchid-shipping-reply.js";
 import { resolveOrchidRoadRoute } from "./orchid-shipping-maps.js";
 import { orchidCompanyPaymentContext } from "./orchid-payment-context.js";
 import { classifyOrchidFlowerComplaint, formatOrchidFlowerComplaintDispatch, orchidFlowerComplaintFingerprint } from "./orchid-flower-complaint.js";
@@ -1550,13 +1550,14 @@ export function makeInboundHandler(
     let shippingFailureContext = "";
     if (!shippingHint && agent.key === "nhan-vien-kinh-doanh-orchids-world" && msg.peerKind === "direct") {
       const request = orchidShippingRequest(shippingMessages);
-      if (request && !(shippingCustomerType === "retail" && request.stemCount < 3)) {
+      if (request) {
         try {
           const route = await resolveOrchidRoadRoute(db, ctx, request.destination);
-          const quote = calculateOrchidShipping({ customerType: shippingCustomerType, stemCount: request.stemCount, distanceKm: route.distanceKm }, shippingPolicy);
-          if (quote.kind === "quote") shippingHint = { ...route, feeVnd: quote.feeVnd };
+          shippingHint = makeOrchidShippingHint({ ...route, customerType: shippingCustomerType, stemCount: request.stemCount }, shippingPolicy);
         } catch {
-          shippingFailureContext = "[HỆ THỐNG: Chưa xác minh được tuyến đường bộ. Không bịa phí, không hứa kiểm tra rồi báo sau. Nếu địa chỉ thiếu/mơ hồ, hỏi đúng phần thiếu hoặc xin ghim vị trí; nếu đã đủ, nói cần nhân viên xác minh phí. Có thể dùng orchid_shipping_quote với địa chỉ đầy đủ đã làm rõ.]";
+          shippingFailureContext = shippingCustomerType === "retail"
+            ? "[HỆ THỐNG: Chưa xác minh được đường bộ trên 10 km cho khách lẻ. Chỉ xác nhận Dạ khi nhận địa chỉ; không báo/nhắc phí, không nói miễn phí, không xin ghim vị trí chỉ để tính phí, không hẹn kiểm tra chính sách giao hàng. Chỉ hỏi thêm địa chỉ nếu thực sự cần để giao hoa.]"
+            : "[HỆ THỐNG: Chưa xác minh được tuyến đường bộ. Không bịa phí, không hứa kiểm tra rồi báo sau. Nếu địa chỉ thiếu/mơ hồ, hỏi đúng phần thiếu hoặc xin ghim vị trí; nếu đã đủ, nói cần nhân viên xác minh phí. Có thể dùng orchid_shipping_quote với địa chỉ đầy đủ đã làm rõ.]";
           logger.info("orchid.shipping_route_unavailable");
         }
       }
@@ -1809,7 +1810,7 @@ export function makeInboundHandler(
         logger.warn(`Không kiểm tra được phản ánh hoa trên ${channel.name}: ${String(error)}`);
       }
     }
-    if (orderReviewReply) return { kind: "reply", text: completeOrchidShippingReply(orderReviewReply, shippingHint) };
+    if (orderReviewReply) return { kind: "reply", text: completeOrchidShippingReply(orderReviewReply, shippingHint, agent.key === "nhan-vien-kinh-doanh-orchids-world" && msg.peerKind === "direct" ? shippingCustomerType : undefined) };
     if (complaintReply) return { kind: "reply", text: complaintReply };
     const userMessageBase = handoffContext || dispatchContext || kiotContext || shippingContext || deliveryContext || paymentContext
       ? `${handoffContext}\n\n${dispatchContext ? `${dispatchContext}\n\n` : ""}${kiotContext ? `${kiotContext}\n\n` : ""}${deliveryContext ? `${deliveryContext}\n\n` : ""}${shippingContext ? `${shippingContext}\n\n` : ""}${paymentContext ? `${paymentContext}\n\n` : ""}[YÊU CẦU MỚI NHẤT CẦN TRẢ LỜI]\n${latestUserMessage}`
@@ -1962,7 +1963,7 @@ export function makeInboundHandler(
     }
 
     // model có thể lặp lại marker trong câu trả lời — gỡ đi
-    const cleanText = completeOrchidShippingReply(finalText.replace(MEDIA_MARKER_RE, "").trim(), shippingHint);
+    const cleanText = completeOrchidShippingReply(finalText.replace(MEDIA_MARKER_RE, "").trim(), shippingHint, agent.key === "nhan-vien-kinh-doanh-orchids-world" && msg.peerKind === "direct" ? shippingCustomerType : undefined);
     const outgoingMedia = channel.kind === "zalo_personal"
       ? await prepareZaloPhotoPaths(mediaOut, userDir)
       : mediaOut;
